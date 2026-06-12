@@ -57,6 +57,12 @@
   .code-err{font-family:var(--mono);font-size:12px;color:var(--down);margin-top:6px;min-height:16px}
   .code-badge{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:14px}
   .code-badge b{color:var(--accent);font-size:16px;letter-spacing:.14em}
+  .lobby-code{font-family:var(--mono);font-size:36px;font-weight:800;letter-spacing:.2em;
+              color:var(--accent);margin:12px 0 4px}
+  .lobby-start{font-family:var(--mono);font-size:14px;margin-top:14px;color:var(--text)}
+  .lobby-start b{color:var(--accent)}
+  .lobby-cancel{width:100%;height:46px;margin-top:20px;border:1px solid var(--line);border-radius:10px;
+                background:var(--panel-2);color:var(--muted);font-size:14px;font-weight:700;cursor:pointer}
   .start-btn{width:100%;height:54px;margin-top:24px;border:none;border-radius:12px;
              background:var(--accent);color:#1A1206;font-size:17px;font-weight:800;cursor:pointer}
   .rules{margin-top:22px;border-top:1px solid var(--line);padding-top:14px;color:var(--muted);
@@ -222,14 +228,16 @@
              placeholder="Leer lassen für neues Spiel" autocomplete="off">
       <div class="code-err" id="codeErr"></div>
     </div>
-    <button class="start-btn" id="startBtn">Runde 1 starten 🔔</button>
+    <button class="start-btn" id="startBtn">Spiel anlegen 🔔</button>
     <div class="rules">
       Beide Spieler erleben <b style="color:var(--text)">denselben Kursverlauf und dieselben News</b> –
       nur so ist der Vergleich fair. Deshalb gilt: Spieler 2 schaut bei Runde 1 nicht zu! 🙈
       Jeder startet mit 25.000 $, SPCX beginnt beim Ausgabepreis von 135 $.
       Am Ende zählt das Gesamtdepot (Bargeld + Positionen zum Schlusskurs).<br><br>
       <b style="color:var(--text)">Zweites Gerät?</b> Jedes Spiel hat einen 6-stelligen Code.
-      Gibt man ihn hier ein, läuft exakt dasselbe Spiel – gleiche Kurse, gleiche News, gleiche Dauer.
+      Gibt man ihn hier ein, läuft exakt dasselbe Spiel – gleiche Kurse, gleiche News, gleiche Dauer.<br><br>
+      Nach dem Anlegen startet das Spiel zur <b style="color:var(--text)">übernächsten vollen Minute</b>.
+      Legt ihr es auf beiden Geräten in derselben Minute an, geht's überall gleichzeitig los. ⏱️
     </div>
   </div>
 </div>
@@ -297,6 +305,19 @@
       <h2>Newsfeed</h2>
       <div id="news"><div class="empty">Gleich geht's los …</div></div>
     </div>
+  </div>
+</div>
+
+<!-- ================= LOBBY (Spiel angelegt, Warten auf Start) ================= -->
+<div class="overlay" id="lobby">
+  <div class="modal">
+    <div class="eyebrow">Spiel angelegt</div>
+    <h3>Bereitmachen!</h3>
+    <div class="lobby-code" id="lobbyCode"></div>
+    <div class="sub">Code fürs zweite Gerät – dort vor <span id="lobbyDeadline"></span> Uhr eingeben,
+      dann startet ihr zeitgleich.</div>
+    <div class="lobby-start">Start um <b id="lobbyTime"></b> Uhr · noch <b id="lobbyCount"></b></div>
+    <button class="lobby-cancel" id="lobbyCancel">Abbrechen</button>
   </div>
 </div>
 
@@ -564,7 +585,45 @@ $("startBtn").onclick = () => {
     {name: $("name1").value.trim() || "Spieler 1", cash:START_CASH, pos:{}, color:"var(--p1)", result:null},
     {name: $("name2").value.trim() || "Spieler 2", cash:START_CASH, pos:{}, color:"var(--p2)", result:null},
   ];
-  startRound(0);
+  openLobby();
+};
+
+/* ====================== Lobby (zeitversetzter Start) ====================== */
+/* Start immer zur übernächsten vollen Minute. Geben beide Geräte den Code
+   innerhalb derselben Minute ein, landen sie auf demselben Startzeitpunkt
+   und spielen zeitgleich – ganz ohne Server. */
+let lobbyTimer = null, startAt = 0;
+
+const hhmm = ms => {
+  const d = new Date(ms);
+  return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+};
+
+function openLobby(){
+  startAt = (Math.floor(Date.now()/60000) + 2) * 60000;
+  $("lobbyCode").textContent = gameCode;
+  $("lobbyTime").textContent = hhmm(startAt);
+  $("lobbyDeadline").textContent = hhmm(startAt - 60000);
+  updateLobby();
+  $("lobby").classList.add("show");
+  clearInterval(lobbyTimer);
+  lobbyTimer = setInterval(updateLobby, 250);
+}
+
+function updateLobby(){
+  const left = startAt - Date.now();
+  if(left <= 0){
+    clearInterval(lobbyTimer);
+    $("lobby").classList.remove("show");
+    startRound(0);
+    return;
+  }
+  $("lobbyCount").textContent = Math.ceil(left/1000) + " s";
+}
+
+$("lobbyCancel").onclick = () => {
+  clearInterval(lobbyTimer);
+  $("lobby").classList.remove("show");
 };
 
 $("round2Btn").onclick = () => {

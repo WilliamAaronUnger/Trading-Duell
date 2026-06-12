@@ -260,6 +260,8 @@
       nur so ist der Vergleich fair.
       Jeder startet mit 25.000 $, SPCX beginnt beim Ausgabepreis von 135 $.
       Am Ende zählt das Gesamtdepot (Bargeld + Positionen zum Schlusskurs).<br><br>
+      <b style="color:var(--text)">🐻 Shorten:</b> Verkaufen ohne Bestand setzt auf fallende Kurse –
+      eingedeckt wird per Kaufen. Maximal 1× Depotwert, kein Hebel. Auch schlechte News sind so eine Chance!<br><br>
       <b style="color:var(--text)">📱 Ein Gerät:</b> Beide spielen nacheinander auf diesem Handy
       (Spieler 2 schaut bei Runde 1 nicht zu 🙈), danach wird automatisch verglichen.<br><br>
       <b style="color:var(--text)">📱📱 Zwei Geräte:</b> Du legst ein Spiel an und bekommst einen
@@ -387,7 +389,7 @@
       <button class="start-btn" id="shareBtn" style="margin-top:14px;height:44px;font-size:14px">📤 Mein Ergebnis kopieren</button>
       <div class="field" style="text-align:left">
         <label>Ergebnis des Gegners einfügen</label>
-        <input id="cmpIn" type="text" placeholder="SPCX1.…" autocomplete="off">
+        <input id="cmpIn" type="text" placeholder="SPCX2.…" autocomplete="off">
         <div class="code-err" id="cmpErr"></div>
       </div>
       <button class="lobby-cancel" id="cmpBtn" style="margin-top:0">⚔️ Vergleichen</button>
@@ -745,7 +747,7 @@ function buildMarket(){
 
 function newPlayer(name, color){
   return {name, cash:START_CASH, pos:{}, color, result:null,
-          stats:{trades:0, buys:0, sells:0, volume:0, realized:0, best:null, worst:null,
+          stats:{trades:0, buys:0, sells:0, shorts:0, volume:0, realized:0, best:null, worst:null,
                  allIns:0, newsTrades:0, investedTicks:0, perSym:{},
                  peak:START_CASH, trough:START_CASH, maxDD:0}};
 }
@@ -984,9 +986,28 @@ function closeNewsPop(){
 }
 
 /* ====================== Handel ====================== */
+/* Positionen: qty > 0 = long, qty < 0 = short (avg = mittlerer Einstiegs-
+   bzw. Short-Kurs). Eine Order wechselt nie direkt von long zu short oder
+   umgekehrt – erst glattstellen, dann neu eröffnen. */
+function shortExposure(p){
+  let v = 0;
+  for(const [sym,pos] of Object.entries(p.pos)) if(pos.qty < 0) v += -pos.qty * price(sym);
+  return v;
+}
+
+/* Kein Hebel: offener Short-Gegenwert maximal 1x aktueller Depotwert */
+function maxShortQty(p, px){
+  return Math.max(0, Math.floor((totalOf(p) - shortExposure(p)) / px));
+}
+
 function curQty(){
   const p = players[round];
-  if(qtyMode === "max") return Math.max(1, Math.floor(p.cash / price(selected)));
+  const pos = p.pos[selected];
+  if(qtyMode === "max"){
+    const afford = Math.floor(p.cash / price(selected));
+    // Bei Short-Position deckt "Max" höchstens alles ein
+    return Math.max(1, pos && pos.qty < 0 ? Math.min(afford, -pos.qty) : afford);
+  }
   return +qtyMode;
 }
 
@@ -1000,40 +1021,72 @@ function noteTrade(p, value, side){
   if(tickCount - lastNewsTick <= Math.round(12000 / TICK_MS)) s.newsTrades++;
 }
 
+function noteClose(p, profit){
+  p.stats.realized += profit;
+  p.stats.best  = p.stats.best  === null ? profit : Math.max(p.stats.best,  profit);
+  p.stats.worst = p.stats.worst === null ? profit : Math.min(p.stats.worst, profit);
+}
+
 function trade(side){
   if(over) return;
   const p = players[round];
   const px = price(selected);
   const qty = curQty();
-  const cost = qty * px;
   const flash = $("flash");
+  const pos = p.pos[selected];
 
   if(side === "buy"){
-    if(cost > p.cash + 0.001){ flash.textContent = "Nicht genug Bargeld."; flash.className = "flash err"; return; }
-    p.cash -= cost;
-    const pos = p.pos[selected] || {qty:0, avg:0};
-    pos.avg = (pos.avg*pos.qty + cost) / (pos.qty + qty);
-    pos.qty += qty;
-    p.pos[selected] = pos;
-    noteTrade(p, cost, "buy");
-    flash.textContent = `Gekauft: ${qty} × ${selected} @ ${fmt(px)}`;
-    flash.className = "flash ok";
-  }else{
-    const pos = p.pos[selected];
-    const sellQty = qtyMode === "max" ? (pos ? pos.qty : 0) : qty;
-    if(!pos || pos.qty < sellQty || sellQty === 0){
-      flash.textContent = "Nicht genug Stücke im Depot."; flash.className = "flash err"; return;
+    if(pos && pos.qty < 0){
+      // Short eindecken: zurückkaufen, Gewinn = (Short-Kurs − Kaufkurs) × Stück
+      const q = Math.min(qty, -pos.qty, Math.floor(p.cash / px));
+      if(q < 1){ flash.textContent = "Nicht genug Bargeld zum Eindecken."; flash.className = "flash err"; return; }
+      const profit = (pos.avg - px) * q;
+      p.cash -= q * px;
+      pos.qty += q;
+      if(pos.qty === 0) delete p.pos[selected];
+      noteTrade(p, q * px, "buy");
+      noteClose(p, profit);
+      flash.textContent = `Eingedeckt: ${q} × ${selected} @ ${fmt(px)} (${sgn(profit)})`;
+      flash.className = "flash ok";
+    }else{
+      const cost = qty * px;
+      if(cost > p.cash + 0.001){ flash.textContent = "Nicht genug Bargeld."; flash.className = "flash err"; return; }
+      p.cash -= cost;
+      const lp = pos || {qty:0, avg:0};
+      lp.avg = (lp.avg*lp.qty + cost) / (lp.qty + qty);
+      lp.qty += qty;
+      p.pos[selected] = lp;
+      noteTrade(p, cost, "buy");
+      flash.textContent = `Gekauft: ${qty} × ${selected} @ ${fmt(px)}`;
+      flash.className = "flash ok";
     }
-    const profit = (px - pos.avg) * sellQty;
-    p.cash += sellQty * px;
-    pos.qty -= sellQty;
-    if(pos.qty === 0) delete p.pos[selected];
-    noteTrade(p, sellQty * px, "sell");
-    p.stats.realized += profit;
-    p.stats.best  = p.stats.best  === null ? profit : Math.max(p.stats.best,  profit);
-    p.stats.worst = p.stats.worst === null ? profit : Math.min(p.stats.worst, profit);
-    flash.textContent = `Verkauft: ${sellQty} × ${selected} @ ${fmt(px)}`;
-    flash.className = "flash ok";
+  }else{
+    if(pos && pos.qty > 0){
+      // Long verkaufen (wie bisher)
+      const sellQty = qtyMode === "max" ? pos.qty : Math.min(qty, pos.qty);
+      const profit = (px - pos.avg) * sellQty;
+      p.cash += sellQty * px;
+      pos.qty -= sellQty;
+      if(pos.qty === 0) delete p.pos[selected];
+      noteTrade(p, sellQty * px, "sell");
+      noteClose(p, profit);
+      flash.textContent = `Verkauft: ${sellQty} × ${selected} @ ${fmt(px)}`;
+      flash.className = "flash ok";
+    }else{
+      // Short eröffnen/aufstocken: Erlös kommt aufs Konto, Rückkauf-Pflicht bleibt
+      const cap = maxShortQty(p, px);
+      const q = qtyMode === "max" ? cap : Math.min(qty, cap);
+      if(q < 1){ flash.textContent = "Short-Limit erreicht (max. 1× Depotwert)."; flash.className = "flash err"; return; }
+      p.cash += q * px;
+      const sp = pos || {qty:0, avg:0};
+      sp.avg = (sp.avg * -sp.qty + q * px) / (-sp.qty + q);
+      sp.qty -= q;
+      p.pos[selected] = sp;
+      noteTrade(p, q * px, "sell");
+      p.stats.shorts++;
+      flash.textContent = `Short: ${q} × ${selected} @ ${fmt(px)} 🐻`;
+      flash.className = "flash ok";
+    }
   }
   renderAll();
 }
@@ -1099,12 +1152,13 @@ function renderAll(){
   chg.textContent = (ch>=0?"+":"") + ch.toFixed(2) + "%";
   chg.className = "chg " + (ch >= 0 ? "up" : "down");
 
-  // %-Entwicklung zum eigenen Einstand (nur wenn investiert)
+  // %-Entwicklung zum eigenen Einstand (Vorzeichen bei Short gedreht: fallender Kurs = Gewinn)
   const myPos = p.pos[selected];
   const ek = $("qEk");
   if(myPos){
-    const ekCh = (px/myPos.avg - 1) * 100;
-    ek.textContent = "EK " + (ekCh>=0?"+":"") + ekCh.toFixed(2) + "%";
+    const dir = myPos.qty < 0 ? -1 : 1;
+    const ekCh = (px/myPos.avg - 1) * 100 * dir;
+    ek.textContent = (myPos.qty < 0 ? "Short " : "EK ") + (ekCh>=0?"+":"") + ekCh.toFixed(2) + "%";
     ek.className = "chg ek " + (ekCh >= 0 ? "up" : "down");
     ek.style.display = "";
   }else{
@@ -1114,14 +1168,24 @@ function renderAll(){
   $("qName").innerHTML = `${STOCK_DEFS[selected].name} · Eröffnung ${fmt(op)}<br><span class="char-line">${STOCK_DEFS[selected].char}</span>`;
   $("tradeSym").textContent = selected;
 
-  // Order
+  // Order: Buttons je nach Positionsrichtung beschriften
   const qty = curQty();
   const held = p.pos[selected]?.qty || 0;
-  $("orderInfo").textContent = qtyMode === "max"
-    ? `Max: Kauf ${qty} Stück ≈ ${fmt(qty*px)} · Verkauf: alle ${held}`
-    : `${qty} Stück ≈ ${fmt(qty*px)} · im Depot: ${held}`;
-  $("buyBtn").disabled = over || qty*px > p.cash;
-  $("sellBtn").disabled = over || held === 0;
+  const isShort = held < 0;
+  $("buyBtn").textContent  = isShort ? "Eindecken" : "Kaufen";
+  $("sellBtn").textContent = held > 0 ? "Verkaufen" : "Shorten 🐻";
+  if(isShort){
+    $("orderInfo").textContent = `Short: ${-held} Stk · Eindecken: ${qty} ≈ ${fmt(qty*px)}`;
+  }else if(held > 0){
+    $("orderInfo").textContent = qtyMode === "max"
+      ? `Max: Kauf ${qty} Stück ≈ ${fmt(qty*px)} · Verkauf: alle ${held}`
+      : `${qty} Stück ≈ ${fmt(qty*px)} · im Depot: ${held}`;
+  }else{
+    const cap = maxShortQty(p, px);
+    $("orderInfo").textContent = `${qty} Stück ≈ ${fmt(qty*px)} · Short möglich: ${cap} Stk`;
+  }
+  $("buyBtn").disabled = over || (isShort ? p.cash < px : qty*px > p.cash + 0.001);
+  $("sellBtn").disabled = over || (held <= 0 && maxShortQty(p, px) < 1);
 
   // Depot
   $("cash").textContent = fmt(p.cash);
@@ -1139,10 +1203,11 @@ function renderAll(){
     for(const sym of syms){
       const pos = p.pos[sym];
       const cur = price(sym);
-      const ppnl = (cur - pos.avg) * pos.qty;
-      const ppct = (cur/pos.avg - 1) * 100;
+      const ppnl = ((cur - pos.avg) * pos.qty) || 0; // "|| 0" fängt das negative Null-Artefakt ab
+      const ppct = ((cur/pos.avg - 1) * 100 * (pos.qty < 0 ? -1 : 1)) || 0;
       const c = ppnl >= 0 ? "var(--up)" : "var(--down)";
-      rows += `<tr><td>${sym}</td><td>${pos.qty}</td><td>${fmt(pos.avg)}</td>
+      const tag = pos.qty < 0 ? ' <span style="color:var(--down);font-size:9px;font-weight:700">SHORT</span>' : "";
+      rows += `<tr><td>${sym}${tag}</td><td>${pos.qty}</td><td>${fmt(pos.avg)}</td>
                <td style="color:${c}">${ppnl>=0?"+":""}${fmt(ppnl)}</td>
                <td style="color:${c}">${ppct>=0?"+":""}${ppct.toFixed(2)}%</td></tr>`;
     }
@@ -1227,10 +1292,11 @@ function drawChart(){
     ctx.fillText("IPO " + op.toFixed(2), L+4, Y(op)-4);
   }
 
-  /* --- Kursverlauf: Farbe relativ zum Einstand, wenn man Stücke hält --- */
+  /* --- Kursverlauf: Farbe relativ zum Einstand, wenn man Stücke hält
+         (bei Short ist unter dem Einstand gut → Logik gedreht) --- */
   const last = data[data.length-1];
   const ref = pos ? pos.avg : op;
-  const up = last >= ref;
+  const up = pos && pos.qty < 0 ? last <= ref : last >= ref;
   const col = up ? "#3DDC97" : "#FF5C72";
   ctx.beginPath();
   for(let i=0;i<data.length;i++){
@@ -1325,6 +1391,7 @@ function playerTitle(p){
   if(s.trades === 0)                        return "🪑 Zuschauer";
   if(s.trades <= 4 && inv > 0.7 && pnl > 0) return "💎 Diamond Hands";
   if(s.trades >= 15)                        return "⚡ Daytrader";
+  if(s.shorts >= 3)                         return "🐻 Short-Seller";
   if(s.newsTrades >= 3)                     return "📰 News-Junkie";
   if(s.allIns >= 3)                         return "🎰 Vollzocker";
   if(pnl >= 400)                            return "🧠 Marktflüsterer";
@@ -1362,6 +1429,7 @@ function buildAnalysis(list){
   const rows = [
     ["Rendite",            p => `<span style="color:${col(p.result.pnl)}">${pctf(p.result.pnl/START_CASH)}</span>`],
     ["Käufe / Verkäufe",   p => `${p.stats.buys} / ${p.stats.sells}`],
+    ["Short-Orders",       p => p.stats.shorts],
     ["Handelsvolumen",     p => fmt(p.stats.volume)],
     ["Realisierte Gewinne",p => `<span style="color:${col(p.stats.realized)}">${sgn(p.stats.realized)}</span>`],
     ["Bester Deal",        p => p.stats.best  === null ? "–" : `<span style="color:${col(p.stats.best)}">${sgn(p.stats.best)}</span>`],
@@ -1392,30 +1460,30 @@ function buildAnalysis(list){
 function packResult(p){
   const s = p.stats;
   const f = [gameCode, p.name, p.result.pnl.toFixed(2), p.result.total.toFixed(2),
-             s.trades, s.buys, s.sells, Math.round(s.volume), s.realized.toFixed(2),
+             s.trades, s.buys, s.sells, s.shorts, Math.round(s.volume), s.realized.toFixed(2),
              s.best  === null ? "x" : s.best.toFixed(2),
              s.worst === null ? "x" : s.worst.toFixed(2),
              s.allIns, s.newsTrades, s.investedTicks,
              s.peak.toFixed(2), s.trough.toFixed(2), s.maxDD.toFixed(2), favSym(p)];
-  return "SPCX1." + btoa(unescape(encodeURIComponent(f.join("|"))));
+  return "SPCX2." + btoa(unescape(encodeURIComponent(f.join("|"))));
 }
 
 function unpackResult(str){
-  if(!str.startsWith("SPCX1.")) return null;
+  if(!str.startsWith("SPCX2.")) return null;
   let f;
   try{ f = decodeURIComponent(escape(atob(str.slice(6)))).split("|"); }catch(e){ return null; }
-  if(f.length !== 18) return null;
+  if(f.length !== 19) return null;
   if(+f[0] !== gameCode) return {wrongGame:true};
-  const nums = [2,3,4,5,6,7,8,11,12,13,14,15,16].map(i => parseFloat(f[i]));
+  const nums = [2,3,4,5,6,7,8,9,12,13,14,15,16,17].map(i => parseFloat(f[i]));
   if(nums.some(isNaN)) return null;
   return {
     name: f[1].slice(0,14) || "Gegner",
     result:{pnl:+f[2], total:+f[3]},
-    stats:{trades:+f[4], buys:+f[5], sells:+f[6], volume:+f[7], realized:+f[8],
-           best: f[9]  === "x" ? null : +f[9],
-           worst:f[10] === "x" ? null : +f[10],
-           allIns:+f[11], newsTrades:+f[12], investedTicks:+f[13],
-           peak:+f[14], trough:+f[15], maxDD:+f[16], perSym:{}, _fav:f[17]},
+    stats:{trades:+f[4], buys:+f[5], sells:+f[6], shorts:+f[7], volume:+f[8], realized:+f[9],
+           best: f[10] === "x" ? null : +f[10],
+           worst:f[11] === "x" ? null : +f[11],
+           allIns:+f[12], newsTrades:+f[13], investedTicks:+f[14],
+           peak:+f[15], trough:+f[16], maxDD:+f[17], perSym:{}, _fav:f[18]},
   };
 }
 

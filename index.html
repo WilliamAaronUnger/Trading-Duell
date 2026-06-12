@@ -111,6 +111,7 @@
   .chg.down{color:var(--down);background:rgba(255,92,114,.12)}
   .chg.ek{background:none;border:1px dashed currentColor;font-size:13px}
   .qname{font-size:13px;color:var(--muted);width:100%}
+  .char-line{font-size:12px;opacity:.85}
   canvas{width:100%;height:190px;display:block;background:var(--panel-2);
          border:1px solid var(--line);border-radius:12px}
 
@@ -152,6 +153,7 @@
   .news-tag{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 6px;border-radius:5px;
             flex-shrink:0;background:var(--panel-2);border:1px solid var(--line)}
   .news-tag.up{color:var(--up)} .news-tag.down{color:var(--down)} .news-tag.neutral{color:var(--muted)}
+  .news-tag.insider{color:var(--accent)}
   .news-text{font-size:13px;line-height:1.45}
 
   /* ============ Overlays ============ */
@@ -169,6 +171,8 @@
   .res-name{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;justify-content:center}
   .res-pnl{font-family:var(--mono);font-size:19px;font-weight:800;margin-top:6px}
   .res-total{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:3px}
+  .res-badge{font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:700;margin-top:8px}
+  .res-stats{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:5px;line-height:1.6}
   .crown{font-size:18px}
   .modal .start-btn{margin-top:20px;height:48px}
 
@@ -180,6 +184,8 @@
            border-radius:14px;padding:18px;max-width:430px;width:100%;
            animation:npIn .22s ease-out;box-shadow:0 18px 50px rgba(0,0,0,.5)}
   .np-card.up{border-left-color:var(--up)} .np-card.down{border-left-color:var(--down)}
+  .np-card.insider{border-left-color:var(--accent)}
+  .np-card.insider .np-live{color:var(--accent)}
   @keyframes npIn{from{transform:translateY(-14px);opacity:0}to{transform:none;opacity:1}}
   @media (prefers-reduced-motion: reduce){.np-card{animation:none}}
   .np-head{display:flex;align-items:center;gap:8px}
@@ -336,7 +342,9 @@
     <div class="eyebrow">Runde 1 beendet</div>
     <h3 id="hoTitle"></h3>
     <div class="handover-pnl" id="hoPnl"></div>
-    <div class="sub" id="hoSub"></div>
+    <div class="res-badge" id="hoBadge"></div>
+    <div class="res-stats" id="hoStats"></div>
+    <div class="sub" id="hoSub" style="margin-top:12px"></div>
     <div class="code-badge">Spiel-Code: <b id="hoCode"></b></div>
     <button class="start-btn" id="round2Btn">Runde 2 starten 🔔</button>
   </div>
@@ -353,11 +361,15 @@
         <div class="res-name"><span class="dot" style="background:var(--p1)"></span><span id="resName1"></span> <span class="crown" id="crown1"></span></div>
         <div class="res-pnl" id="resPnl1"></div>
         <div class="res-total" id="resTot1"></div>
+        <div class="res-badge" id="resBadge1"></div>
+        <div class="res-stats" id="resStats1"></div>
       </div>
       <div class="res-card" id="resCard2">
         <div class="res-name"><span class="dot" style="background:var(--p2)"></span><span id="resName2"></span> <span class="crown" id="crown2"></span></div>
         <div class="res-pnl" id="resPnl2"></div>
         <div class="res-total" id="resTot2"></div>
+        <div class="res-badge" id="resBadge2"></div>
+        <div class="res-stats" id="resStats2"></div>
       </div>
     </div>
     <div class="code-badge">Spiel-Code: <b id="resCode"></b></div>
@@ -369,11 +381,11 @@
 <div class="news-pop" id="newsPop">
   <div class="np-card" id="npCard">
     <div class="np-head">
-      <span class="np-live">Breaking</span>
+      <span class="np-live" id="npLive">Breaking</span>
       <span class="np-sym" id="npSym"></span>
     </div>
     <div class="np-text" id="npText"></div>
-    <div class="np-hint">⏳ Der Markt reagiert in wenigen Sekunden …</div>
+    <div class="np-hint" id="npHint">⏳ Der Markt reagiert in wenigen Sekunden …</div>
     <div class="np-btns">
       <button class="np-btn np-go" id="npGo"></button>
       <button class="np-btn np-skip" id="npSkip">Ignorieren</button>
@@ -394,12 +406,21 @@ const TICK_SCALE = 700 / TICK_MS;
 /* Vorlauf zwischen News-Anzeige und Kursreaktion: Zeit zum Reagieren */
 const REACT_TICKS = Math.round(8000 / TICK_MS);
 
-/* Drift ~neutral: Aktien können im Plus UND im Minus enden – nur SPCX hat minimal IPO-Rückenwind */
+/* Drift ~neutral: Aktien können im Plus UND im Minus enden – nur SPCX hat minimal IPO-Rückenwind.
+   Jede Aktie hat einen eigenen Charakter:
+   - newsMult: News-Sprünge wirken stärker/schwächer (Hype-Wert)
+   - momentum: jüngerer Trend verstärkt sich selbst (Momentum-Wert)
+   - meanRev:  Kurs wird zur Eröffnung zurückgezogen (stabiler Riese)
+   - spikeP/spikeMag: seltene, plötzliche Einzelsprünge (Zock-Papier) */
 const STOCK_DEFS = {
-  SPCX:{name:"SpaceX",     start:135.00, sigma:0.0015, drift:0.00001},
-  TSLA:{name:"Tesla",      start:312.40, sigma:0.0010, drift:0},
-  NVDA:{name:"NVIDIA",     start:176.80, sigma:0.0009, drift:0},
-  RKLB:{name:"Rocket Lab", start:38.65,  sigma:0.0013, drift:0},
+  SPCX:{name:"SpaceX",     start:135.00, sigma:0.0015, drift:0.00001, newsMult:1.25,
+        char:"🚀 Hype-Wert: reagiert besonders heftig auf News"},
+  TSLA:{name:"Tesla",      start:312.40, sigma:0.0010, drift:0, momentum:0.45,
+        char:"📈 Momentum-Wert: Trends verstärken sich selbst"},
+  NVDA:{name:"NVIDIA",     start:176.80, sigma:0.0008, drift:0, meanRev:0.002,
+        char:"🛡️ Stabiler Riese: schwankt wenig, kehrt zur Mitte zurück"},
+  RKLB:{name:"Rocket Lab", start:38.65,  sigma:0.0011, drift:0, spikeP:0.006, spikeMag:0.010,
+        char:"🎢 Zock-Papier: lange ruhig, dann plötzliche Sprünge"},
 };
 
 /* News: kleinere Sprünge, dafür längere Drift-Phasen → fließendere Bewegungen.
@@ -454,6 +475,27 @@ const MOMENTUM_POOL = {
   ],
 };
 
+/* Mehrstufige News: erst ein Gerücht (kleiner Effekt), 1,5–2,5 Min später
+   die Auflösung – Bestätigung (großer Sprung) oder Dementi (Umkehr) */
+const CHAIN_POOL = [
+  {t:"SPCX",
+   rumor:  {txt:"Gerücht: Pentagon prüft Milliardenvertrag mit SpaceX.", jump:+0.005, drift:+0.0002, dur:20},
+   confirm:{txt:"Bestätigt: Pentagon vergibt Milliardenvertrag an SpaceX!", jump:+0.014, drift:+0.0005, dur:32},
+   deny:   {txt:"Dementi: Pentagon-Vertrag geht an die Konkurrenz.", jump:-0.012, drift:-0.0004, dur:28}},
+  {t:"TSLA",
+   rumor:  {txt:"Gerücht: Behörde untersucht angeblich Teslas Autopilot-Daten.", jump:-0.005, drift:-0.0002, dur:20},
+   confirm:{txt:"Bestätigt: Behörde leitet formale Untersuchung gegen Tesla ein.", jump:-0.012, drift:-0.0005, dur:30},
+   deny:   {txt:"Entwarnung: Keine Untersuchung gegen Tesla – Kurs erholt sich.", jump:+0.011, drift:+0.0004, dur:28}},
+  {t:"NVDA",
+   rumor:  {txt:"Spekulation: NVIDIA soll vor Übernahme eines KI-Startups stehen.", jump:+0.004, drift:+0.0002, dur:20},
+   confirm:{txt:"Offiziell: NVIDIA übernimmt KI-Startup – Analysten jubeln.", jump:+0.012, drift:+0.0005, dur:30},
+   deny:   {txt:"Übernahme geplatzt: KI-Startup geht an Mitbewerber.", jump:-0.010, drift:-0.0004, dur:28}},
+  {t:"RKLB",
+   rumor:  {txt:"Gerücht: Rocket Lab soll Mega-Auftrag einer Telekom-Firma erhalten.", jump:+0.006, drift:+0.0003, dur:20},
+   confirm:{txt:"Fix: Rocket Lab erhält Mega-Auftrag – größter Deal der Firmengeschichte!", jump:+0.016, drift:+0.0006, dur:32},
+   deny:   {txt:"Mega-Auftrag geplatzt: Telekom-Firma entscheidet sich um.", jump:-0.013, drift:-0.0005, dur:30}},
+];
+
 /* ====================== Helpers ====================== */
 const $ = id => document.getElementById(id);
 const fmt = n => n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2}) + " $";
@@ -494,6 +536,8 @@ function genMarket(seed, ticks){
   let lastIdx = -1;
   let lastEventSym = null; // bricht die Momentum-Schleife: nie zweimal dieselbe Aktie in Folge
   let nextEvent = Math.round((30 + Math.floor(rnd()*40)) * TICK_SCALE);
+  const chainsLeft = [...CHAIN_POOL]; // jede Kette höchstens einmal pro Spiel
+  let chainQueue = [];                // geplante Auflösungen (Bestätigung/Dementi)
 
   /* Event auslösen: News erscheint bei Tick i, der Kurs reagiert erst
      REACT_TICKS später – so bleibt Zeit, auf die Meldung zu reagieren.
@@ -506,7 +550,9 @@ function genMarket(seed, ticks){
     const targets = sym === "ALL" ? Object.keys(prices) : [sym];
     const hits = i + REACT_TICKS;
     for(const s of targets){
-      if(resolved.jump) pendingJumps.push({at:hits, sym:s, factor: 1 + resolved.jump * (0.85 + rnd()*0.3)});
+      // newsMult: Hype-Werte reagieren stärker auf Schlagzeilen
+      const mult = STOCK_DEFS[s].newsMult || 1;
+      if(resolved.jump) pendingJumps.push({at:hits, sym:s, factor: 1 + resolved.jump * mult * (0.85 + rnd()*0.3)});
     }
     if(resolved.drift) effects.push({sym, drift:resolved.drift * TICK_SCALE, from:hits, until:hits + dur});
     if(sym !== "ALL") lastEventSym = sym;
@@ -537,6 +583,13 @@ function genMarket(seed, ticks){
         if(best.chg >= 0) pool = rnd() < 0.65 ? MOMENTUM_POOL.upCont : MOMENTUM_POOL.upTake;
         else              pool = rnd() < 0.5  ? MOMENTUM_POOL.downReb : MOMENTUM_POOL.downCont;
         fire(i, pool[Math.floor(rnd()*pool.length)], best.sym);
+      }else if(chainsLeft.length && i < ticks*0.55 && rnd() < 0.35){
+        // Mehrstufig: Gerücht jetzt, Auflösung 1,5–2,5 Min später
+        const chain = chainsLeft.splice(Math.floor(rnd()*chainsLeft.length), 1)[0];
+        fire(i, chain.rumor, chain.t);
+        let at = i + Math.round((90 + rnd()*60) * 1000 / TICK_MS);
+        at = Math.min(at, ticks - (REACT_TICKS + 8));
+        chainQueue.push({at, chain});
       }else{
         let idx;
         do{ idx = Math.floor(rnd()*NEWS_POOL.length); }while(idx === lastIdx);
@@ -546,6 +599,12 @@ function genMarket(seed, ticks){
       }
       nextEvent = i + Math.round((60 + Math.floor(rnd()*55)) * TICK_SCALE);
     }
+
+    // Ketten-Auflösung fällig? Bestätigung (65%) oder Dementi (35%)
+    for(const c of chainQueue){
+      if(c.at === i) fire(i, rnd() < 0.65 ? c.chain.confirm : c.chain.deny, c.chain.t);
+    }
+    chainQueue = chainQueue.filter(c => c.at > i);
 
     // Fällige News-Sprünge (REACT_TICKS nach der Meldung) anwenden
     for(const j of pendingJumps){
@@ -560,6 +619,11 @@ function genMarket(seed, ticks){
       for(const e of effects){
         if(e.from <= i && (e.sym === sym || e.sym === "ALL")) drift += e.drift;
       }
+      // Charakter der Aktie:
+      if(d.momentum) drift += d.momentum * (prices[sym] / paths[sym][Math.max(0, i - 1 - LOOKBACK)] - 1) / LOOKBACK;
+      if(d.meanRev)  drift -= d.meanRev * (prices[sym] / d.start - 1);
+      if(d.spikeP && rnd() < d.spikeP)
+        prices[sym] *= 1 + (rnd() < 0.5 ? -1 : 1) * d.spikeMag * (0.7 + rnd()*0.6);
       let sig = d.sigma;
       if(sym === "SPCX" && i < ticks*0.12) sig *= 1.3;
       if(i > ticks*0.9) sig *= 1.2;
@@ -567,7 +631,23 @@ function genMarket(seed, ticks){
       paths[sym].push(prices[sym]);
     }
   }
-  return {paths, events};
+
+  /* Insider-Tipps: kündigen zwei echte kommende Events vage an (~50 s Vorlauf).
+     Deterministisch aus dem Seed → beide Spieler/Geräte bekommen dieselben Tipps. */
+  const lead = Math.round(50000 / TICK_MS);
+  const tips = [];
+  const candidates = events.filter(e => e.ev.t !== "ALL" && Math.abs(e.ev.jump) >= 0.008 && e.tick > lead + 10);
+  for(const [lo, hi] of [[0.12, 0.5], [0.5, 0.95]]){
+    const zone = candidates.filter(e =>
+      e.tick >= ticks*lo && e.tick < ticks*hi && !tips.some(t => t.eventTick === e.tick));
+    if(zone.length){
+      const e = zone[Math.floor(rnd()*zone.length)];
+      tips.push({tick: e.tick - lead, eventTick: e.tick, sym: e.ev.t, dir: e.ev.jump > 0 ? 1 : -1});
+    }
+  }
+  tips.sort((a,b) => a.tick - b.tick);
+
+  return {paths, events, tips};
 }
 
 /* ====================== State ====================== */
@@ -642,13 +722,18 @@ function buildMarket(){
   market = genMarket(gameCode, matchTicks);
 }
 
+function newPlayer(name, color){
+  return {name, cash:START_CASH, pos:{}, color, result:null,
+          stats:{trades:0, volume:0, best:null, worst:null, allIns:0, newsTrades:0, investedTicks:0, peak:START_CASH}};
+}
+
 $("startBtn").onclick = () => {
   if(mode === "local"){
     gameCode = makeCode(DURATIONS.indexOf(durationMin));
     buildMarket();
     players = [
-      {name: $("name1").value.trim() || "Spieler 1", cash:START_CASH, pos:{}, color:"var(--p1)", result:null},
-      {name: $("name2").value.trim() || "Spieler 2", cash:START_CASH, pos:{}, color:"var(--p2)", result:null},
+      newPlayer($("name1").value.trim() || "Spieler 1", "var(--p1)"),
+      newPlayer($("name2").value.trim() || "Spieler 2", "var(--p2)"),
     ];
     startRound(0);
     return;
@@ -668,10 +753,10 @@ $("startBtn").onclick = () => {
     gameCode = makeCode(DURATIONS.indexOf(durationMin));
   }
   buildMarket();
-  players = [{
-    name: $("name1").value.trim() || (joined ? "Spieler 2" : "Spieler 1"),
-    cash: START_CASH, pos:{}, color: joined ? "var(--p2)" : "var(--p1)", result:null
-  }];
+  players = [newPlayer(
+    $("name1").value.trim() || (joined ? "Spieler 2" : "Spieler 1"),
+    joined ? "var(--p2)" : "var(--p1)"
+  )];
   openLobby(joined);
 };
 
@@ -739,7 +824,7 @@ $("rematchBtn").onclick = () => {
 
 function startRound(r){
   round = r;
-  tickCount = 0; paused = false; over = false; newsPaused = false;
+  tickCount = 0; paused = false; over = false; newsPaused = false; lastNewsTick = -999;
   $("newsPop").classList.remove("show");
   selected = "SPCX"; qtyMode = "5";
   document.querySelectorAll(".chip").forEach(x => x.classList.toggle("active", x.dataset.q === "5"));
@@ -773,9 +858,40 @@ function startRound(r){
 
 /* ====================== Tick (spielt vorberechneten Markt ab) ====================== */
 let newsPaused = false;
+let lastNewsTick = -999; // für die News-Junkie-Statistik
 
 function price(sym){ return market.paths[sym][Math.min(tickCount, matchTicks)]; }
 function open_(sym){ return STOCK_DEFS[sym].start; }
+
+function insiderText(t){
+  return t.dir > 0
+    ? `Vertrauliche Quelle: Bei ${t.sym} bahnt sich in Kürze etwas Positives an …`
+    : `Vertrauliche Quelle: Bei ${t.sym} ziehen dunkle Wolken auf …`;
+}
+
+/* Events und Insider-Tipps des aktuellen Ticks verarbeiten.
+   showPopup=false beim Catch-up nach Tab-Schlaf (kein Popup-Stau). */
+function processTick(showPopup){
+  for(const e of market.events){
+    if(e.tick === tickCount){
+      pushNews(e.ev.t, e.ev.txt, e.tag);
+      lastNewsTick = tickCount;
+      if(showPopup) showNewsPop(e);
+    }
+  }
+  for(const t of market.tips){
+    if(t.tick === tickCount){
+      pushNews(t.sym, insiderText(t), "insider");
+      lastNewsTick = tickCount;
+      if(showPopup) showNewsPop({ev:{t:t.sym, txt:"🤫 " + insiderText(t)}, tag:t.dir > 0 ? "up" : "down", insider:true});
+    }
+  }
+  // Statistik: investierte Zeit und Depot-Spitze
+  const p = players[round];
+  if(Object.keys(p.pos).length) p.stats.investedTicks++;
+  const tv = totalOf(p);
+  if(tv > p.stats.peak) p.stats.peak = tv;
+}
 
 function tick(){
   if(over) return;
@@ -787,13 +903,7 @@ function tick(){
     const target = Math.min(matchTicks, Math.floor((Date.now() - roundAnchor) / TICK_MS));
     while(tickCount < target){
       tickCount++;
-      for(const e of market.events){
-        if(e.tick === tickCount){
-          pushNews(e.ev.t, e.ev.txt, e.tag);
-          // Popup nur für frische Events, kein Popup-Stau nach Catch-up
-          if(e.tick === target) showNewsPop(e);
-        }
-      }
+      processTick(tickCount === target);
     }
     if(tickCount >= matchTicks){ endRound(); return; }
     renderAll();
@@ -803,13 +913,7 @@ function tick(){
   // Local (Pass & Play): tick-basiert, Pause und News-Popup halten an
   if(paused || newsPaused) return;
   tickCount++;
-
-  for(const e of market.events){
-    if(e.tick === tickCount){
-      pushNews(e.ev.t, e.ev.txt, e.tag);
-      showNewsPop(e);
-    }
-  }
+  processTick(true);
 
   if(tickCount >= matchTicks){ endRound(); return; }
   renderAll();
@@ -824,9 +928,11 @@ function showNewsPop(e){
   clearTimeout(npTimer);
   if(mode === "remote") npTimer = setTimeout(closeNewsPop, 6000);
   const sym = e.ev.t;
+  $("npLive").textContent = e.insider ? "Insider" : "Breaking";
+  $("npHint").style.display = e.insider ? "none" : "";
   $("npSym").textContent = sym === "ALL" ? "MARKT" : sym;
   $("npSym").className = "np-sym " + e.tag;
-  $("npCard").className = "np-card " + e.tag;
+  $("npCard").className = "np-card " + e.tag + (e.insider ? " insider" : "");
   $("npText").textContent = e.ev.txt;
   const go = $("npGo");
   if(sym === "ALL"){
@@ -859,6 +965,14 @@ function curQty(){
   return +qtyMode;
 }
 
+/* Statistik je Order: Anzahl, Volumen, All-ins, Trades kurz nach News */
+function noteTrade(p, value){
+  const s = p.stats;
+  s.trades++; s.volume += value;
+  if(qtyMode === "max") s.allIns++;
+  if(tickCount - lastNewsTick <= Math.round(12000 / TICK_MS)) s.newsTrades++;
+}
+
 function trade(side){
   if(over) return;
   const p = players[round];
@@ -874,6 +988,7 @@ function trade(side){
     pos.avg = (pos.avg*pos.qty + cost) / (pos.qty + qty);
     pos.qty += qty;
     p.pos[selected] = pos;
+    noteTrade(p, cost);
     flash.textContent = `Gekauft: ${qty} × ${selected} @ ${fmt(px)}`;
     flash.className = "flash ok";
   }else{
@@ -882,9 +997,13 @@ function trade(side){
     if(!pos || pos.qty < sellQty || sellQty === 0){
       flash.textContent = "Nicht genug Stücke im Depot."; flash.className = "flash err"; return;
     }
+    const profit = (px - pos.avg) * sellQty;
     p.cash += sellQty * px;
     pos.qty -= sellQty;
     if(pos.qty === 0) delete p.pos[selected];
+    noteTrade(p, sellQty * px);
+    p.stats.best  = p.stats.best  === null ? profit : Math.max(p.stats.best,  profit);
+    p.stats.worst = p.stats.worst === null ? profit : Math.min(p.stats.worst, profit);
     flash.textContent = `Verkauft: ${sellQty} × ${selected} @ ${fmt(px)}`;
     flash.className = "flash ok";
   }
@@ -964,7 +1083,7 @@ function renderAll(){
     ek.style.display = "none";
   }
 
-  $("qName").textContent = STOCK_DEFS[selected].name + " · Eröffnung " + fmt(op);
+  $("qName").innerHTML = `${STOCK_DEFS[selected].name} · Eröffnung ${fmt(op)}<br><span class="char-line">${STOCK_DEFS[selected].char}</span>`;
   $("tradeSym").textContent = selected;
 
   // Order
@@ -1161,6 +1280,8 @@ function endRound(){
     const ho = $("hoPnl");
     ho.textContent = sgn(p.result.pnl);
     ho.style.color = p.result.pnl >= 0 ? "var(--up)" : "var(--down)";
+    $("hoBadge").textContent = playerTitle(p);
+    $("hoStats").innerHTML = statsLine(p);
     $("hoSub").innerHTML = `Handy weitergeben an <b style="color:var(--p2)">${players[1].name}</b>.<br>
       Gleicher Markt, gleiche News – gleiche Chancen.`;
     $("hoCode").textContent = gameCode;
@@ -1168,6 +1289,27 @@ function endRound(){
   }else{
     showResult();
   }
+}
+
+/* Titel je nach Spielstil – der erste passende gewinnt */
+function playerTitle(p){
+  const s = p.stats, pnl = p.result.pnl, inv = s.investedTicks / matchTicks;
+  if(s.trades === 0)                        return "🪑 Zuschauer";
+  if(s.trades <= 4 && inv > 0.7 && pnl > 0) return "💎 Diamond Hands";
+  if(s.trades >= 15)                        return "⚡ Daytrader";
+  if(s.newsTrades >= 3)                     return "📰 News-Junkie";
+  if(s.allIns >= 3)                         return "🎰 Vollzocker";
+  if(pnl >= 400)                            return "🧠 Marktflüsterer";
+  if(pnl <= -400)                           return "🔥 Verbrannte Finger";
+  if(inv < 0.25)                            return "🛟 Vorsichtsanleger";
+  return "📊 Solider Trader";
+}
+
+function statsLine(p){
+  const s = p.stats;
+  let out = `${s.trades} Trades · Spitze ${fmt(s.peak)}`;
+  if(s.best !== null) out += `<br>Bester Deal ${sgn(s.best)} · Schwächster ${sgn(s.worst)}`;
+  return out;
 }
 
 /* Remote: nur das eigene Ergebnis – verglichen wird manuell übers Gerät hinweg */
@@ -1179,7 +1321,7 @@ function showResultSolo(p){
   $("crown1").textContent = "";
   $("resCard1").classList.remove("win");
   $("resCard2").style.display = "none";
-  setRes("1", p.result);
+  setRes("1", p);
   $("resCode").textContent = String(gameCode).padStart(6,"0");
   $("rematchBtn").textContent = "Neues Spiel";
   $("overlay").classList.add("show");
@@ -1192,7 +1334,7 @@ function showResult(){
   const r1 = players[0].result, r2 = players[1].result;
   $("resName1").textContent = players[0].name;
   $("resName2").textContent = players[1].name;
-  setRes("1", r1); setRes("2", r2);
+  setRes("1", players[0]); setRes("2", players[1]);
 
   const diff = Math.abs(r1.pnl - r2.pnl);
   if(diff < 0.005){
@@ -1213,11 +1355,14 @@ function showResult(){
   $("overlay").classList.add("show");
 }
 
-function setRes(i, r){
+function setRes(i, p){
+  const r = p.result;
   const el = $("resPnl"+i);
   el.textContent = sgn(r.pnl);
   el.style.color = r.pnl >= 0 ? "var(--up)" : "var(--down)";
   $("resTot"+i).textContent = "Endwert " + fmt(r.total);
+  $("resBadge"+i).textContent = playerTitle(p);
+  $("resStats"+i).innerHTML = statsLine(p);
 }
 
 /* ====================== Steuerung ====================== */

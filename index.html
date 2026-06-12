@@ -311,11 +311,10 @@
 <!-- ================= LOBBY (Spiel angelegt, Warten auf Start) ================= -->
 <div class="overlay" id="lobby">
   <div class="modal">
-    <div class="eyebrow">Spiel angelegt</div>
-    <h3>Bereitmachen!</h3>
+    <div class="eyebrow" id="lobbyEyebrow">Spiel angelegt</div>
+    <h3 id="lobbyHead">Bereitmachen!</h3>
     <div class="lobby-code" id="lobbyCode"></div>
-    <div class="sub">Code fürs zweite Gerät – dort vor <span id="lobbyDeadline"></span> Uhr eingeben,
-      dann startet ihr zeitgleich.</div>
+    <div class="sub" id="lobbySub"></div>
     <div class="lobby-start">Start um <b id="lobbyTime"></b> Uhr · noch <b id="lobbyCount"></b></div>
     <button class="lobby-cancel" id="lobbyCancel">Abbrechen</button>
   </div>
@@ -561,6 +560,7 @@ codeIn.addEventListener("input", () => {
   const valid = /^\d{6}$/.test(codeIn.value);
   // Bei gültigem Code ist die Dauer vorgegeben – Buttons sperren und anzeigen
   document.querySelectorAll(".dur").forEach(b => b.disabled = valid);
+  $("startBtn").textContent = valid ? "Spiel beitreten 🔔" : "Spiel anlegen 🔔";
   if(valid){
     durationMin = DURATIONS[+codeIn.value % 3];
     document.querySelectorAll(".dur").forEach(x => x.classList.toggle("active", +x.dataset.m === durationMin));
@@ -573,7 +573,8 @@ $("startBtn").onclick = () => {
     $("codeErr").textContent = "Der Spiel-Code hat 6 Ziffern.";
     return;
   }
-  if(raw){
+  const joined = !!raw;
+  if(joined){
     gameCode = +raw;
     durationMin = DURATIONS[gameCode % 3];
   }else{
@@ -585,7 +586,7 @@ $("startBtn").onclick = () => {
     {name: $("name1").value.trim() || "Spieler 1", cash:START_CASH, pos:{}, color:"var(--p1)", result:null},
     {name: $("name2").value.trim() || "Spieler 2", cash:START_CASH, pos:{}, color:"var(--p2)", result:null},
   ];
-  openLobby();
+  openLobby(joined);
 };
 
 /* ====================== Lobby (zeitversetzter Start) ====================== */
@@ -599,11 +600,17 @@ const hhmm = ms => {
   return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
 };
 
-function openLobby(){
+function openLobby(joined){
   startAt = (Math.floor(Date.now()/60000) + 2) * 60000;
-  $("lobbyCode").textContent = gameCode;
+  $("lobbyEyebrow").textContent = joined ? "Spiel beigetreten" : "Spiel angelegt";
+  $("lobbyHead").textContent = joined ? "Auf die Plätze!" : "Bereitmachen!";
+  $("lobbyCode").textContent = String(gameCode).padStart(6, "0");
+  $("lobbySub").innerHTML = joined
+    ? "Exakt dasselbe Spiel wie auf dem anderen Gerät – gleiche Kurse, gleiche News.<br>" +
+      "Wurde es dort in derselben Minute angelegt, startet ihr zeitgleich."
+    : `Code fürs zweite Gerät – dort vor <b style="color:var(--text)">${hhmm(startAt - 60000)}</b> Uhr
+       beitreten, dann startet ihr zeitgleich.`;
   $("lobbyTime").textContent = hhmm(startAt);
-  $("lobbyDeadline").textContent = hhmm(startAt - 60000);
   updateLobby();
   $("lobby").classList.add("show");
   clearInterval(lobbyTimer);
@@ -638,6 +645,7 @@ $("rematchBtn").onclick = () => {
   // Code leeren, sonst würde die Revanche denselben (nun bekannten) Markt abspielen
   codeIn.value = "";
   $("codeErr").textContent = "";
+  $("startBtn").textContent = "Spiel anlegen 🔔";
   document.querySelectorAll(".dur").forEach(b => b.disabled = false);
   window.scrollTo(0,0);
 };

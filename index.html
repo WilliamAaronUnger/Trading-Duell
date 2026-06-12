@@ -129,6 +129,7 @@
   .btn{flex:1;height:48px;border:none;border-radius:10px;font-size:16px;font-weight:800;cursor:pointer}
   .btn.buy{background:var(--up);color:#06281A}
   .btn.sell{background:var(--down);color:#330911}
+  .btn.short{background:#9F7AEA;color:#22103F}
   .btn:disabled{opacity:.3;cursor:not-allowed}
   .order-info{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:9px}
   .flash{font-family:var(--mono);font-size:12px;margin-top:5px;min-height:16px}
@@ -316,6 +317,7 @@
       <div class="trade-row">
         <button class="btn buy" id="buyBtn">Kaufen</button>
         <button class="btn sell" id="sellBtn">Verkaufen</button>
+        <button class="btn short" id="shortBtn">Short 🐻</button>
       </div>
       <div class="order-info" id="orderInfo"></div>
       <div class="flash" id="flash"></div>
@@ -1060,33 +1062,37 @@ function trade(side){
       flash.textContent = `Gekauft: ${qty} × ${selected} @ ${fmt(px)}`;
       flash.className = "flash ok";
     }
-  }else{
-    if(pos && pos.qty > 0){
-      // Long verkaufen (wie bisher)
-      const sellQty = qtyMode === "max" ? pos.qty : Math.min(qty, pos.qty);
-      const profit = (px - pos.avg) * sellQty;
-      p.cash += sellQty * px;
-      pos.qty -= sellQty;
-      if(pos.qty === 0) delete p.pos[selected];
-      noteTrade(p, sellQty * px, "sell");
-      noteClose(p, profit);
-      flash.textContent = `Verkauft: ${sellQty} × ${selected} @ ${fmt(px)}`;
-      flash.className = "flash ok";
-    }else{
-      // Short eröffnen/aufstocken: Erlös kommt aufs Konto, Rückkauf-Pflicht bleibt
-      const cap = maxShortQty(p, px);
-      const q = qtyMode === "max" ? cap : Math.min(qty, cap);
-      if(q < 1){ flash.textContent = "Short-Limit erreicht (max. 1× Depotwert)."; flash.className = "flash err"; return; }
-      p.cash += q * px;
-      const sp = pos || {qty:0, avg:0};
-      sp.avg = (sp.avg * -sp.qty + q * px) / (-sp.qty + q);
-      sp.qty -= q;
-      p.pos[selected] = sp;
-      noteTrade(p, q * px, "sell");
-      p.stats.shorts++;
-      flash.textContent = `Short: ${q} × ${selected} @ ${fmt(px)} 🐻`;
-      flash.className = "flash ok";
+  }else if(side === "sell"){
+    // Long verkaufen – Shorts laufen über den eigenen Short-Button
+    if(!pos || pos.qty <= 0){
+      flash.textContent = "Nicht genug Stücke im Depot."; flash.className = "flash err"; return;
     }
+    const sellQty = qtyMode === "max" ? pos.qty : Math.min(qty, pos.qty);
+    const profit = (px - pos.avg) * sellQty;
+    p.cash += sellQty * px;
+    pos.qty -= sellQty;
+    if(pos.qty === 0) delete p.pos[selected];
+    noteTrade(p, sellQty * px, "sell");
+    noteClose(p, profit);
+    flash.textContent = `Verkauft: ${sellQty} × ${selected} @ ${fmt(px)}`;
+    flash.className = "flash ok";
+  }else{
+    // Short eröffnen/aufstocken: Erlös kommt aufs Konto, Rückkauf-Pflicht bleibt
+    if(pos && pos.qty > 0){
+      flash.textContent = "Erst Long-Position verkaufen, dann shorten."; flash.className = "flash err"; return;
+    }
+    const cap = maxShortQty(p, px);
+    const q = qtyMode === "max" ? cap : Math.min(qty, cap);
+    if(q < 1){ flash.textContent = "Short-Limit erreicht (max. 1× Depotwert)."; flash.className = "flash err"; return; }
+    p.cash += q * px;
+    const sp = pos || {qty:0, avg:0};
+    sp.avg = (sp.avg * -sp.qty + q * px) / (-sp.qty + q);
+    sp.qty -= q;
+    p.pos[selected] = sp;
+    noteTrade(p, q * px, "sell");
+    p.stats.shorts++;
+    flash.textContent = `Short: ${q} × ${selected} @ ${fmt(px)} 🐻`;
+    flash.className = "flash ok";
   }
   renderAll();
 }
@@ -1168,12 +1174,13 @@ function renderAll(){
   $("qName").innerHTML = `${STOCK_DEFS[selected].name} · Eröffnung ${fmt(op)}<br><span class="char-line">${STOCK_DEFS[selected].char}</span>`;
   $("tradeSym").textContent = selected;
 
-  // Order: Buttons je nach Positionsrichtung beschriften
+  // Order: Kaufen deckt bei Short-Position ein, Verkaufen nur für Longs,
+  // Short hat seinen eigenen Button
   const qty = curQty();
   const held = p.pos[selected]?.qty || 0;
   const isShort = held < 0;
-  $("buyBtn").textContent  = isShort ? "Eindecken" : "Kaufen";
-  $("sellBtn").textContent = held > 0 ? "Verkaufen" : "Shorten 🐻";
+  const cap = maxShortQty(p, px);
+  $("buyBtn").textContent = isShort ? "Eindecken" : "Kaufen";
   if(isShort){
     $("orderInfo").textContent = `Short: ${-held} Stk · Eindecken: ${qty} ≈ ${fmt(qty*px)}`;
   }else if(held > 0){
@@ -1181,11 +1188,11 @@ function renderAll(){
       ? `Max: Kauf ${qty} Stück ≈ ${fmt(qty*px)} · Verkauf: alle ${held}`
       : `${qty} Stück ≈ ${fmt(qty*px)} · im Depot: ${held}`;
   }else{
-    const cap = maxShortQty(p, px);
     $("orderInfo").textContent = `${qty} Stück ≈ ${fmt(qty*px)} · Short möglich: ${cap} Stk`;
   }
   $("buyBtn").disabled = over || (isShort ? p.cash < px : qty*px > p.cash + 0.001);
-  $("sellBtn").disabled = over || (held <= 0 && maxShortQty(p, px) < 1);
+  $("sellBtn").disabled = over || held <= 0;
+  $("shortBtn").disabled = over || held > 0 || cap < 1;
 
   // Depot
   $("cash").textContent = fmt(p.cash);
@@ -1602,6 +1609,7 @@ $("pauseBtn").onclick = function(){
 $("npSkip").onclick = closeNewsPop;
 $("buyBtn").onclick = () => trade("buy");
 $("sellBtn").onclick = () => trade("sell");
+$("shortBtn").onclick = () => trade("short");
 document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
   qtyMode = c.dataset.q;
   document.querySelectorAll(".chip").forEach(x => x.classList.toggle("active", x === c));

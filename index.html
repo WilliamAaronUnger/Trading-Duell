@@ -520,6 +520,7 @@ const CHAIN_POOL = [
 const $ = id => document.getElementById(id);
 const fmt = n => n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2}) + " $";
 const sgn = n => (n>=0?"+":"") + fmt(n);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 /* Seeded PRNG, damit beide Runden den identischen Markt bekommen */
 function mulberry32(a){
@@ -1348,6 +1349,7 @@ function buyHoldPnl(){
 }
 
 function favSym(p){
+  if(p.stats._fav) return p.stats._fav; // entpacktes Gegner-Ergebnis liefert den String direkt
   const e = Object.entries(p.stats.perSym).sort((a,b) => b[1] - a[1]);
   return e.length ? `${e[0][0]} (${e[0][1]}×)` : "–";
 }
@@ -1368,13 +1370,13 @@ function buildAnalysis(list){
     ["Depot-Tief",         p => fmt(p.stats.trough)],
     ["Max. Rücksetzer",    p => p.stats.maxDD < 0.005 ? "–" : "−" + fmt(p.stats.maxDD)],
     ["Investierte Zeit",   p => Math.round(p.stats.investedTicks / matchTicks * 100) + " %"],
-    ["Lieblingsaktie",     p => favSym(p)],
+    ["Lieblingsaktie",     p => esc(favSym(p))],
     ["Trades nach News",   p => p.stats.newsTrades],
     ["Markt geschlagen",   p => p.result.pnl > bh ? "✅ Ja" : "❌ Nein"],
   ];
   let html = '<h4>📊 Analyse</h4><table>';
   if(list.length > 1){
-    html += `<tr><th></th>${list.map(p => `<th style="color:${p.color}">${p.name}</th>`).join("")}</tr>`;
+    html += `<tr><th></th>${list.map(p => `<th style="color:${p.color}">${esc(p.name)}</th>`).join("")}</tr>`;
   }
   for(const [label, fn] of rows){
     html += `<tr><td>${label}</td>${list.map(p => `<td>${fn(p)}</td>`).join("")}</tr>`;
@@ -1383,10 +1385,92 @@ function buildAnalysis(list){
   $("analysis").innerHTML = html;
 }
 
-/* Remote: nur das eigene Ergebnis – verglichen wird manuell übers Gerät hinweg */
+/* ====================== Ergebnis-Austausch (Zwei-Geräte-Modus) ====================== */
+/* Ohne Server: Jeder kopiert sein Ergebnis als kompakten Code (Base64) und
+   schickt ihn dem Gegner (z. B. per Messenger). Eingefügt ergibt das die volle
+   Duell-Ansicht mit Krone und zweispaltiger Analyse. */
+function packResult(p){
+  const s = p.stats;
+  const f = [gameCode, p.name, p.result.pnl.toFixed(2), p.result.total.toFixed(2),
+             s.trades, s.buys, s.sells, Math.round(s.volume), s.realized.toFixed(2),
+             s.best  === null ? "x" : s.best.toFixed(2),
+             s.worst === null ? "x" : s.worst.toFixed(2),
+             s.allIns, s.newsTrades, s.investedTicks,
+             s.peak.toFixed(2), s.trough.toFixed(2), s.maxDD.toFixed(2), favSym(p)];
+  return "SPCX1." + btoa(unescape(encodeURIComponent(f.join("|"))));
+}
+
+function unpackResult(str){
+  if(!str.startsWith("SPCX1.")) return null;
+  let f;
+  try{ f = decodeURIComponent(escape(atob(str.slice(6)))).split("|"); }catch(e){ return null; }
+  if(f.length !== 18) return null;
+  if(+f[0] !== gameCode) return {wrongGame:true};
+  const nums = [2,3,4,5,6,7,8,11,12,13,14,15,16].map(i => parseFloat(f[i]));
+  if(nums.some(isNaN)) return null;
+  return {
+    name: f[1].slice(0,14) || "Gegner",
+    result:{pnl:+f[2], total:+f[3]},
+    stats:{trades:+f[4], buys:+f[5], sells:+f[6], volume:+f[7], realized:+f[8],
+           best: f[9]  === "x" ? null : +f[9],
+           worst:f[10] === "x" ? null : +f[10],
+           allIns:+f[11], newsTrades:+f[12], investedTicks:+f[13],
+           peak:+f[14], trough:+f[15], maxDD:+f[16], perSym:{}, _fav:f[17]},
+  };
+}
+
+/* Gegner-Ergebnis eingefügt → volle Duell-Ansicht wie im Ein-Gerät-Modus */
+function renderCompare(me, opp){
+  opp.color = me.color === "var(--p1)" ? "var(--p2)" : "var(--p1)";
+  $("cmpBox").style.display = "none";
+  $("resCard2").style.display = "";
+  $("resName2").textContent = opp.name;
+  document.querySelector("#resCard2 .dot").style.background = opp.color;
+  setRes("2", opp);
+  const diff = Math.abs(me.result.pnl - opp.result.pnl);
+  if(diff < 0.005){
+    $("resTitle").textContent = "Unentschieden!";
+    $("resSub").textContent = "Auf den Cent gleich – das gibt's selten.";
+    $("crown1").textContent = ""; $("crown2").textContent = "";
+    $("resCard1").classList.remove("win"); $("resCard2").classList.remove("win");
+  }else{
+    const meWins = me.result.pnl > opp.result.pnl;
+    $("resTitle").textContent = (meWins ? me.name : opp.name) + " gewinnt!";
+    $("resSub").textContent = "Vorsprung: " + fmt(diff) + " · identischer Markt für beide";
+    $("crown1").textContent = meWins ? "👑" : "";
+    $("crown2").textContent = meWins ? "" : "👑";
+    $("resCard1").classList.toggle("win", meWins);
+    $("resCard2").classList.toggle("win", !meWins);
+  }
+  buildAnalysis([me, opp]);
+}
+
+let soloP = null;
+
+$("shareBtn").onclick = async function(){
+  const txt = packResult(soloP);
+  try{
+    if(navigator.share) await navigator.share({text: txt});
+    else await navigator.clipboard.writeText(txt);
+    this.textContent = "✅ Kopiert – schick's dem Gegner!";
+  }catch(e){
+    window.prompt("Zum Kopieren markieren:", txt);
+  }
+};
+
+$("cmpBtn").onclick = () => {
+  const opp = unpackResult($("cmpIn").value.trim());
+  if(!opp){ $("cmpErr").textContent = "Code nicht lesbar – komplett kopiert?"; return; }
+  if(opp.wrongGame){ $("cmpErr").textContent = "Das Ergebnis stammt aus einem anderen Spiel."; return; }
+  $("cmpErr").textContent = "";
+  renderCompare(soloP, opp);
+};
+
+/* Remote: eigenes Ergebnis + Austausch-Box für den Vergleich */
 function showResultSolo(p){
+  soloP = p;
   $("resTitle").textContent = "Geschafft!";
-  $("resSub").textContent = "Vergleicht eure Endwerte – höheres Plus gewinnt. Gleicher Markt für beide.";
+  $("resSub").textContent = "Tauscht eure Ergebnisse aus – dann gibt's den direkten Vergleich.";
   $("resName1").textContent = p.name;
   document.querySelector("#resCard1 .dot").style.background = p.color;
   $("crown1").textContent = "";
@@ -1394,6 +1478,9 @@ function showResultSolo(p){
   $("resCard2").style.display = "none";
   setRes("1", p);
   buildAnalysis([p]);
+  $("cmpBox").style.display = "";
+  $("shareBtn").textContent = "📤 Mein Ergebnis kopieren";
+  $("cmpIn").value = ""; $("cmpErr").textContent = "";
   $("resCode").textContent = String(gameCode).padStart(6,"0");
   $("rematchBtn").textContent = "Neues Spiel";
   $("overlay").classList.add("show");
@@ -1401,6 +1488,7 @@ function showResultSolo(p){
 
 function showResult(){
   $("resCard2").style.display = "";
+  $("cmpBox").style.display = "none";
   $("rematchBtn").textContent = "Revanche";
   document.querySelector("#resCard1 .dot").style.background = "var(--p1)";
   const r1 = players[0].result, r2 = players[1].result;

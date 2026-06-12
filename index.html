@@ -396,37 +396,42 @@ const REACT_TICKS = Math.round(8000 / TICK_MS);
 
 /* Drift ~neutral: Aktien können im Plus UND im Minus enden – nur SPCX hat minimal IPO-Rückenwind */
 const STOCK_DEFS = {
-  SPCX:{name:"SpaceX",     start:135.00, sigma:0.0015,  drift:0.00001},
-  TSLA:{name:"Tesla",      start:312.40, sigma:0.00075, drift:0},
-  NVDA:{name:"NVIDIA",     start:176.80, sigma:0.0007,  drift:0},
-  RKLB:{name:"Rocket Lab", start:38.65,  sigma:0.0010,  drift:0},
+  SPCX:{name:"SpaceX",     start:135.00, sigma:0.0015, drift:0.00001},
+  TSLA:{name:"Tesla",      start:312.40, sigma:0.0010, drift:0},
+  NVDA:{name:"NVIDIA",     start:176.80, sigma:0.0009, drift:0},
+  RKLB:{name:"Rocket Lab", start:38.65,  sigma:0.0013, drift:0},
 };
 
-/* News: kleinere Sprünge, dafür längere Drift-Phasen → fließendere Bewegungen */
+/* News: kleinere Sprünge, dafür längere Drift-Phasen → fließendere Bewegungen.
+   Pool bewusst ausbalanciert: SPCX dominiert nicht – auch TSLA/NVDA/RKLB
+   bekommen gleich viele und ähnlich kräftige Stories. */
 const NEWS_POOL = [
   {t:"SPCX", txt:"Starship-Testflug verläuft fehlerfrei – Booster erneut gelandet.", jump:+0.012, drift:+0.0005, dur:36},
   {t:"SPCX", txt:"Analystenhaus warnt: Bewertung von 1,77 Bio. $ »kaum zu rechtfertigen«.", jump:-0.010, drift:-0.0004, dur:38},
-  {t:"SPCX", txt:"Starlink meldet Rekord bei Neuanmeldungen.", jump:+0.008, drift:+0.0004, dur:30},
   {t:"SPCX", txt:"Gerücht: Großinvestor will nach Lock-up-Frist verkaufen.", jump:-0.009, drift:-0.0004, dur:30},
   {t:"SPCX", txt:"NASA vergibt weiteren Mond-Auftrag an SpaceX.", jump:+0.010, drift:+0.0004, dur:32},
-  {t:"SPCX", txt:"Senatorin fordert kartellrechtliche Prüfung von Starlink.", jump:-0.008, drift:-0.0003, dur:28},
   {t:"SPCX", txt:"xAI-Sparte verbrennt laut Bericht mehr Geld als erwartet.", jump:-0.007, drift:-0.0003, dur:26},
-  {t:"SPCX", txt:"Musk kündigt »baldige Mars-Roadmap« an.", jump:+0.007, drift:+0.0003, dur:26},
   {t:"SPCX", txt:"Indexfonds müssen SPCX aufnehmen – Kauforders laufen ein.", jump:+0.009, drift:+0.0004, dur:30},
-  {t:"TSLA", txt:"Tesla rollt FSD-Update in Europa breiter aus.", jump:+0.006, drift:+0.0003, dur:26},
-  {t:"TSLA", txt:"Absatzzahlen aus China enttäuschen.", jump:-0.006, drift:-0.0003, dur:26},
-  {t:"NVDA", txt:"NVIDIA meldet Großauftrag für Rechenzentrums-GPUs.", jump:+0.006, drift:+0.0003, dur:26},
-  {t:"NVDA", txt:"Berichte über neue Exportauflagen belasten Chipwerte.", jump:-0.006, drift:-0.0003, dur:26},
-  {t:"RKLB", txt:"Rocket Lab gewinnt Konstellations-Vertrag.", jump:+0.009, drift:+0.0004, dur:28},
+  {t:"TSLA", txt:"Tesla rollt FSD-Update in Europa breiter aus.", jump:+0.008, drift:+0.0004, dur:28},
+  {t:"TSLA", txt:"Robotaxi-Flotte erhält Zulassung für weitere Großstädte.", jump:+0.010, drift:+0.0004, dur:30},
+  {t:"TSLA", txt:"Absatzzahlen aus China enttäuschen.", jump:-0.008, drift:-0.0004, dur:28},
+  {t:"TSLA", txt:"Rückruf wegen Software-Fehlers trifft Hunderttausende Fahrzeuge.", jump:-0.009, drift:-0.0004, dur:30},
+  {t:"NVDA", txt:"NVIDIA meldet Großauftrag für Rechenzentrums-GPUs.", jump:+0.008, drift:+0.0004, dur:28},
+  {t:"NVDA", txt:"Nächste Chip-Generation kommt früher als geplant.", jump:+0.010, drift:+0.0004, dur:30},
+  {t:"NVDA", txt:"Berichte über neue Exportauflagen belasten Chipwerte.", jump:-0.008, drift:-0.0004, dur:28},
+  {t:"NVDA", txt:"Großkunde verschiebt laut Insidern Bestellungen.", jump:-0.009, drift:-0.0004, dur:30},
+  {t:"RKLB", txt:"Rocket Lab gewinnt Konstellations-Vertrag.", jump:+0.010, drift:+0.0004, dur:28},
+  {t:"RKLB", txt:"Neutron absolviert ersten Testflug erfolgreich.", jump:+0.012, drift:+0.0005, dur:32},
   {t:"RKLB", txt:"Neutron-Erststart verschiebt sich erneut.", jump:-0.008, drift:-0.0004, dur:28},
+  {t:"RKLB", txt:"Triebwerkstest schlägt fehl – Untersuchung läuft.", jump:-0.009, drift:-0.0004, dur:30},
   {t:"ALL",  txt:"Inflationsdaten besser als erwartet – Markt dreht ins Plus.", jump:+0.004, drift:+0.0002, dur:36},
   {t:"ALL",  txt:"Fed-Mitglied dämpft Zinssenkungshoffnungen.", jump:-0.004, drift:-0.0002, dur:36},
   {t:"ALL",  txt:"Risk-off: Anleger schichten in Anleihen um.", jump:-0.003, drift:-0.0002, dur:30},
 ];
 
 const OPENING_EVENT = {t:"SPCX",
-  txt:"Eröffnung: SPCX startet deutlich über dem Ausgabepreis von 135 $.",
-  jump:+0.04, drift:+0.0022, dur:24};
+  txt:"Eröffnung: SPCX startet über dem Ausgabepreis von 135 $.",
+  jump:+0.012, drift:+0.0006, dur:24};
 
 /* Momentum-News: beziehen sich auf die Aktie, die gerade am stärksten läuft (%SYM% wird ersetzt) */
 const MOMENTUM_POOL = {
@@ -487,6 +492,7 @@ function genMarket(seed, ticks){
   let effects = [];
   let pendingJumps = [];
   let lastIdx = -1;
+  let lastEventSym = null; // bricht die Momentum-Schleife: nie zweimal dieselbe Aktie in Folge
   let nextEvent = Math.round((30 + Math.floor(rnd()*40)) * TICK_SCALE);
 
   /* Event auslösen: News erscheint bei Tick i, der Kurs reagiert erst
@@ -503,6 +509,7 @@ function genMarket(seed, ticks){
       if(resolved.jump) pendingJumps.push({at:hits, sym:s, factor: 1 + resolved.jump * (0.85 + rnd()*0.3)});
     }
     if(resolved.drift) effects.push({sym, drift:resolved.drift * TICK_SCALE, from:hits, until:hits + dur});
+    if(sym !== "ALL") lastEventSym = sym;
     events.push({tick:i, ev:resolved, tag: resolved.jump > 0 ? "up" : resolved.jump < 0 ? "down" : "neutral"});
   }
 
@@ -518,9 +525,12 @@ function genMarket(seed, ticks){
       if(rnd() < 0.5){
         let best = null, bestScore = -1;
         for(const sym of Object.keys(prices)){
+          if(sym === lastEventSym) continue; // nicht zweimal in Folge dieselbe Aktie
           const back = Math.max(0, i - 1 - LOOKBACK);
           const chg = paths[sym][i-1] / paths[sym][back] - 1;
-          const score = Math.abs(chg) + rnd()*0.004; // etwas Zufall, sonst immer SPCX
+          // Bewegung relativ zur eigenen Volatilität, sonst gewinnt immer
+          // die schwankungsstärkste Aktie (SPCX) – plus ordentlich Zufall
+          const score = Math.abs(chg) / STOCK_DEFS[sym].sigma + rnd()*3;
           if(score > bestScore){ bestScore = score; best = {sym, chg}; }
         }
         let pool;
@@ -551,7 +561,7 @@ function genMarket(seed, ticks){
         if(e.from <= i && (e.sym === sym || e.sym === "ALL")) drift += e.drift;
       }
       let sig = d.sigma;
-      if(sym === "SPCX" && i < ticks*0.12) sig *= 1.6;
+      if(sym === "SPCX" && i < ticks*0.12) sig *= 1.3;
       if(i > ticks*0.9) sig *= 1.2;
       prices[sym] = Math.max(1, prices[sym] * Math.exp(drift - sig*sig/2 + sig*g()));
       paths[sym].push(prices[sym]);

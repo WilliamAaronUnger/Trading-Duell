@@ -1,0 +1,16 @@
+{
+  "name": "SPCX Trading-Duell",
+  "short_name": "SPCX Duell",
+  "description": "Börsensimulator zum SpaceX-IPO: Wer macht in 15 Minuten das größere Plus?",
+  "lang": "de",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B1020",
+  "theme_color": "#0B1020",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

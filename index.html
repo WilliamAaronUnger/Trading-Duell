@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>SPCX Trading-Duell</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0B1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SPCX Duell">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<style>
+  :root{
+    --bg:#0B1020;
+    --panel:#131B32;
+    --panel-2:#0E1528;
+    --line:#1F2A47;
+    --text:#EAEFFA;
+    --muted:#7E8BA8;
+    --accent:#FFB454;
+    --p1:#FFB454;
+    --p2:#5EC8F8;
+    --up:#3DDC97;
+    --down:#FF5C72;
+    --mono:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px}
+  body{padding-bottom:calc(30px + env(safe-area-inset-bottom))}
+  .wrap{max-width:720px;margin:0 auto;padding:0 14px}
+  button{font-family:var(--sans)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ============ Start-Screen ============ */
+  .screen{display:none}
+  .screen.show{display:block}
+  .start-hero{text-align:center;padding:46px 0 26px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent)}
+  .start-hero h1{font-size:30px;font-weight:800;letter-spacing:-.02em;margin-top:8px}
+  .start-hero p{color:var(--muted);font-size:14px;margin-top:8px;line-height:1.5}
+  .field{margin-top:14px}
+  .field label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+               text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+  .field input{width:100%;height:48px;border-radius:10px;border:1px solid var(--line);
+               background:var(--panel);color:var(--text);font-size:16px;padding:0 14px}
+  .field input:focus{outline:none}
+  .field input.pl1:focus{border-color:var(--p1)}
+  .field input.pl2:focus{border-color:var(--p2)}
+  .dur-row{display:flex;gap:8px;margin-top:6px}
+  .dur{flex:1;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+       color:var(--muted);font-family:var(--mono);font-size:14px;cursor:pointer}
+  .dur.active{border-color:var(--accent);color:var(--text);background:#1A2340;font-weight:700}
+  .start-btn{width:100%;height:54px;margin-top:24px;border:none;border-radius:12px;
+             background:var(--accent);color:#1A1206;font-size:17px;font-weight:800;cursor:pointer}
+  .rules{margin-top:22px;border-top:1px solid var(--line);padding-top:14px;color:var(--muted);
+         font-size:13px;line-height:1.7}
+
+  /* ============ Match: Topbar ============ */
+  .topbar{position:sticky;top:0;z-index:20;background:rgba(11,16,32,.92);
+          backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .topbar-in{max-width:720px;margin:0 auto;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top))}
+  .top-row{display:flex;align-items:center;gap:10px}
+  .countdown{font-family:var(--mono);font-size:24px;font-weight:700;flex-shrink:0}
+  .countdown.hot{color:var(--down)}
+  .round-tag{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+  .pauseBtn{margin-left:auto;font-family:var(--mono);font-size:12px;background:var(--panel);
+            border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 12px;cursor:pointer}
+  .player-row{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+  .player-pill{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:99px;
+               background:var(--panel-2);padding:6px 13px;font-size:13px;font-weight:700}
+  .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+  .live-pnl{font-family:var(--mono);font-size:14px;font-weight:700}
+  .target{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .target b{font-weight:700}
+
+  /* ============ Ticker-Band ============ */
+  .tape{overflow:hidden;border-bottom:1px solid var(--line);background:var(--panel-2);white-space:nowrap}
+  .tape-inner{display:inline-block;padding:7px 0;font-family:var(--mono);font-size:12px;
+        animation:tape 26s linear infinite;will-change:transform}
+  @keyframes tape{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  @media (prefers-reduced-motion: reduce){.tape-inner{animation:none}}
+  .tape span{margin:0 20px}
+  .t-up{color:var(--up)} .t-down{color:var(--down)} .t-sym{color:var(--text);font-weight:700}
+
+  /* ============ Watchlist ============ */
+  .watch{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0 12px}
+  .w-card{border:1px solid var(--line);border-radius:10px;background:var(--panel);
+          padding:9px 8px;cursor:pointer;text-align:center}
+  .w-card.active{border-color:var(--accent);background:#1A2340}
+  .w-sym{font-family:var(--mono);font-size:13px;font-weight:700}
+  .w-chg{font-family:var(--mono);font-size:11px;margin-top:3px;font-weight:600}
+
+  /* ============ Kurs + Chart ============ */
+  .quote{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .px{font-family:var(--mono);font-size:32px;font-weight:700;letter-spacing:-.02em}
+  .chg{font-family:var(--mono);font-size:14px;font-weight:700;padding:3px 8px;border-radius:6px}
+  .chg.up{color:var(--up);background:rgba(61,220,151,.12)}
+  .chg.down{color:var(--down);background:rgba(255,92,114,.12)}
+  .chg.ek{background:none;border:1px dashed currentColor;font-size:13px}
+  .qname{font-size:13px;color:var(--muted);width:100%}
+  canvas{width:100%;height:190px;display:block;background:var(--panel-2);
+         border:1px solid var(--line);border-radius:12px}
+
+  /* ============ Panels ============ */
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:14px}
+  .panel h2{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+            color:var(--muted);margin-bottom:10px}
+
+  /* ============ Order ============ */
+  .chips{display:flex;gap:6px;margin-bottom:10px}
+  .chip{flex:1;height:36px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);
+        color:var(--muted);font-family:var(--mono);font-size:13px;cursor:pointer}
+  .chip.active{border-color:var(--accent);color:var(--text);font-weight:700}
+  .trade-row{display:flex;gap:8px}
+  .btn{flex:1;height:48px;border:none;border-radius:10px;font-size:16px;font-weight:800;cursor:pointer}
+  .btn.buy{background:var(--up);color:#06281A}
+  .btn.sell{background:var(--down);color:#330911}
+  .btn:disabled{opacity:.3;cursor:not-allowed}
+  .order-info{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:9px}
+  .flash{font-family:var(--mono);font-size:12px;margin-top:5px;min-height:16px}
+  .flash.ok{color:var(--up)} .flash.err{color:var(--down)}
+
+  /* ============ Depot ============ */
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .stat{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+  .stat .lbl{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .stat .val{font-family:var(--mono);font-size:14px;font-weight:700;margin-top:3px}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px}
+  th{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
+     text-align:right;padding:4px 6px;font-weight:500}
+  th:first-child,td:first-child{text-align:left}
+  td{padding:7px 6px;text-align:right;border-top:1px solid var(--line)}
+  .empty{color:var(--muted);font-size:13px}
+
+  /* ============ News ============ */
+  .news-item{display:flex;gap:9px;padding:9px 0;border-top:1px solid var(--line);align-items:baseline}
+  .news-item:first-child{border-top:none}
+  .news-time{font-family:var(--mono);font-size:11px;color:var(--muted);flex-shrink:0}
+  .news-tag{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 6px;border-radius:5px;
+            flex-shrink:0;background:var(--panel-2);border:1px solid var(--line)}
+  .news-tag.up{color:var(--up)} .news-tag.down{color:var(--down)} .news-tag.neutral{color:var(--muted)}
+  .news-text{font-size:13px;line-height:1.45}
+
+  /* ============ Overlays ============ */
+  .overlay{position:fixed;inset:0;background:rgba(5,8,18,.92);display:none;
+           align-items:center;justify-content:center;padding:20px;z-index:50}
+  .overlay.show{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--accent);border-radius:16px;
+         padding:26px 22px;max-width:430px;width:100%;text-align:center}
+  .modal h3{font-size:22px;margin:6px 0 4px}
+  .modal .sub{font-size:14px;color:var(--muted);margin-bottom:16px;line-height:1.5}
+  .handover-pnl{font-family:var(--mono);font-size:26px;font-weight:800;margin:10px 0 4px}
+  .res-row{display:flex;gap:10px}
+  .res-card{flex:1;border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel-2)}
+  .res-card.win{border-color:var(--accent);background:#1C2440}
+  .res-name{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;justify-content:center}
+  .res-pnl{font-family:var(--mono);font-size:19px;font-weight:800;margin-top:6px}
+  .res-total{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:3px}
+  .crown{font-size:18px}
+  .modal .start-btn{margin-top:20px;height:48px}
+
+  /* ============ News-Popup (Breaking News) ============ */
+  .news-pop{position:fixed;inset:0;background:rgba(5,8,18,.75);display:none;
+            align-items:flex-start;justify-content:center;padding:90px 18px 0;z-index:60}
+  .news-pop.show{display:flex}
+  .np-card{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--muted);
+           border-radius:14px;padding:18px;max-width:430px;width:100%;
+           animation:npIn .22s ease-out;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+  .np-card.up{border-left-color:var(--up)} .np-card.down{border-left-color:var(--down)}
+  @keyframes npIn{from{transform:translateY(-14px);opacity:0}to{transform:none;opacity:1}}
+  @media (prefers-reduced-motion: reduce){.np-card{animation:none}}
+  .np-head{display:flex;align-items:center;gap:8px}
+  .np-live{font-family:var(--mono);font-size:10px;letter-spacing:.18em;color:var(--down);font-weight:700}
+  .np-live::before{content:"●";margin-right:5px;animation:blink 1.1s infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .np-sym{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight:700;
+          padding:3px 8px;border-radius:6px;background:var(--panel-2);border:1px solid var(--line)}
+  .np-sym.up{color:var(--up)} .np-sym.down{color:var(--down)} .np-sym.neutral{color:var(--muted)}
+  .np-text{font-size:15px;line-height:1.5;margin:12px 0 16px;font-weight:600}
+  .np-btns{display:flex;gap:8px}
+  .np-btn{flex:1;height:46px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer}
+  .np-go{border:none;background:var(--accent);color:#1A1206}
+  .np-skip{border:1px solid var(--line);background:var(--panel-2);color:var(--muted)}
+</style>
+</head>
+<body>
+
+<!-- ================= START ================= -->
+<div class="screen show" id="startScreen">
+  <div class="wrap">
+    <div class="start-hero">
+      <div class="eyebrow">Nasdaq · SPCX IPO-Tag</div>
+      <h1>Trading-Duell</h1>
+      <p>Zwei Trader, nacheinander, exakt derselbe Markt.<br>Wer holt das größere Plus raus?</p>
+    </div>
+    <div class="field">
+      <label>Spieler 1 (beginnt)</label>
+      <input class="pl1" id="name1" type="text" maxlength="14" placeholder="Name" value="Spieler 1">
+    </div>
+    <div class="field">
+      <label>Spieler 2</label>
+      <input class="pl2" id="name2" type="text" maxlength="14" placeholder="Name" value="Spieler 2">
+    </div>
+    <div class="field">
+      <label>Zeit pro Spieler</label>
+      <div class="dur-row">
+        <button class="dur" data-m="5">5 Min</button>
+        <button class="dur" data-m="10">10 Min</button>
+        <button class="dur active" data-m="15">15 Min</button>
+      </div>
+    </div>
+    <button class="start-btn" id="startBtn">Runde 1 starten 🔔</button>
+    <div class="rules">
+      Beide Spieler erleben <b style="color:var(--text)">denselben Kursverlauf und dieselben News</b> –
+      nur so ist der Vergleich fair. Deshalb gilt: Spieler 2 schaut bei Runde 1 nicht zu! 🙈
+      Jeder startet mit 25.000 $, SPCX beginnt beim Ausgabepreis von 135 $.
+      Am Ende zählt das Gesamtdepot (Bargeld + Positionen zum Schlusskurs).
+    </div>
+  </div>
+</div>
+
+<!-- ================= MATCH ================= -->
+<div class="screen" id="matchScreen">
+  <div class="topbar">
+    <div class="topbar-in">
+      <div class="top-row">
+        <div class="countdown" id="countdown">15:00</div>
+        <div class="round-tag" id="roundTag">Runde 1/2</div>
+        <button class="pauseBtn" id="pauseBtn">⏸ Pause</button>
+      </div>
+      <div class="player-row">
+        <div class="player-pill">
+          <span class="dot" id="pillDot"></span><span id="pillName"></span>
+          <span class="live-pnl" id="pillPnl"></span>
+        </div>
+        <div class="target" id="target"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tape"><div class="tape-inner" id="tape"></div></div>
+
+  <div class="wrap">
+    <div class="watch" id="watch"></div>
+
+    <div class="quote">
+      <span class="px" id="qPx">–</span>
+      <span class="chg" id="qChg"></span>
+      <span class="chg ek" id="qEk" style="display:none"></span>
+      <span class="qname" id="qName"></span>
+    </div>
+    <canvas id="chart" height="190"></canvas>
+
+    <div class="panel">
+      <h2>Order · <span id="tradeSym">SPCX</span></h2>
+      <div class="chips" id="chips">
+        <button class="chip" data-q="1">1</button>
+        <button class="chip active" data-q="5">5</button>
+        <button class="chip" data-q="10">10</button>
+        <button class="chip" data-q="25">25</button>
+        <button class="chip" data-q="max">Max</button>
+      </div>
+      <div class="trade-row">
+        <button class="btn buy" id="buyBtn">Kaufen</button>
+        <button class="btn sell" id="sellBtn">Verkaufen</button>
+      </div>
+      <div class="order-info" id="orderInfo"></div>
+      <div class="flash" id="flash"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Depot · <span id="depName"></span></h2>
+      <div class="stats">
+        <div class="stat"><div class="lbl">Bargeld</div><div class="val" id="cash"></div></div>
+        <div class="stat"><div class="lbl">Gesamt</div><div class="val" id="total"></div></div>
+        <div class="stat"><div class="lbl">+/−</div><div class="val" id="pnl"></div></div>
+      </div>
+      <div id="posWrap"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Newsfeed</h2>
+      <div id="news"><div class="empty">Gleich geht's los …</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= ÜBERGABE ================= -->
+<div class="overlay" id="handover">
+  <div class="modal">
+    <div class="eyebrow">Runde 1 beendet</div>
+    <h3 id="hoTitle"></h3>
+    <div class="handover-pnl" id="hoPnl"></div>
+    <div class="sub" id="hoSub"></div>
+    <button class="start-btn" id="round2Btn">Runde 2 starten 🔔</button>
+  </div>
+</div>
+
+<!-- ================= ERGEBNIS ================= -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="eyebrow">Closing Bell</div>
+    <h3 id="resTitle">Ergebnis</h3>
+    <div class="sub" id="resSub"></div>
+    <div class="res-row">
+      <div class="res-card" id="resCard1">
+        <div class="res-name"><span class="dot" style="background:var(--p1)"></span><span id="resName1"></span> <span class="crown" id="crown1"></span></div>
+        <div class="res-pnl" id="resPnl1"></div>
+        <div class="res-total" id="resTot1"></div>
+      </div>
+      <div class="res-card" id="resCard2">
+        <div class="res-name"><span class="dot" style="background:var(--p2)"></span><span id="resName2"></span> <span class="crown" id="crown2"></span></div>
+        <div class="res-pnl" id="resPnl2"></div>
+        <div class="res-total" id="resTot2"></div>
+      </div>
+    </div>
+    <button class="start-btn" id="rematchBtn">Revanche</button>
+  </div>
+</div>
+
+<!-- ================= NEWS-POPUP ================= -->
+<div class="news-pop" id="newsPop">
+  <div class="np-card" id="npCard">
+    <div class="np-head">
+      <span class="np-live">Breaking</span>
+      <span class="np-sym" id="npSym"></span>
+    </div>
+    <div class="np-text" id="npText"></div>
+    <div class="np-btns">
+      <button class="np-btn np-go" id="npGo"></button>
+      <button class="np-btn np-skip" id="npSkip">Ignorieren</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ====================== Konfiguration ====================== */
+const START_CASH = 25000;
+const TICK_MS = 700;
+
+/* Drift ~neutral: Aktien können im Plus UND im Minus enden – nur SPCX hat minimal IPO-Rückenwind */
+const STOCK_DEFS = {
+  SPCX:{name:"SpaceX",     start:135.00, sigma:0.0020, drift:0.00001},
+  TSLA:{name:"Tesla",      start:312.40, sigma:0.0010, drift:0},
+  NVDA:{name:"NVIDIA",     start:176.80, sigma:0.0009, drift:0},
+  RKLB:{name:"Rocket Lab", start:38.65,  sigma:0.0013, drift:0},
+};
+
+/* News: kleinere Sprünge, dafür längere Drift-Phasen → fließendere Bewegungen */
+const NEWS_POOL = [
+  {t:"SPCX", txt:"Starship-Testflug verläuft fehlerfrei – Booster erneut gelandet.", jump:+0.012, drift:+0.0005, dur:36},
+  {t:"SPCX", txt:"Analystenhaus warnt: Bewertung von 1,77 Bio. $ »kaum zu rechtfertigen«.", jump:-0.010, drift:-0.0004, dur:38},
+  {t:"SPCX", txt:"Starlink meldet Rekord bei Neuanmeldungen.", jump:+0.008, drift:+0.0004, dur:30},
+  {t:"SPCX", txt:"Gerücht: Großinvestor will nach Lock-up-Frist verkaufen.", jump:-0.009, drift:-0.0004, dur:30},
+  {t:"SPCX", txt:"NASA vergibt weiteren Mond-Auftrag an SpaceX.", jump:+0.010, drift:+0.0004, dur:32},
+  {t:"SPCX", txt:"Senatorin fordert kartellrechtliche Prüfung von Starlink.", jump:-0.008, drift:-0.0003, dur:28},
+  {t:"SPCX", txt:"xAI-Sparte verbrennt laut Bericht mehr Geld als erwartet.", jump:-0.007, drift:-0.0003, dur:26},
+  {t:"SPCX", txt:"Musk kündigt »baldige Mars-Roadmap« an.", jump:+0.007, drift:+0.0003, dur:26},
+  {t:"SPCX", txt:"Indexfonds müssen SPCX aufnehmen – Kauforders laufen ein.", jump:+0.009, drift:+0.0004, dur:30},
+  {t:"TSLA", txt:"Tesla rollt FSD-Update in Europa breiter aus.", jump:+0.006, drift:+0.0003, dur:26},
+  {t:"TSLA", txt:"Absatzzahlen aus China enttäuschen.", jump:-0.006, drift:-0.0003, dur:26},
+  {t:"NVDA", txt:"NVIDIA meldet Großauftrag für Rechenzentrums-GPUs.", jump:+0.006, drift:+0.0003, dur:26},
+  {t:"NVDA", txt:"Berichte über neue Exportauflagen belasten Chipwerte.", jump:-0.006, drift:-0.0003, dur:26},
+  {t:"RKLB", txt:"Rocket Lab gewinnt Konstellations-Vertrag.", jump:+0.009, drift:+0.0004, dur:28},
+  {t:"RKLB", txt:"Neutron-Erststart verschiebt sich erneut.", jump:-0.008, drift:-0.0004, dur:28},
+  {t:"ALL",  txt:"Inflationsdaten besser als erwartet – Markt dreht ins Plus.", jump:+0.004, drift:+0.0002, dur:36},
+  {t:"ALL",  txt:"Fed-Mitglied dämpft Zinssenkungshoffnungen.", jump:-0.004, drift:-0.0002, dur:36},
+  {t:"ALL",  txt:"Risk-off: Anleger schichten in Anleihen um.", jump:-0.003, drift:-0.0002, dur:30},
+];
+
+const OPENING_EVENT = {t:"SPCX",
+  txt:"Eröffnung: SPCX startet deutlich über dem Ausgabepreis von 135 $.",
+  jump:+0.04, drift:+0.0022, dur:24};
+
+/* Momentum-News: beziehen sich auf die Aktie, die gerade am stärksten läuft (%SYM% wird ersetzt) */
+const MOMENTUM_POOL = {
+  upCont: [
+    {txt:"%SYM% ist gerade der meistgehandelte Wert – immer mehr Anleger springen auf.", jump:+0.007, drift:+0.0004, dur:28},
+    {txt:"Hype um %SYM%: Social-Media-Trader treiben den Kurs weiter.", jump:+0.006, drift:+0.0004, dur:26},
+    {txt:"Kaufwelle bei %SYM% – Orderbücher laufen voll.", jump:+0.006, drift:+0.0003, dur:24},
+  ],
+  upTake: [
+    {txt:"Nach der Rally: Erste Gewinnmitnahmen bei %SYM%.", jump:-0.007, drift:-0.0003, dur:24},
+    {txt:"Analysten warnen: %SYM% ist kurzfristig heißgelaufen.", jump:-0.006, drift:-0.0003, dur:24},
+  ],
+  downCont: [
+    {txt:"Abwärtsdruck bei %SYM%: Stop-Loss-Verkäufe beschleunigen den Rutsch.", jump:-0.007, drift:-0.0004, dur:26},
+    {txt:"Anleger flüchten aus %SYM% – Stimmung kippt.", jump:-0.006, drift:-0.0003, dur:24},
+  ],
+  downReb: [
+    {txt:"Schnäppchenjäger greifen bei %SYM% zu – Kurs stabilisiert sich.", jump:+0.006, drift:+0.0004, dur:26},
+    {txt:"Großanleger nutzt den Rücksetzer bei %SYM% zum Einstieg.", jump:+0.007, drift:+0.0003, dur:24},
+  ],
+};
+
+/* ====================== Helpers ====================== */
+const $ = id => document.getElementById(id);
+const fmt = n => n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2}) + " $";
+const sgn = n => (n>=0?"+":"") + fmt(n);
+
+/* Seeded PRNG, damit beide Runden den identischen Markt bekommen */
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* ====================== Markt vorab generieren ====================== */
+/* market = { paths: {SYM:[preise...]}, events: [{tick, t, txt, tag}] } */
+let market = null;
+
+function genMarket(seed, ticks){
+  const rnd = mulberry32(seed);
+  const g = () => {
+    let u=0,v=0;
+    while(u===0)u=rnd();
+    while(v===0)v=rnd();
+    return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+  };
+
+  const events = [];
+  const paths = {};
+  const prices = {};
+  for(const [sym,d] of Object.entries(STOCK_DEFS)){
+    paths[sym] = [d.start];
+    prices[sym] = d.start;
+  }
+  let effects = [];
+  let lastIdx = -1;
+  let nextEvent = 30 + Math.floor(rnd()*40);
+
+  /* Event auslösen: Sprung + Drift anwenden und für die Wiedergabe speichern */
+  function fire(i, ev, sym){
+    const resolved = {t:sym, txt:ev.txt.replace("%SYM%", sym),
+                      jump:ev.jump, drift:ev.drift, dur:ev.dur};
+    const targets = sym === "ALL" ? Object.keys(prices) : [sym];
+    for(const s of targets){
+      if(resolved.jump) prices[s] = Math.max(1, prices[s] * (1 + resolved.jump * (0.85 + rnd()*0.3)));
+    }
+    if(resolved.drift) effects.push({sym, drift:resolved.drift, until:i + resolved.dur});
+    events.push({tick:i, ev:resolved, tag: resolved.jump > 0 ? "up" : resolved.jump < 0 ? "down" : "neutral"});
+  }
+
+  const LOOKBACK = Math.round(60000 / TICK_MS); // Momentum über die letzte Minute
+
+  for(let i = 1; i <= ticks; i++){
+    // Opening-Pop fest am Anfang
+    if(i === 3) fire(i, OPENING_EVENT, "SPCX");
+
+    // Zufalls-News: ~50% Momentum-News über die gerade "beliebte" Aktie, sonst klassische News
+    if(i === nextEvent && i < ticks - 15){
+      if(rnd() < 0.5){
+        let best = null, bestScore = -1;
+        for(const sym of Object.keys(prices)){
+          const back = Math.max(0, i - 1 - LOOKBACK);
+          const chg = paths[sym][i-1] / paths[sym][back] - 1;
+          const score = Math.abs(chg) + rnd()*0.004; // etwas Zufall, sonst immer SPCX
+          if(score > bestScore){ bestScore = score; best = {sym, chg}; }
+        }
+        let pool;
+        if(best.chg >= 0) pool = rnd() < 0.65 ? MOMENTUM_POOL.upCont : MOMENTUM_POOL.upTake;
+        else              pool = rnd() < 0.5  ? MOMENTUM_POOL.downReb : MOMENTUM_POOL.downCont;
+        fire(i, pool[Math.floor(rnd()*pool.length)], best.sym);
+      }else{
+        let idx;
+        do{ idx = Math.floor(rnd()*NEWS_POOL.length); }while(idx === lastIdx);
+        lastIdx = idx;
+        const ev = NEWS_POOL[idx];
+        fire(i, ev, ev.t);
+      }
+      nextEvent = i + 60 + Math.floor(rnd()*55);
+    }
+
+    effects = effects.filter(e => e.until > i);
+
+    for(const [sym,d] of Object.entries(STOCK_DEFS)){
+      let drift = d.drift;
+      for(const e of effects){
+        if(e.sym === sym || e.sym === "ALL") drift += e.drift;
+      }
+      let sig = d.sigma;
+      if(sym === "SPCX" && i < ticks*0.12) sig *= 1.6;
+      if(i > ticks*0.9) sig *= 1.2;
+      prices[sym] = Math.max(1, prices[sym] * Math.exp(drift - sig*sig/2 + sig*g()));
+      paths[sym].push(prices[sym]);
+    }
+  }
+  return {paths, events};
+}
+
+/* ====================== State ====================== */
+let players, round, selected, qtyMode;
+let tickCount, matchTicks, paused, over, timer;
+
+let durationMin = 15;
+document.querySelectorAll(".dur").forEach(b => b.onclick = () => {
+  durationMin = +b.dataset.m;
+  document.querySelectorAll(".dur").forEach(x => x.classList.toggle("active", x === b));
+});
+
+$("startBtn").onclick = () => {
+  matchTicks = Math.round(durationMin * 60000 / TICK_MS);
+  market = genMarket((Math.random()*1e9)|0, matchTicks);
+  players = [
+    {name: $("name1").value.trim() || "Spieler 1", cash:START_CASH, pos:{}, color:"var(--p1)", result:null},
+    {name: $("name2").value.trim() || "Spieler 2", cash:START_CASH, pos:{}, color:"var(--p2)", result:null},
+  ];
+  startRound(0);
+};
+
+$("round2Btn").onclick = () => {
+  $("handover").classList.remove("show");
+  startRound(1);
+};
+
+$("rematchBtn").onclick = () => {
+  $("overlay").classList.remove("show");
+  $("matchScreen").classList.remove("show");
+  $("startScreen").classList.add("show");
+  window.scrollTo(0,0);
+};
+
+function startRound(r){
+  round = r;
+  tickCount = 0; paused = false; over = false; newsPaused = false;
+  $("newsPop").classList.remove("show");
+  selected = "SPCX"; qtyMode = "5";
+  document.querySelectorAll(".chip").forEach(x => x.classList.toggle("active", x.dataset.q === "5"));
+  $("news").innerHTML = '<div class="empty">Gleich geht\'s los …</div>';
+  $("flash").textContent = "";
+  $("pauseBtn").textContent = "⏸ Pause";
+  $("roundTag").textContent = `Runde ${r+1}/2`;
+
+  const p = players[round];
+  $("pillDot").style.background = p.color;
+  $("pillName").textContent = p.name;
+  $("depName").textContent = p.name;
+  $("target").innerHTML = round === 1
+    ? `Zu schlagen: <b style="color:${players[0].result.pnl>=0?'var(--up)':'var(--down)'}">${sgn(players[0].result.pnl)}</b>`
+    : "";
+
+  buildWatch();
+  $("startScreen").classList.remove("show");
+  $("matchScreen").classList.add("show");
+  window.scrollTo(0,0);
+
+  clearInterval(timer);
+  timer = setInterval(tick, TICK_MS);
+  renderAll();
+}
+
+/* ====================== Tick (spielt vorberechneten Markt ab) ====================== */
+let newsPaused = false;
+
+function price(sym){ return market.paths[sym][Math.min(tickCount, matchTicks)]; }
+function open_(sym){ return STOCK_DEFS[sym].start; }
+
+function tick(){
+  if(paused || newsPaused || over) return;
+  tickCount++;
+
+  for(const e of market.events){
+    if(e.tick === tickCount){
+      pushNews(e.ev.t, e.ev.txt, e.tag);
+      showNewsPop(e);
+    }
+  }
+
+  if(tickCount >= matchTicks){ endRound(); return; }
+  renderAll();
+}
+
+/* Breaking-News-Popup: pausiert das Spiel bis zur Entscheidung */
+function showNewsPop(e){
+  newsPaused = true;
+  const sym = e.ev.t;
+  $("npSym").textContent = sym === "ALL" ? "MARKT" : sym;
+  $("npSym").className = "np-sym " + e.tag;
+  $("npCard").className = "np-card " + e.tag;
+  $("npText").textContent = e.ev.txt;
+  const go = $("npGo");
+  if(sym === "ALL"){
+    go.style.display = "none";
+    $("npSkip").textContent = "Weiter";
+  }else{
+    go.style.display = "";
+    go.textContent = "Zu " + sym + " →";
+    $("npSkip").textContent = "Ignorieren";
+    go.onclick = () => {
+      selected = sym;
+      buildWatch();
+      closeNewsPop();
+    };
+  }
+  $("newsPop").classList.add("show");
+}
+
+function closeNewsPop(){
+  $("newsPop").classList.remove("show");
+  newsPaused = false;
+  renderAll();
+}
+
+/* ====================== Handel ====================== */
+function curQty(){
+  const p = players[round];
+  if(qtyMode === "max") return Math.max(1, Math.floor(p.cash / price(selected)));
+  return +qtyMode;
+}
+
+function trade(side){
+  if(over) return;
+  const p = players[round];
+  const px = price(selected);
+  const qty = curQty();
+  const cost = qty * px;
+  const flash = $("flash");
+
+  if(side === "buy"){
+    if(cost > p.cash + 0.001){ flash.textContent = "Nicht genug Bargeld."; flash.className = "flash err"; return; }
+    p.cash -= cost;
+    const pos = p.pos[selected] || {qty:0, avg:0};
+    pos.avg = (pos.avg*pos.qty + cost) / (pos.qty + qty);
+    pos.qty += qty;
+    p.pos[selected] = pos;
+    flash.textContent = `Gekauft: ${qty} × ${selected} @ ${fmt(px)}`;
+    flash.className = "flash ok";
+  }else{
+    const pos = p.pos[selected];
+    const sellQty = qtyMode === "max" ? (pos ? pos.qty : 0) : qty;
+    if(!pos || pos.qty < sellQty || sellQty === 0){
+      flash.textContent = "Nicht genug Stücke im Depot."; flash.className = "flash err"; return;
+    }
+    p.cash += sellQty * px;
+    pos.qty -= sellQty;
+    if(pos.qty === 0) delete p.pos[selected];
+    flash.textContent = `Verkauft: ${sellQty} × ${selected} @ ${fmt(px)}`;
+    flash.className = "flash ok";
+  }
+  renderAll();
+}
+
+function totalOf(p){
+  let v = p.cash;
+  for(const [sym,pos] of Object.entries(p.pos)) v += pos.qty * price(sym);
+  return v;
+}
+
+/* ====================== Rendering ====================== */
+function buildWatch(){
+  const el = $("watch");
+  el.innerHTML = "";
+  for(const sym of Object.keys(STOCK_DEFS)){
+    const b = document.createElement("button");
+    b.className = "w-card" + (sym === selected ? " active" : "");
+    b.id = "w-" + sym;
+    b.innerHTML = `<div class="w-sym">${sym}</div><div class="w-chg"></div>`;
+    b.onclick = () => { selected = sym; buildWatch(); renderAll(); };
+    el.appendChild(b);
+  }
+}
+
+function renderAll(){
+  const remain = Math.max(0, Math.round((matchTicks - tickCount) * TICK_MS / 1000));
+  const cd = $("countdown");
+  cd.textContent = String(Math.floor(remain/60)).padStart(2,"0") + ":" + String(remain%60).padStart(2,"0");
+  cd.classList.toggle("hot", remain <= 60);
+
+  const p = players[round];
+  const tv = totalOf(p);
+  const livePnl = tv - START_CASH;
+  const pill = $("pillPnl");
+  pill.textContent = sgn(livePnl);
+  pill.style.color = livePnl >= 0 ? "var(--up)" : "var(--down)";
+
+  // Tape
+  let tape = "";
+  for(const sym of Object.keys(STOCK_DEFS)){
+    const px = price(sym), op = open_(sym);
+    const ch = (px/op - 1) * 100;
+    const cls = ch >= 0 ? "t-up" : "t-down";
+    tape += `<span><span class="t-sym">${sym}</span> ${fmt(px)} <span class="${cls}">${ch>=0?"+":""}${ch.toFixed(2)}%</span></span>`;
+  }
+  $("tape").innerHTML = tape + tape;
+
+  // Watchlist
+  for(const sym of Object.keys(STOCK_DEFS)){
+    const card = $("w-" + sym);
+    if(!card) continue;
+    const ch = (price(sym)/open_(sym) - 1) * 100;
+    const d = card.querySelector(".w-chg");
+    d.textContent = (ch>=0?"+":"") + ch.toFixed(2) + "%";
+    d.style.color = ch >= 0 ? "var(--up)" : "var(--down)";
+  }
+
+  // Kurs
+  const px = price(selected), op = open_(selected);
+  const ch = (px/op - 1) * 100;
+  $("qPx").textContent = fmt(px);
+  const chg = $("qChg");
+  chg.textContent = (ch>=0?"+":"") + ch.toFixed(2) + "%";
+  chg.className = "chg " + (ch >= 0 ? "up" : "down");
+
+  // %-Entwicklung zum eigenen Einstand (nur wenn investiert)
+  const myPos = p.pos[selected];
+  const ek = $("qEk");
+  if(myPos){
+    const ekCh = (px/myPos.avg - 1) * 100;
+    ek.textContent = "EK " + (ekCh>=0?"+":"") + ekCh.toFixed(2) + "%";
+    ek.className = "chg ek " + (ekCh >= 0 ? "up" : "down");
+    ek.style.display = "";
+  }else{
+    ek.style.display = "none";
+  }
+
+  $("qName").textContent = STOCK_DEFS[selected].name + " · Eröffnung " + fmt(op);
+  $("tradeSym").textContent = selected;
+
+  // Order
+  const qty = curQty();
+  const held = p.pos[selected]?.qty || 0;
+  $("orderInfo").textContent = qtyMode === "max"
+    ? `Max: Kauf ${qty} Stück ≈ ${fmt(qty*px)} · Verkauf: alle ${held}`
+    : `${qty} Stück ≈ ${fmt(qty*px)} · im Depot: ${held}`;
+  $("buyBtn").disabled = over || qty*px > p.cash;
+  $("sellBtn").disabled = over || held === 0;
+
+  // Depot
+  $("cash").textContent = fmt(p.cash);
+  $("total").textContent = fmt(tv);
+  const pnlEl = $("pnl");
+  pnlEl.textContent = sgn(livePnl);
+  pnlEl.style.color = livePnl >= 0 ? "var(--up)" : "var(--down)";
+
+  const wrap = $("posWrap");
+  const syms = Object.keys(p.pos);
+  if(syms.length === 0){
+    wrap.innerHTML = '<div class="empty">Keine offenen Positionen.</div>';
+  }else{
+    let rows = "";
+    for(const sym of syms){
+      const pos = p.pos[sym];
+      const cur = price(sym);
+      const ppnl = (cur - pos.avg) * pos.qty;
+      const ppct = (cur/pos.avg - 1) * 100;
+      const c = ppnl >= 0 ? "var(--up)" : "var(--down)";
+      rows += `<tr><td>${sym}</td><td>${pos.qty}</td><td>${fmt(pos.avg)}</td>
+               <td style="color:${c}">${ppnl>=0?"+":""}${fmt(ppnl)}</td>
+               <td style="color:${c}">${ppct>=0?"+":""}${ppct.toFixed(2)}%</td></tr>`;
+    }
+    wrap.innerHTML = `<table><thead><tr><th>Wert</th><th>Stk.</th><th>EK</th><th>+/−</th><th>% z. EK</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  drawChart();
+}
+
+/* "Schöne" Schrittweite für Gitterlinien (1-2-5-Raster) */
+function niceStep(range, targetLines){
+  const raw = range / targetLines;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  for(const m of [1, 2, 2.5, 5, 10]){
+    if(raw <= m * mag) return m * mag;
+  }
+  return 10 * mag;
+}
+
+function drawChart(){
+  const cv = $("chart");
+  if(!cv.clientWidth) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = 190;
+  cv.width = w*dpr; cv.height = h*dpr;
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+
+  const op = open_(selected);
+  const p = players[round];
+  const pos = p.pos[selected];
+
+  /* Rollierendes Fenster: nur die letzten ~3 Minuten zeigen, Anfang abschneiden */
+  const WINDOW = Math.round(180000 / TICK_MS);
+  const full = market.paths[selected].slice(0, tickCount + 1);
+  const startIdx = Math.max(0, full.length - WINDOW);
+  const data = full.slice(startIdx);
+
+  let min = Math.min(...data), max = Math.max(...data);
+  if(op >= min - (max-min)*0.3 && op <= max + (max-min)*0.3){ min = Math.min(min, op); max = Math.max(max, op); }
+  if(pos){ min = Math.min(min, pos.avg); max = Math.max(max, pos.avg); }
+  const pad = (max-min)*0.14 || 1;
+  min -= pad; max += pad;
+
+  const L = 8, R = 46, T = 8, B = 22;       // Innenabstände (rechts Platz für Preis-Labels)
+  const X = i => L + (w-L-R) * (data.length > 1 ? i/(data.length-1) : 0);
+  const Y = v => h - B - (h-T-B) * ((v-min)/(max-min));
+
+  ctx.font = "10px ui-monospace,monospace";
+
+  /* --- Horizontale Gitterlinien (Preis) --- */
+  const step = niceStep(max-min, 4);
+  ctx.strokeStyle = "#19233E"; ctx.lineWidth = 1;
+  ctx.fillStyle = "#5F6C8C";
+  for(let v = Math.ceil(min/step)*step; v <= max; v += step){
+    const y = Y(v);
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w-R, y); ctx.stroke();
+    ctx.fillText(v.toFixed(step < 1 ? 2 : step < 10 ? 1 : 0), w-R+5, y+3);
+  }
+
+  /* --- Vertikale Gitterlinien (Zeit, mm:ss, bezogen aufs sichtbare Fenster) --- */
+  const winStartS = startIdx * TICK_MS / 1000;
+  const winEndS = tickCount * TICK_MS / 1000;
+  if(data.length > 10){
+    const tSteps = 4;
+    for(let k = 1; k < tSteps; k++){
+      const x = L + (w-L-R) * k/tSteps;
+      ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, h-B); ctx.stroke();
+      const sec = Math.round(winStartS + (winEndS - winStartS) * k/tSteps);
+      const lbl = String(Math.floor(sec/60)).padStart(2,"0") + ":" + String(sec%60).padStart(2,"0");
+      ctx.fillText(lbl, x - 13, h-7);
+    }
+  }
+
+  /* --- Eröffnungslinie (nur wenn im sichtbaren Bereich) --- */
+  if(op >= min && op <= max){
+    ctx.strokeStyle = "#3A4769"; ctx.setLineDash([4,4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(L, Y(op)); ctx.lineTo(w-R, Y(op)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#7E8BA8";
+    ctx.fillText("IPO " + op.toFixed(2), L+4, Y(op)-4);
+  }
+
+  /* --- Kursverlauf: Farbe relativ zum Einstand, wenn man Stücke hält --- */
+  const last = data[data.length-1];
+  const ref = pos ? pos.avg : op;
+  const up = last >= ref;
+  const col = up ? "#3DDC97" : "#FF5C72";
+  ctx.beginPath();
+  for(let i=0;i<data.length;i++){
+    i===0 ? ctx.moveTo(X(i),Y(data[i])) : ctx.lineTo(X(i),Y(data[i]));
+  }
+  ctx.strokeStyle = col; ctx.lineWidth = 1.8;
+  ctx.lineJoin = "round"; ctx.stroke();
+
+  /* Fläche unter der Kurve */
+  ctx.lineTo(X(data.length-1), h-B); ctx.lineTo(L, h-B); ctx.closePath();
+  const g = ctx.createLinearGradient(0,T,0,h-B);
+  g.addColorStop(0, up ? "rgba(61,220,151,.16)" : "rgba(255,92,114,.16)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fill();
+
+  /* --- Einstandslinie des aktiven Spielers --- */
+  if(pos){
+    const pCol = round === 0 ? "#FFB454" : "#5EC8F8";
+    ctx.strokeStyle = pCol; ctx.setLineDash([7,4]); ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(L, Y(pos.avg)); ctx.lineTo(w-R, Y(pos.avg)); ctx.stroke();
+    ctx.setLineDash([]);
+    const label = "Einstand " + pos.avg.toFixed(2);
+    ctx.font = "bold 10px ui-monospace,monospace";
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = "rgba(11,16,32,.88)";
+    ctx.fillRect(w-R-tw-12, Y(pos.avg)-15, tw+8, 13);
+    ctx.fillStyle = pCol;
+    ctx.fillText(label, w-R-tw-8, Y(pos.avg)-5);
+    ctx.font = "10px ui-monospace,monospace";
+  }
+
+  /* --- Letzter Kurs: Punkt + Preis-Tag am rechten Rand --- */
+  const lx = X(data.length-1), ly = Y(last);
+  ctx.beginPath(); ctx.arc(lx,ly,3.2,0,7); ctx.fillStyle = col; ctx.fill();
+  ctx.fillStyle = col;
+  ctx.fillRect(w-R+2, ly-7, R-4, 14);
+  ctx.fillStyle = "#0B1020";
+  ctx.font = "bold 10px ui-monospace,monospace";
+  ctx.fillText(last.toFixed(2), w-R+6, ly+3);
+}
+
+/* ====================== News-Feed ====================== */
+function pushNews(sym, text, tag){
+  const elapsed = Math.round(tickCount * TICK_MS / 1000);
+  const t = String(Math.floor(elapsed/60)).padStart(2,"0") + ":" + String(elapsed%60).padStart(2,"0");
+  const el = $("news");
+  if(el.querySelector(".empty")) el.innerHTML = "";
+  const div = document.createElement("div");
+  div.className = "news-item";
+  div.innerHTML = `<span class="news-time">${t}</span>
+                   <span class="news-tag ${tag}">${sym === "ALL" ? "MARKT" : sym}</span>
+                   <span class="news-text">${text}</span>`;
+  el.prepend(div);
+  while(el.children.length > 12) el.removeChild(el.lastChild);
+}
+
+/* ====================== Runden-/Match-Ende ====================== */
+function endRound(){
+  over = true;
+  clearInterval(timer);
+  tickCount = matchTicks;
+  renderAll();
+  const p = players[round];
+  const tot = totalOf(p);
+  p.result = {total: tot, pnl: tot - START_CASH};
+
+  if(round === 0){
+    $("hoTitle").textContent = players[0].name + " ist fertig";
+    const ho = $("hoPnl");
+    ho.textContent = sgn(p.result.pnl);
+    ho.style.color = p.result.pnl >= 0 ? "var(--up)" : "var(--down)";
+    $("hoSub").innerHTML = `Handy weitergeben an <b style="color:var(--p2)">${players[1].name}</b>.<br>
+      Gleicher Markt, gleiche News – gleiche Chancen.`;
+    $("handover").classList.add("show");
+  }else{
+    showResult();
+  }
+}
+
+function showResult(){
+  const r1 = players[0].result, r2 = players[1].result;
+  $("resName1").textContent = players[0].name;
+  $("resName2").textContent = players[1].name;
+  setRes("1", r1); setRes("2", r2);
+
+  const diff = Math.abs(r1.pnl - r2.pnl);
+  if(diff < 0.005){
+    $("resTitle").textContent = "Unentschieden!";
+    $("resSub").textContent = "Auf den Cent gleich – das gibt's selten.";
+    $("crown1").textContent = ""; $("crown2").textContent = "";
+    $("resCard1").classList.remove("win"); $("resCard2").classList.remove("win");
+  }else{
+    const w = r1.pnl > r2.pnl ? 0 : 1;
+    $("resTitle").textContent = players[w].name + " gewinnt!";
+    $("resSub").textContent = "Vorsprung: " + fmt(diff) + " · identischer Markt für beide";
+    $("crown1").textContent = w === 0 ? "👑" : "";
+    $("crown2").textContent = w === 1 ? "👑" : "";
+    $("resCard1").classList.toggle("win", w === 0);
+    $("resCard2").classList.toggle("win", w === 1);
+  }
+  $("overlay").classList.add("show");
+}
+
+function setRes(i, r){
+  const el = $("resPnl"+i);
+  el.textContent = sgn(r.pnl);
+  el.style.color = r.pnl >= 0 ? "var(--up)" : "var(--down)";
+  $("resTot"+i).textContent = "Endwert " + fmt(r.total);
+}
+
+/* ====================== Steuerung ====================== */
+$("pauseBtn").onclick = function(){
+  if(over) return;
+  paused = !paused;
+  this.textContent = paused ? "▶ Weiter" : "⏸ Pause";
+};
+$("npSkip").onclick = closeNewsPop;
+$("buyBtn").onclick = () => trade("buy");
+$("sellBtn").onclick = () => trade("sell");
+document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+  qtyMode = c.dataset.q;
+  document.querySelectorAll(".chip").forEach(x => x.classList.toggle("active", x === c));
+  renderAll();
+});
+window.addEventListener("resize", () => { if(market) drawChart(); });
+
+/* PWA: Service Worker registrieren (nur wenn über http(s) geladen) */
+if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

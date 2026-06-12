@@ -26,6 +26,7 @@ The fairness guarantee of the game depends on one idea: the full market (all pri
 - Anything random that affects prices or news must use the seeded `rnd()` inside `genMarket`, never `Math.random()`, or the two rounds diverge and the duel becomes unfair.
 - `price(sym)` is just an index lookup into `market.paths[sym][tickCount]`; live game code never mutates prices.
 - News events carry a `jump` (immediate price shock) and a `drift` over `dur` ticks; both are applied during generation, and the event list is replayed at the matching tick to show the news popup/feed.
+- The 6-digit game code (`gameCode`) *is* the market seed: entering the same code on another device reproduces the identical game. `code % 3` encodes the duration (5/10/15 min via `DURATIONS`), so seed and tick count always match across devices. Don't change `genMarket`'s consumption order of `rnd()` casually — it would silently change what every shared code produces.
 
 ### Other things to know
 

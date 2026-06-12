@@ -53,6 +53,10 @@
   .dur{flex:1;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
        color:var(--muted);font-family:var(--mono);font-size:14px;cursor:pointer}
   .dur.active{border-color:var(--accent);color:var(--text);background:#1A2340;font-weight:700}
+  .dur:disabled{opacity:.35;cursor:not-allowed}
+  .code-err{font-family:var(--mono);font-size:12px;color:var(--down);margin-top:6px;min-height:16px}
+  .code-badge{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:14px}
+  .code-badge b{color:var(--accent);font-size:16px;letter-spacing:.14em}
   .start-btn{width:100%;height:54px;margin-top:24px;border:none;border-radius:12px;
              background:var(--accent);color:#1A1206;font-size:17px;font-weight:800;cursor:pointer}
   .rules{margin-top:22px;border-top:1px solid var(--line);padding-top:14px;color:var(--muted);
@@ -212,12 +216,20 @@
         <button class="dur active" data-m="15">15 Min</button>
       </div>
     </div>
+    <div class="field">
+      <label>Spiel-Code (optional)</label>
+      <input id="codeIn" type="text" inputmode="numeric" maxlength="6"
+             placeholder="Leer lassen für neues Spiel" autocomplete="off">
+      <div class="code-err" id="codeErr"></div>
+    </div>
     <button class="start-btn" id="startBtn">Runde 1 starten 🔔</button>
     <div class="rules">
       Beide Spieler erleben <b style="color:var(--text)">denselben Kursverlauf und dieselben News</b> –
       nur so ist der Vergleich fair. Deshalb gilt: Spieler 2 schaut bei Runde 1 nicht zu! 🙈
       Jeder startet mit 25.000 $, SPCX beginnt beim Ausgabepreis von 135 $.
-      Am Ende zählt das Gesamtdepot (Bargeld + Positionen zum Schlusskurs).
+      Am Ende zählt das Gesamtdepot (Bargeld + Positionen zum Schlusskurs).<br><br>
+      <b style="color:var(--text)">Zweites Gerät?</b> Jedes Spiel hat einen 6-stelligen Code.
+      Gibt man ihn hier ein, läuft exakt dasselbe Spiel – gleiche Kurse, gleiche News, gleiche Dauer.
     </div>
   </div>
 </div>
@@ -295,6 +307,7 @@
     <h3 id="hoTitle"></h3>
     <div class="handover-pnl" id="hoPnl"></div>
     <div class="sub" id="hoSub"></div>
+    <div class="code-badge">Spiel-Code: <b id="hoCode"></b></div>
     <button class="start-btn" id="round2Btn">Runde 2 starten 🔔</button>
   </div>
 </div>
@@ -317,6 +330,7 @@
         <div class="res-total" id="resTot2"></div>
       </div>
     </div>
+    <div class="code-badge">Spiel-Code: <b id="resCode"></b></div>
     <button class="start-btn" id="rematchBtn">Revanche</button>
   </div>
 </div>
@@ -506,9 +520,46 @@ document.querySelectorAll(".dur").forEach(b => b.onclick = () => {
   document.querySelectorAll(".dur").forEach(x => x.classList.toggle("active", x === b));
 });
 
+/* Spiel-Code: 6 Ziffern, dient direkt als Markt-Seed.
+   Code mod 3 kodiert die Spieldauer (5/10/15 Min), damit beide Geräte
+   automatisch dieselbe Tick-Anzahl und damit denselben Markt bekommen. */
+const DURATIONS = [5, 10, 15];
+let gameCode = null;
+
+function makeCode(durIdx){
+  let c = 100000 + Math.floor(Math.random()*900000);
+  c -= c % 3; c += durIdx;
+  if(c > 999999) c -= 3;
+  return c;
+}
+
+const codeIn = $("codeIn");
+codeIn.addEventListener("input", () => {
+  codeIn.value = codeIn.value.replace(/\D/g, "");
+  $("codeErr").textContent = "";
+  const valid = /^\d{6}$/.test(codeIn.value);
+  // Bei gültigem Code ist die Dauer vorgegeben – Buttons sperren und anzeigen
+  document.querySelectorAll(".dur").forEach(b => b.disabled = valid);
+  if(valid){
+    durationMin = DURATIONS[+codeIn.value % 3];
+    document.querySelectorAll(".dur").forEach(x => x.classList.toggle("active", +x.dataset.m === durationMin));
+  }
+});
+
 $("startBtn").onclick = () => {
+  const raw = codeIn.value.trim();
+  if(raw && !/^\d{6}$/.test(raw)){
+    $("codeErr").textContent = "Der Spiel-Code hat 6 Ziffern.";
+    return;
+  }
+  if(raw){
+    gameCode = +raw;
+    durationMin = DURATIONS[gameCode % 3];
+  }else{
+    gameCode = makeCode(DURATIONS.indexOf(durationMin));
+  }
   matchTicks = Math.round(durationMin * 60000 / TICK_MS);
-  market = genMarket((Math.random()*1e9)|0, matchTicks);
+  market = genMarket(gameCode, matchTicks);
   players = [
     {name: $("name1").value.trim() || "Spieler 1", cash:START_CASH, pos:{}, color:"var(--p1)", result:null},
     {name: $("name2").value.trim() || "Spieler 2", cash:START_CASH, pos:{}, color:"var(--p2)", result:null},
@@ -525,6 +576,10 @@ $("rematchBtn").onclick = () => {
   $("overlay").classList.remove("show");
   $("matchScreen").classList.remove("show");
   $("startScreen").classList.add("show");
+  // Code leeren, sonst würde die Revanche denselben (nun bekannten) Markt abspielen
+  codeIn.value = "";
+  $("codeErr").textContent = "";
+  document.querySelectorAll(".dur").forEach(b => b.disabled = false);
   window.scrollTo(0,0);
 };
 
@@ -537,7 +592,7 @@ function startRound(r){
   $("news").innerHTML = '<div class="empty">Gleich geht\'s los …</div>';
   $("flash").textContent = "";
   $("pauseBtn").textContent = "⏸ Pause";
-  $("roundTag").textContent = `Runde ${r+1}/2`;
+  $("roundTag").textContent = `Runde ${r+1}/2 · Code ${gameCode}`;
 
   const p = players[round];
   $("pillDot").style.background = p.color;
@@ -914,6 +969,7 @@ function endRound(){
     ho.style.color = p.result.pnl >= 0 ? "var(--up)" : "var(--down)";
     $("hoSub").innerHTML = `Handy weitergeben an <b style="color:var(--p2)">${players[1].name}</b>.<br>
       Gleicher Markt, gleiche News – gleiche Chancen.`;
+    $("hoCode").textContent = gameCode;
     $("handover").classList.add("show");
   }else{
     showResult();
@@ -941,6 +997,7 @@ function showResult(){
     $("resCard1").classList.toggle("win", w === 0);
     $("resCard2").classList.toggle("win", w === 1);
   }
+  $("resCode").textContent = gameCode;
   $("overlay").classList.add("show");
 }
 

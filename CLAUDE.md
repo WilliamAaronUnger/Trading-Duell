@@ -31,6 +31,7 @@ The fairness guarantee of the game depends on one idea: the full market (all pri
 
 ### Other things to know
 
+- There are two game modes, chosen on the start screen and held in `mode`. **`"local"`** is the original pass-and-play: `players` has both entries, round 1 → handover overlay → round 2 → `showResult()` compares the two with a crown. **`"remote"`** is one player per device coupled only by the shared code: `players` has a single entry, the match runs exactly one round, and `endRound()` calls `showResultSolo()` (own P&L only — the two devices compare manually). Most match code keys off `mode`; remote always has `round === 0`.
 - Player state lives in the `players` array (cash, positions with average entry price, result). `round` indexes the active player.
 - The breaking-news popup pauses the game (`newsPaused`) until the player reacts — gameplay time only advances via `tickCount`, so all timing logic should be tick-based, not wall-clock-based.
 - The chart is hand-drawn on a `<canvas>` in `drawChart()` (rolling ~3-minute window, devicePixelRatio-aware).

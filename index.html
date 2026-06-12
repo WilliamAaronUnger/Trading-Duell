@@ -207,10 +207,17 @@
       <p>Zwei Trader, nacheinander, exakt derselbe Markt.<br>Wer holt das größere Plus raus?</p>
     </div>
     <div class="field">
-      <label>Spieler 1 (beginnt)</label>
+      <label>Modus</label>
+      <div class="dur-row">
+        <button class="dur mode active" data-mode="local">📱 Ein Gerät</button>
+        <button class="dur mode" data-mode="remote">📱📱 Zwei Geräte</button>
+      </div>
+    </div>
+    <div class="field" id="field1">
+      <label id="label1">Spieler 1 (beginnt)</label>
       <input class="pl1" id="name1" type="text" maxlength="14" placeholder="Name" value="Spieler 1">
     </div>
-    <div class="field">
+    <div class="field" id="field2">
       <label>Spieler 2</label>
       <input class="pl2" id="name2" type="text" maxlength="14" placeholder="Name" value="Spieler 2">
     </div>
@@ -222,22 +229,24 @@
         <button class="dur active" data-m="15">15 Min</button>
       </div>
     </div>
-    <div class="field">
-      <label>Spiel-Code (optional)</label>
+    <div class="field" id="fieldCode" style="display:none">
+      <label>Spiel-Code (zum Beitreten)</label>
       <input id="codeIn" type="text" inputmode="numeric" maxlength="6"
              placeholder="Leer lassen für neues Spiel" autocomplete="off">
       <div class="code-err" id="codeErr"></div>
     </div>
-    <button class="start-btn" id="startBtn">Spiel anlegen 🔔</button>
+    <button class="start-btn" id="startBtn">Duell starten 🔔</button>
     <div class="rules">
       Beide Spieler erleben <b style="color:var(--text)">denselben Kursverlauf und dieselben News</b> –
-      nur so ist der Vergleich fair. Deshalb gilt: Spieler 2 schaut bei Runde 1 nicht zu! 🙈
+      nur so ist der Vergleich fair.
       Jeder startet mit 25.000 $, SPCX beginnt beim Ausgabepreis von 135 $.
       Am Ende zählt das Gesamtdepot (Bargeld + Positionen zum Schlusskurs).<br><br>
-      <b style="color:var(--text)">Zweites Gerät?</b> Jedes Spiel hat einen 6-stelligen Code.
-      Gibt man ihn hier ein, läuft exakt dasselbe Spiel – gleiche Kurse, gleiche News, gleiche Dauer.<br><br>
-      Nach dem Anlegen startet das Spiel zur <b style="color:var(--text)">übernächsten vollen Minute</b>.
-      Legt ihr es auf beiden Geräten in derselben Minute an, geht's überall gleichzeitig los. ⏱️
+      <b style="color:var(--text)">📱 Ein Gerät:</b> Beide spielen nacheinander auf diesem Handy
+      (Spieler 2 schaut bei Runde 1 nicht zu 🙈), danach wird automatisch verglichen.<br><br>
+      <b style="color:var(--text)">📱📱 Zwei Geräte:</b> Du legst ein Spiel an und bekommst einen
+      6-stelligen Code. Der andere tippt ihn auf seinem Gerät ein – beide spielen exakt dasselbe Spiel.
+      Start zur übernächsten vollen Minute; in derselben Minute angelegt, geht's zeitgleich los. ⏱️
+      Die Endwerte vergleicht ihr danach selbst.
     </div>
   </div>
 </div>
@@ -534,10 +543,14 @@ function genMarket(seed, ticks){
 let players, round, selected, qtyMode;
 let tickCount, matchTicks, paused, over, timer;
 
+/* Spielmodus: "local" = beide nacheinander auf einem Gerät (Pass & Play),
+   "remote" = ein Spieler pro Gerät, gekoppelt über den Spiel-Code. */
+let mode = "local";
+
 let durationMin = 15;
-document.querySelectorAll(".dur").forEach(b => b.onclick = () => {
+document.querySelectorAll(".dur[data-m]").forEach(b => b.onclick = () => {
   durationMin = +b.dataset.m;
-  document.querySelectorAll(".dur").forEach(x => x.classList.toggle("active", x === b));
+  document.querySelectorAll(".dur[data-m]").forEach(x => x.classList.toggle("active", x === b));
 });
 
 /* Spiel-Code: 6 Ziffern, dient direkt als Markt-Seed.
@@ -553,21 +566,61 @@ function makeCode(durIdx){
   return c;
 }
 
+/* Start-Button-Text richtet sich nach Modus und (im Remote-Modus) danach,
+   ob ein gültiger Code zum Beitreten eingetippt wurde. */
+function updateStartBtn(){
+  if(mode === "local"){ $("startBtn").textContent = "Duell starten 🔔"; return; }
+  const valid = /^\d{6}$/.test(codeIn.value);
+  $("startBtn").textContent = valid ? "Spiel beitreten 🔔" : "Spiel anlegen 🔔";
+}
+
+function setMode(m){
+  mode = m;
+  document.querySelectorAll(".mode").forEach(b => b.classList.toggle("active", b.dataset.mode === m));
+  $("field2").style.display  = m === "local" ? "" : "none";
+  $("fieldCode").style.display = m === "remote" ? "" : "none";
+  $("label1").textContent = m === "local" ? "Spieler 1 (beginnt)" : "Dein Name";
+  if(m === "local"){
+    codeIn.value = "";
+    document.querySelectorAll(".dur[data-m]").forEach(b => b.disabled = false);
+  }
+  $("codeErr").textContent = "";
+  updateStartBtn();
+}
+document.querySelectorAll(".mode").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+
 const codeIn = $("codeIn");
 codeIn.addEventListener("input", () => {
   codeIn.value = codeIn.value.replace(/\D/g, "");
   $("codeErr").textContent = "";
   const valid = /^\d{6}$/.test(codeIn.value);
   // Bei gültigem Code ist die Dauer vorgegeben – Buttons sperren und anzeigen
-  document.querySelectorAll(".dur").forEach(b => b.disabled = valid);
-  $("startBtn").textContent = valid ? "Spiel beitreten 🔔" : "Spiel anlegen 🔔";
+  document.querySelectorAll(".dur[data-m]").forEach(b => b.disabled = valid);
   if(valid){
     durationMin = DURATIONS[+codeIn.value % 3];
-    document.querySelectorAll(".dur").forEach(x => x.classList.toggle("active", +x.dataset.m === durationMin));
+    document.querySelectorAll(".dur[data-m]").forEach(x => x.classList.toggle("active", +x.dataset.m === durationMin));
   }
+  updateStartBtn();
 });
 
+function buildMarket(){
+  matchTicks = Math.round(durationMin * 60000 / TICK_MS);
+  market = genMarket(gameCode, matchTicks);
+}
+
 $("startBtn").onclick = () => {
+  if(mode === "local"){
+    gameCode = makeCode(DURATIONS.indexOf(durationMin));
+    buildMarket();
+    players = [
+      {name: $("name1").value.trim() || "Spieler 1", cash:START_CASH, pos:{}, color:"var(--p1)", result:null},
+      {name: $("name2").value.trim() || "Spieler 2", cash:START_CASH, pos:{}, color:"var(--p2)", result:null},
+    ];
+    startRound(0);
+    return;
+  }
+
+  // Remote: ein Spieler auf diesem Gerät, gekoppelt über den Code
   const raw = codeIn.value.trim();
   if(raw && !/^\d{6}$/.test(raw)){
     $("codeErr").textContent = "Der Spiel-Code hat 6 Ziffern.";
@@ -580,12 +633,11 @@ $("startBtn").onclick = () => {
   }else{
     gameCode = makeCode(DURATIONS.indexOf(durationMin));
   }
-  matchTicks = Math.round(durationMin * 60000 / TICK_MS);
-  market = genMarket(gameCode, matchTicks);
-  players = [
-    {name: $("name1").value.trim() || "Spieler 1", cash:START_CASH, pos:{}, color:"var(--p1)", result:null},
-    {name: $("name2").value.trim() || "Spieler 2", cash:START_CASH, pos:{}, color:"var(--p2)", result:null},
-  ];
+  buildMarket();
+  players = [{
+    name: $("name1").value.trim() || (joined ? "Spieler 2" : "Spieler 1"),
+    cash: START_CASH, pos:{}, color: joined ? "var(--p2)" : "var(--p1)", result:null
+  }];
   openLobby(joined);
 };
 
@@ -645,8 +697,9 @@ $("rematchBtn").onclick = () => {
   // Code leeren, sonst würde die Revanche denselben (nun bekannten) Markt abspielen
   codeIn.value = "";
   $("codeErr").textContent = "";
-  $("startBtn").textContent = "Spiel anlegen 🔔";
-  document.querySelectorAll(".dur").forEach(b => b.disabled = false);
+  $("resCard2").style.display = "";
+  document.querySelectorAll(".dur[data-m]").forEach(b => b.disabled = false);
+  updateStartBtn();
   window.scrollTo(0,0);
 };
 
@@ -659,13 +712,15 @@ function startRound(r){
   $("news").innerHTML = '<div class="empty">Gleich geht\'s los …</div>';
   $("flash").textContent = "";
   $("pauseBtn").textContent = "⏸ Pause";
-  $("roundTag").textContent = `Runde ${r+1}/2 · Code ${gameCode}`;
+  $("roundTag").textContent = mode === "remote"
+    ? `Code ${String(gameCode).padStart(6,"0")}`
+    : `Runde ${r+1}/2`;
 
   const p = players[round];
   $("pillDot").style.background = p.color;
   $("pillName").textContent = p.name;
   $("depName").textContent = p.name;
-  $("target").innerHTML = round === 1
+  $("target").innerHTML = (mode === "local" && round === 1)
     ? `Zu schlagen: <b style="color:${players[0].result.pnl>=0?'var(--up)':'var(--down)'}">${sgn(players[0].result.pnl)}</b>`
     : "";
 
@@ -1029,6 +1084,12 @@ function endRound(){
   const tot = totalOf(p);
   p.result = {total: tot, pnl: tot - START_CASH};
 
+  // Remote: jedes Gerät spielt nur seine eine Runde – eigenes Ergebnis zeigen
+  if(mode === "remote"){
+    showResultSolo(p);
+    return;
+  }
+
   if(round === 0){
     $("hoTitle").textContent = players[0].name + " ist fertig";
     const ho = $("hoPnl");
@@ -1043,7 +1104,25 @@ function endRound(){
   }
 }
 
+/* Remote: nur das eigene Ergebnis – verglichen wird manuell übers Gerät hinweg */
+function showResultSolo(p){
+  $("resTitle").textContent = "Geschafft!";
+  $("resSub").textContent = "Vergleicht eure Endwerte – höheres Plus gewinnt. Gleicher Markt für beide.";
+  $("resName1").textContent = p.name;
+  document.querySelector("#resCard1 .dot").style.background = p.color;
+  $("crown1").textContent = "";
+  $("resCard1").classList.remove("win");
+  $("resCard2").style.display = "none";
+  setRes("1", p.result);
+  $("resCode").textContent = String(gameCode).padStart(6,"0");
+  $("rematchBtn").textContent = "Neues Spiel";
+  $("overlay").classList.add("show");
+}
+
 function showResult(){
+  $("resCard2").style.display = "";
+  $("rematchBtn").textContent = "Revanche";
+  document.querySelector("#resCard1 .dot").style.background = "var(--p1)";
   const r1 = players[0].result, r2 = players[1].result;
   $("resName1").textContent = players[0].name;
   $("resName2").textContent = players[1].name;

@@ -2587,7 +2587,10 @@ function tutFinish(p){
   $("coachText").innerHTML =
     `🎓 <b>Geschafft!</b> Dein Übungs-Ergebnis: ` +
     `<b style="color:${pnl >= 0 ? "var(--up)" : "var(--down)"}">${sgn(pnl)}</b>. ` +
-    `Im echten Duell zählt genau das – nur dass dein Gegner denselben Markt bekommt. Viel Erfolg!`;
+    `💡 <b>Tipp:</b> Im echten Spiel gibt es <b>10 Aktien</b>. Über den Button ` +
+    `<b>»☆ Alle Aktien«</b> über der Watchlist stöberst du durch alle Werte, wählst ` +
+    `direkt eine zum Handeln und legst per Stern deine bis zu <b>4 Favoriten</b> fest. ` +
+    `Im echten Duell zählt genau dein Ergebnis – nur dass dein Gegner denselben Markt bekommt. Viel Erfolg!`;
   const b = $("coachBtn");
   b.style.display = "";
   b.textContent = "Zum Startbildschirm";

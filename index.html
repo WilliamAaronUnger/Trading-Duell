@@ -298,6 +298,11 @@
         <button class="dur mode" data-mode="remote">📱📱 Zwei Geräte</button>
       </div>
       <div class="mode-hint" id="modeHint"></div>
+      <div class="dur-row" id="soloSub">
+        <button class="dur solosub active" data-sb="false">🎯 Normal</button>
+        <button class="dur solosub" data-sb="true">🏖️ Sandbox</button>
+      </div>
+      <div class="mode-hint" id="soloHint"></div>
     </div>
     <div class="field" id="field1">
       <label id="label1">Spieler 1 (beginnt)</label>
@@ -307,12 +312,21 @@
       <label>Spieler 2</label>
       <input class="pl2" id="name2" type="text" maxlength="14" placeholder="Name" value="Spieler 2">
     </div>
-    <div class="field">
+    <div class="field" id="durField">
       <label>Zeit pro Spieler</label>
       <div class="dur-row">
         <button class="dur" data-m="5">5 Min</button>
         <button class="dur" data-m="10">10 Min</button>
         <button class="dur active" data-m="15">15 Min</button>
+      </div>
+    </div>
+    <div class="field" id="capField" style="display:none">
+      <label>Startkapital</label>
+      <div class="dur-row">
+        <button class="dur cap" data-cap="10000">10.000 $</button>
+        <button class="dur cap active" data-cap="25000">25.000 $</button>
+        <button class="dur cap" data-cap="50000">50.000 $</button>
+        <button class="dur cap" data-cap="100000">100.000 $</button>
       </div>
     </div>
     <div class="field" id="fieldCode" style="display:none">
@@ -326,7 +340,7 @@
     <div class="rules">
       Beide Spieler erleben <b style="color:var(--text)">denselben Kursverlauf und dieselben News</b> –
       nur so ist der Vergleich fair.
-      Jeder startet mit 25.000 $, SPCX beginnt beim Ausgabepreis von 135 $.
+      Jeder startet mit dem gewählten Startkapital, SPCX beginnt beim Ausgabepreis von 135 $.
       Am Ende zählt das Gesamtdepot (Bargeld + Positionen zum Schlusskurs).<br><br>
       <b style="color:var(--text)">🐻 Shorten:</b> Der Short-Button setzt auf fallende Kurse –
       eingedeckt wird per Kaufen. Maximal 1× Depotwert, kein Hebel. Auch schlechte News sind so eine Chance!<br><br>
@@ -351,6 +365,7 @@
         <div class="countdown" id="countdown">15:00</div>
         <div class="round-tag" id="roundTag">Runde 1/2</div>
         <button class="pauseBtn" id="pauseBtn">⏸ Pause</button>
+        <button class="pauseBtn" id="endSandboxBtn" style="display:none">⏹ Beenden</button>
       </div>
       <div class="player-row">
         <div class="player-pill">
@@ -516,7 +531,7 @@
 "use strict";
 
 /* ====================== Konfiguration ====================== */
-const START_CASH = 25000;
+let START_CASH = 25000;
 const TICK_MS = 1000;
 /* Pool-Daten (dur, Event-Abstände, Drift pro Tick) sind auf 0,7-s-Ticks kalibriert –
    dieser Faktor rechnet sie auf die aktuelle Tick-Länge um, damit alles in
@@ -929,12 +944,37 @@ let roundAnchor = 0;
    Timing: "solo" und "local" sind tick-basiert (pausierbar); nur "remote" läuft
    nach Weltzeit. Ergebnis: "solo" und "remote" zeigen das eigene Ergebnis. */
 let mode = "local";
+let sandbox = false;
+let sandboxCash = 25000;
 
 let durationMin = 15;
 document.querySelectorAll(".dur[data-m]").forEach(b => b.onclick = () => {
   durationMin = +b.dataset.m;
   document.querySelectorAll(".dur[data-m]").forEach(x => x.classList.toggle("active", x === b));
 });
+
+document.querySelectorAll(".solosub").forEach(b => b.onclick = () => {
+  sandbox = b.dataset.sb === "true";
+  document.querySelectorAll(".solosub").forEach(x => x.classList.toggle("active", x === b));
+  applySoloUI();
+  updateStartBtn();
+});
+
+document.querySelectorAll(".cap").forEach(b => b.onclick = () => {
+  sandboxCash = +b.dataset.cap;
+  document.querySelectorAll(".cap").forEach(x => x.classList.toggle("active", x === b));
+});
+
+function applySoloUI(){
+  const solo = mode === "solo";
+  $("soloSub").style.display  = solo ? "" : "none";
+  $("soloHint").style.display = solo ? "" : "none";
+  $("capField").style.display = (solo && sandbox) ? "" : "none";
+  $("durField").style.display = (solo && sandbox) ? "none" : "";
+  $("soloHint").textContent   = sandbox
+    ? "Freies Üben ohne Zeitdruck – kein Rekord-Eintrag."
+    : "Du spielst allein und misst dich an deinem eigenen Rekord.";
+}
 
 /* Spiel-Code: 6 Ziffern, dient direkt als Markt-Seed.
    Code mod 3 kodiert die Spieldauer (5/10/15 Min), damit beide Geräte
@@ -952,7 +992,10 @@ function makeCode(durIdx){
 /* Start-Button-Text richtet sich nach Modus und (im Remote-Modus) danach,
    ob ein gültiger Code zum Beitreten eingetippt wurde. */
 function updateStartBtn(){
-  if(mode === "solo"){  $("startBtn").textContent = "Spiel starten 🔔"; return; }
+  if(mode === "solo"){
+    $("startBtn").textContent = sandbox ? "Sandbox starten 🏖️" : "Spiel starten 🔔";
+    return;
+  }
   if(mode === "local"){ $("startBtn").textContent = "Duell starten 🔔"; return; }
   const valid = /^\d{6}$/.test(codeIn.value);
   $("startBtn").textContent = valid ? "Spiel beitreten 🔔" : "Spiel anlegen 🔔";
@@ -977,6 +1020,7 @@ function setMode(m){
   $("modeHint").textContent = MODE_HINTS[m] || "";
   $("codeErr").textContent = "";
   updateStartBtn();
+  applySoloUI();
 }
 document.querySelectorAll(".mode").forEach(b => b.onclick = () => setMode(b.dataset.mode));
 
@@ -988,6 +1032,8 @@ function setTop(t){
     $("modeSub").style.display = "none";
     setMode("solo");
   }else{
+    sandbox = false;
+    document.querySelectorAll(".solosub").forEach(b => b.classList.toggle("active", b.dataset.sb === "false"));
     $("modeSub").style.display = "";
     const sub = document.querySelector(".mode.active");
     setMode(sub ? sub.dataset.mode : "local");
@@ -1010,7 +1056,9 @@ codeIn.addEventListener("input", () => {
 });
 
 function buildMarket(){
-  matchTicks = Math.round(durationMin * 60000 / TICK_MS);
+  matchTicks = sandbox
+    ? Math.round(60 * 60000 / TICK_MS)
+    : Math.round(durationMin * 60000 / TICK_MS);
   market = genMarket(gameCode, matchTicks);
 }
 
@@ -1036,7 +1084,7 @@ const saveStore = s => { try{ localStorage.setItem(STORE_KEY, JSON.stringify(s))
    Eigener Schlüssel, getrennt von Namen/Rekord. Tutorial wird nie gesichert. */
 const GAME_KEY = "spcx-duell-game";
 function saveSnapshot(phase){
-  if(tutorial || over && phase !== "handover") return;
+  if(tutorial || sandbox || (over && phase !== "handover")) return;
   try{
     localStorage.setItem(GAME_KEY, JSON.stringify({
       v:1, mode, gameCode, durationMin, round,
@@ -1138,12 +1186,14 @@ $("startBtn").onclick = () => {
   rememberNames();
   if(mode === "solo"){
     // Einzelspieler: ein Spieler, eine Runde, sofortiger Start (keine Lobby)
+    START_CASH = sandbox ? sandboxCash : 25000;
     gameCode = makeCode(DURATIONS.indexOf(durationMin));
     buildMarket();
     players = [newPlayer($("name1").value.trim() || "Spieler 1", "var(--p1)")];
     startRound(0);
     return;
   }
+  START_CASH = 25000;
   if(mode === "local"){
     gameCode = makeCode(DURATIONS.indexOf(durationMin));
     buildMarket();
@@ -1251,14 +1301,17 @@ function startRound(r){
   $("pauseBtn").textContent = "⏸ Pause";
   // Remote läuft strikt nach Weltzeit – keine Pause möglich; im Tutorial pausiert der Coach
   $("pauseBtn").style.display = (mode === "remote" || tutorial) ? "none" : "";
+  $("endSandboxBtn").style.display = sandbox ? "" : "none";
   roundAnchor = mode === "remote" ? startAt : Date.now();
   $("roundTag").textContent = tutorial
     ? "🎓 Tutorial"
-    : mode === "solo"
-      ? "Einzelspiel"
-      : mode === "remote"
-        ? `Code ${String(gameCode).padStart(6,"0")}`
-        : `Runde ${r+1}/2`;
+    : (mode === "solo" && sandbox)
+      ? "🏖️ Sandbox"
+      : mode === "solo"
+        ? "Einzelspiel"
+        : mode === "remote"
+          ? `Code ${String(gameCode).padStart(6,"0")}`
+          : `Runde ${r+1}/2`;
 
   const p = players[round];
   $("pillDot").style.background = p.color;
@@ -1345,7 +1398,7 @@ function tick(){
   processTick(true);
   if(tutorial) tutOnTick();
 
-  if(tickCount >= matchTicks){ endRound(); return; }
+  if(!sandbox && tickCount >= matchTicks){ endRound(); return; }
   saveSnapshot("play");
   renderAll();
 }
@@ -1531,10 +1584,16 @@ function buildWatch(){
 }
 
 function renderAll(){
-  const remain = Math.max(0, Math.round((matchTicks - tickCount) * TICK_MS / 1000));
   const cd = $("countdown");
-  cd.textContent = String(Math.floor(remain/60)).padStart(2,"0") + ":" + String(remain%60).padStart(2,"0");
-  cd.classList.toggle("hot", remain <= 60);
+  if(sandbox){
+    const elapsed = Math.round(tickCount * TICK_MS / 1000);
+    cd.textContent = String(Math.floor(elapsed/60)).padStart(2,"0") + ":" + String(elapsed%60).padStart(2,"0");
+    cd.classList.remove("hot");
+  }else{
+    const remain = Math.max(0, Math.round((matchTicks - tickCount) * TICK_MS / 1000));
+    cd.textContent = String(Math.floor(remain/60)).padStart(2,"0") + ":" + String(remain%60).padStart(2,"0");
+    cd.classList.toggle("hot", remain <= 60);
+  }
 
   const p = players[round];
   const tv = totalOf(p);
@@ -1860,7 +1919,7 @@ function endRound(){
   over = true;
   clearInterval(timer);
   stopChartLoop();
-  tickCount = matchTicks;
+  if(sandbox) matchTicks = tickCount; else tickCount = matchTicks;
   renderAll();
   const p = players[round];
   const tot = totalOf(p);
@@ -1872,7 +1931,7 @@ function endRound(){
     return;
   }
 
-  updateRecord(p); // persönlichen Rekord auf diesem Gerät fortschreiben
+  if(!sandbox) updateRecord(p); // persönlichen Rekord auf diesem Gerät fortschreiben
 
   // Eine Runde, eigenes Ergebnis: Einzelspieler oder jedes Remote-Gerät
   if(mode === "solo" || mode === "remote"){
@@ -2097,10 +2156,12 @@ function showResultSolo(p){
   clearSnapshot(); // Runde gespielt – Snapshot entfernen
   soloP = p;
   const solo = mode === "solo"; // Einzelspieler: kein Gegner, kein Ergebnis-Austausch
-  $("resTitle").textContent = "Geschafft!";
-  $("resSub").textContent = solo
-    ? "Dein Ergebnis – schaffst du beim nächsten Mal mehr?"
-    : "Tauscht eure Ergebnisse aus – dann gibt's den direkten Vergleich.";
+  $("resTitle").textContent = sandbox ? "Sandbox beendet!" : "Geschafft!";
+  $("resSub").textContent = sandbox
+    ? "Freies Üben – kein Rekord-Eintrag."
+    : solo
+      ? "Dein Ergebnis – schaffst du beim nächsten Mal mehr?"
+      : "Tauscht eure Ergebnisse aus – dann gibt's den direkten Vergleich.";
   $("resName1").textContent = p.name;
   document.querySelector("#resCard1 .dot").style.background = p.color;
   $("crown1").textContent = "";
@@ -2335,6 +2396,7 @@ $("pauseBtn").onclick = function(){
   paused = !paused;
   this.textContent = paused ? "▶ Weiter" : "⏸ Pause";
 };
+$("endSandboxBtn").onclick = () => { if(!over) endRound(); };
 $("npSkip").onclick = closeNewsPop;
 $("buyBtn").onclick = () => trade("buy");
 $("sellBtn").onclick = () => trade("sell");

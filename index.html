@@ -1756,8 +1756,9 @@ function drawChart(){
   let candles = null, visStartTick = startIdx, firstC = 0;
   if(chartMode === "candle"){
     candles = [];
-    firstC = Math.max(0, lastC - Math.ceil(WINDOW / CT) + 1);
-    visStartTick = firstC * CT;
+    const firstVisC = Math.max(0, lastC - Math.ceil(WINDOW / CT) + 1);
+    firstC = Math.max(0, firstVisC - 1);   // eine Kerze mehr links → scrollt geclippt sauber raus
+    visStartTick = firstVisC * CT;
     for(let c = firstC; c <= lastC; c++){
       const a = c*CT, b = Math.min(c*CT + CT - 1, tickCount);
       let hi = path[a], lo = path[a];
@@ -1836,6 +1837,12 @@ function drawChart(){
   const liveX = xt(headTick);
   const liveY = Y(livePrice);
 
+  /* Plotbereich clippen: alte Punkte/Kerzen scrollen sauber unter dem linken
+     Rand heraus, statt am Fensterrand zu „springen" (ein Extra-Punkt links
+     wird gezeichnet und hier abgeschnitten). */
+  ctx.save();
+  ctx.beginPath(); ctx.rect(L, T, w-L-R, h-T-B); ctx.clip();
+
   if(candles){
     /* --- Kerzen --- */
     const NC = candles.length;
@@ -1858,22 +1865,24 @@ function drawChart(){
     }
   }else{
     /* --- Linie --- */
+    const startI = startIdx > 0 ? -1 : 0; // Extra-Punkt links für nahtloses Rausscrollen
     ctx.beginPath();
-    for(let i=0;i<nPts;i++){
+    for(let i=startI;i<nPts;i++){
       const px = i < nPts-1 ? X(i) : liveX;
-      const py = i < nPts-1 ? Y(data[i]) : liveY;
-      i===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+      const py = i < nPts-1 ? Y(i < 0 ? path[startIdx-1] : data[i]) : liveY;
+      i===startI ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
     }
     ctx.strokeStyle = col; ctx.lineWidth = 1.8;
     ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke();
 
     /* Fläche unter der Kurve */
-    ctx.lineTo(liveX, h-B); ctx.lineTo(X(0), h-B); ctx.closePath();
+    ctx.lineTo(liveX, h-B); ctx.lineTo(X(startI), h-B); ctx.closePath();
     const g = ctx.createLinearGradient(0,T,0,h-B);
     g.addColorStop(0, up ? "rgba(61,220,151,.16)" : "rgba(255,92,114,.16)");
     g.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = g; ctx.fill();
   }
+  ctx.restore();
 
   /* --- Einstandslinie des aktiven Spielers --- */
   if(pos){

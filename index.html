@@ -121,6 +121,12 @@
   .char-line{font-size:12px;opacity:.85}
   canvas{width:100%;height:190px;display:block;background:var(--panel-2);
          border:1px solid var(--line);border-radius:12px}
+  .chart-bar{display:flex;justify-content:flex-end;margin-bottom:8px}
+  .chart-toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .ctg{padding:5px 12px;background:var(--panel-2);color:var(--muted);border:none;
+       font-family:var(--mono);font-size:12px;cursor:pointer}
+  .ctg+.ctg{border-left:1px solid var(--line)}
+  .ctg.active{background:#1A2340;color:var(--text);font-weight:700}
 
   /* ============ Panels ============ */
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:14px}
@@ -258,9 +264,13 @@
     .topbar-in{max-width:1180px}
     #startScreen .wrap{max-width:480px}      /* Formular bleibt schlank zentriert */
     #matchScreen .wrap{max-width:1180px}
-    .match-grid{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:20px;align-items:start}
+    .match-grid{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:20px;align-items:stretch}
     .col-chart{min-width:0}                  /* Chart darf schrumpfen statt zu überlaufen */
     #matchScreen canvas{height:300px}        /* mehr Höhe auf breiten Schirmen (drawChart folgt) */
+    /* rechte Spalte füllt die volle Grid-Höhe; Newsfeed wächst in den freien Rest */
+    .col-side{display:flex;flex-direction:column}
+    .col-side .panel:last-child{flex:1;display:flex;flex-direction:column;min-height:0}
+    .col-side .panel:last-child #news{flex:1;overflow-y:auto;min-height:80px}
   }
 </style>
 </head>
@@ -356,10 +366,14 @@
       <span class="chg ek" id="qEk" style="display:none"></span>
       <span class="qname" id="qName"></span>
     </div>
-    <canvas id="chart" height="190"></canvas>
+    <div class="chart-bar">
+      <div class="chart-toggle" id="chartToggle">
+        <button class="ctg active" data-cm="line">📈 Linie</button>
+        <button class="ctg" data-cm="candle">📊 Kerzen</button>
+      </div>
     </div>
+    <canvas id="chart" height="190"></canvas>
 
-    <div class="col-side">
     <div class="panel">
       <h2>Order · <span id="tradeSym">SPCX</span></h2>
       <div class="chips" id="chips">
@@ -377,7 +391,9 @@
       <div class="order-info" id="orderInfo"></div>
       <div class="flash" id="flash"></div>
     </div>
+    </div>
 
+    <div class="col-side">
     <div class="panel">
       <h2>Depot · <span id="depName"></span></h2>
       <div class="stats">
@@ -528,21 +544,52 @@ const NEWS_POOL = [
   {t:"SPCX", txt:"NASA vergibt weiteren Mond-Auftrag an SpaceX.", jump:+0.010, drift:+0.0004, dur:32},
   {t:"SPCX", txt:"xAI-Sparte verbrennt laut Bericht mehr Geld als erwartet.", jump:-0.007, drift:-0.0003, dur:26},
   {t:"SPCX", txt:"Indexfonds müssen SPCX aufnehmen – Kauforders laufen ein.", jump:+0.009, drift:+0.0004, dur:30},
+  {t:"SPCX", txt:"Starlink-Erlöse übertreffen Schätzungen – Analysten erhöhen Kursziel.", jump:+0.011, drift:+0.0005, dur:34},
+  {t:"SPCX", txt:"FAA erteilt Genehmigung für kommerzielle Starship-Routineflüge.", jump:+0.010, drift:+0.0004, dur:30},
+  {t:"SPCX", txt:"Elon Musk kündigt Ausgliederung der Mars-Missionssparte an.", jump:+0.008, drift:+0.0003, dur:28},
+  {t:"SPCX", txt:"Blue Origin gewinnt Ausschreibung, die SpaceX anvisierende hatte.", jump:-0.008, drift:-0.0003, dur:28},
+  {t:"SPCX", txt:"Versicherungskosten nach Raketenverlust sprunghaft gestiegen.", jump:-0.008, drift:-0.0003, dur:26},
+  {t:"SPCX", txt:"Hedgefonds meldet Short-Position von über 1 % des Streubesitzes.", jump:-0.009, drift:-0.0004, dur:32},
   {t:"TSLA", txt:"Tesla rollt FSD-Update in Europa breiter aus.", jump:+0.008, drift:+0.0004, dur:28},
   {t:"TSLA", txt:"Robotaxi-Flotte erhält Zulassung für weitere Großstädte.", jump:+0.010, drift:+0.0004, dur:30},
   {t:"TSLA", txt:"Absatzzahlen aus China enttäuschen.", jump:-0.008, drift:-0.0004, dur:28},
   {t:"TSLA", txt:"Rückruf wegen Software-Fehlers trifft Hunderttausende Fahrzeuge.", jump:-0.009, drift:-0.0004, dur:30},
+  {t:"TSLA", txt:"Tesla-Energiesparte meldet Rekordumsatz – Analysten überrascht.", jump:+0.009, drift:+0.0004, dur:30},
+  {t:"TSLA", txt:"Optimus-Roboter absolviert ersten öffentlichen Kundentest.", jump:+0.010, drift:+0.0004, dur:30},
+  {t:"TSLA", txt:"Lieferzahlen für das Quartal klar über den Erwartungen.", jump:+0.009, drift:+0.0004, dur:28},
+  {t:"TSLA", txt:"Neues Model-Y-Facelift kommt laut Leak Monate früher als geplant.", jump:+0.007, drift:+0.0003, dur:26},
+  {t:"TSLA", txt:"Preissenkungen in Europa drücken die Bruttomarge.", jump:-0.008, drift:-0.0004, dur:28},
+  {t:"TSLA", txt:"Institutionelle Anleger fordern mehr Fokus, kritisieren CEO-Ablenkung.", jump:-0.007, drift:-0.0003, dur:26},
   {t:"NVDA", txt:"NVIDIA meldet Großauftrag für Rechenzentrums-GPUs.", jump:+0.008, drift:+0.0004, dur:28},
   {t:"NVDA", txt:"Nächste Chip-Generation kommt früher als geplant.", jump:+0.010, drift:+0.0004, dur:30},
   {t:"NVDA", txt:"Berichte über neue Exportauflagen belasten Chipwerte.", jump:-0.008, drift:-0.0004, dur:28},
   {t:"NVDA", txt:"Großkunde verschiebt laut Insidern Bestellungen.", jump:-0.009, drift:-0.0004, dur:30},
+  {t:"NVDA", txt:"Neue Blackwell-Ultra-Chips mit doppelter KI-Rechenleistung vorgestellt.", jump:+0.010, drift:+0.0004, dur:32},
+  {t:"NVDA", txt:"Quartalsbericht übertrifft Konsens bei Marge und Umsatz deutlich.", jump:+0.011, drift:+0.0004, dur:30},
+  {t:"NVDA", txt:"Tech-Konzern verlängert GPU-Rahmenvertrag um weitere drei Jahre.", jump:+0.008, drift:+0.0003, dur:28},
+  {t:"NVDA", txt:"AMD kündigt Konkurrenzchip an – Analysten sehen erste Marktanteilsverluste.", jump:-0.008, drift:-0.0003, dur:28},
+  {t:"NVDA", txt:"China-Verkaufsverbot auf weitere Hochleistungschips ausgeweitet.", jump:-0.010, drift:-0.0004, dur:32},
+  {t:"NVDA", txt:"Lagerüberhang: Händler schieben Nachbestellungen auf nächstes Quartal.", jump:-0.007, drift:-0.0003, dur:26},
   {t:"RKLB", txt:"Rocket Lab gewinnt Konstellations-Vertrag.", jump:+0.010, drift:+0.0004, dur:28},
   {t:"RKLB", txt:"Neutron absolviert ersten Testflug erfolgreich.", jump:+0.012, drift:+0.0005, dur:32},
   {t:"RKLB", txt:"Neutron-Erststart verschiebt sich erneut.", jump:-0.008, drift:-0.0004, dur:28},
   {t:"RKLB", txt:"Triebwerkstest schlägt fehl – Untersuchung läuft.", jump:-0.009, drift:-0.0004, dur:30},
+  {t:"RKLB", txt:"Electron absolviert 60. Flug – Branchenbester Zuverlässigkeitsrekord.", jump:+0.009, drift:+0.0004, dur:28},
+  {t:"RKLB", txt:"US-Militär verlängert Rahmenvertrag mit Rocket Lab um fünf Jahre.", jump:+0.011, drift:+0.0005, dur:30},
+  {t:"RKLB", txt:"NASA-Ausschreibung: Rocket Lab unter den drei Finalisten.", jump:+0.008, drift:+0.0003, dur:26},
+  {t:"RKLB", txt:"Neue Montagehalle in Neuseeland eröffnet – Kapazität verdoppelt.", jump:+0.007, drift:+0.0003, dur:24},
+  {t:"RKLB", txt:"Zulieferer meldet Engpass – Startkalender könnte rutschen.", jump:-0.008, drift:-0.0004, dur:28},
+  {t:"RKLB", txt:"Konkurrent gewinnt Auftrag, den Rocket Lab angepeilt hatte.", jump:-0.007, drift:-0.0003, dur:26},
   {t:"ALL",  txt:"Inflationsdaten besser als erwartet – Markt dreht ins Plus.", jump:+0.004, drift:+0.0002, dur:36},
   {t:"ALL",  txt:"Fed-Mitglied dämpft Zinssenkungshoffnungen.", jump:-0.004, drift:-0.0002, dur:36},
   {t:"ALL",  txt:"Risk-off: Anleger schichten in Anleihen um.", jump:-0.003, drift:-0.0002, dur:30},
+  {t:"ALL",  txt:"Jobmarkt-Daten überraschen positiv – Konjunktursorgen schwinden.", jump:+0.004, drift:+0.0002, dur:30},
+  {t:"ALL",  txt:"Ölpreisrückgang senkt Inflationserwartungen – Tech-Werte profitieren.", jump:+0.004, drift:+0.0002, dur:32},
+  {t:"ALL",  txt:"Starke Bankenzahlen signalisieren robuste Konjunktur.", jump:+0.003, drift:+0.0002, dur:26},
+  {t:"ALL",  txt:"M&A-Boom: Fusionswelle treibt den Risikoappetit.", jump:+0.003, drift:+0.0002, dur:28},
+  {t:"ALL",  txt:"Geopolitische Spannungen: Anleger ziehen sich aus Tech zurück.", jump:-0.005, drift:-0.0003, dur:36},
+  {t:"ALL",  txt:"US-Haushaltsdebatte eskaliert – Unsicherheit belastet Märkte.", jump:-0.004, drift:-0.0002, dur:30},
+  {t:"ALL",  txt:"Überraschender Zinsschritt der Fed sorgt für Volatilitätsschub.", jump:-0.005, drift:-0.0003, dur:34},
 ];
 
 const OPENING_EVENT = {t:"SPCX",
@@ -564,6 +611,10 @@ const MEGA_POOL = [
   {t:"RKLB", txt:"💥 MEGA: Medizin-Durchbruch in Schwerelosigkeit – Rocket-Lab-Kapseln auf Jahre ausgebucht!", jump:+0.32, drift:+0.0009, dur:40},
   {t:"ALL",  txt:"💥 MEGA: Branchenboom! Regierungen verdoppeln weltweit die Raumfahrt- und Tech-Budgets.", jump:+0.20, drift:+0.0006, dur:44},
   {t:"ALL",  txt:"💥 MEGA: Marktpanik! Flash-Crash reißt alle Werte gleichzeitig in die Tiefe.", jump:-0.13, drift:-0.0004, dur:40},
+  {t:"SPCX", txt:"💥 MEGA: Musk verkündet vollständige Fusion von SpaceX und Tesla – Märkte rasten aus.", jump:+0.35, drift:+0.0009, dur:44},
+  {t:"TSLA", txt:"💥 MEGA: Zulassung erteilt! Vollautonomes Fahren auf allen US-Bundesstraßen genehmigt.", jump:+0.32, drift:+0.0009, dur:40},
+  {t:"NVDA", txt:"💥 MEGA: KI-Superzyklus! NATO und EU kaufen gemeinsam 500.000 NVIDIA-Chips.", jump:+0.28, drift:+0.0008, dur:40},
+  {t:"ALL",  txt:"💥 MEGA: Zinswende! Fed senkt Leitzins überraschend um 150 Basispunkte – Tech explodiert.", jump:+0.22, drift:+0.0006, dur:44},
 ];
 
 /* Momentum-News: beziehen sich auf die Aktie, die gerade am stärksten läuft (%SYM% wird ersetzt) */
@@ -572,18 +623,26 @@ const MOMENTUM_POOL = {
     {txt:"%SYM% ist gerade der meistgehandelte Wert – immer mehr Anleger springen auf.", jump:+0.007, drift:+0.0004, dur:28},
     {txt:"Hype um %SYM%: Social-Media-Trader treiben den Kurs weiter.", jump:+0.006, drift:+0.0004, dur:26},
     {txt:"Kaufwelle bei %SYM% – Orderbücher laufen voll.", jump:+0.006, drift:+0.0003, dur:24},
+    {txt:"Momentum-Signal: Algorithmen erhöhen %SYM%-Positionen automatisch.", jump:+0.007, drift:+0.0004, dur:26},
+    {txt:"%SYM% durchbricht charttechnischen Widerstand – neue Kaufsignale.", jump:+0.008, drift:+0.0004, dur:28},
   ],
   upTake: [
     {txt:"Nach der Rally: Erste Gewinnmitnahmen bei %SYM%.", jump:-0.007, drift:-0.0003, dur:24},
     {txt:"Analysten warnen: %SYM% ist kurzfristig heißgelaufen.", jump:-0.006, drift:-0.0003, dur:24},
+    {txt:"Optionen-Ablauf drückt auf %SYM% – Händler rollen Positionen.", jump:-0.006, drift:-0.0003, dur:22},
+    {txt:"Fonds-Rebalancing zum Monatsende: %SYM% unter Verkaufsdruck.", jump:-0.007, drift:-0.0003, dur:24},
   ],
   downCont: [
     {txt:"Abwärtsdruck bei %SYM%: Stop-Loss-Verkäufe beschleunigen den Rutsch.", jump:-0.007, drift:-0.0004, dur:26},
     {txt:"Anleger flüchten aus %SYM% – Stimmung kippt.", jump:-0.006, drift:-0.0003, dur:24},
+    {txt:"Short-Seller erhöhen Druck auf %SYM% – Borrow-Rate steigt.", jump:-0.007, drift:-0.0004, dur:26},
+    {txt:"Negative Berichterstattung häuft sich: %SYM% im Fokus der Kritiker.", jump:-0.006, drift:-0.0003, dur:24},
   ],
   downReb: [
     {txt:"Schnäppchenjäger greifen bei %SYM% zu – Kurs stabilisiert sich.", jump:+0.006, drift:+0.0004, dur:26},
     {txt:"Großanleger nutzt den Rücksetzer bei %SYM% zum Einstieg.", jump:+0.007, drift:+0.0003, dur:24},
+    {txt:"Überverkauft-Signal bei %SYM%: Kontra-Trader kaufen.", jump:+0.006, drift:+0.0003, dur:22},
+    {txt:"Short-Squeeze zeichnet sich ab: %SYM% dreht plötzlich ins Plus.", jump:+0.008, drift:+0.0004, dur:26},
   ],
 };
 
@@ -606,6 +665,18 @@ const CHAIN_POOL = [
    rumor:  {txt:"Gerücht: Rocket Lab soll Mega-Auftrag einer Telekom-Firma erhalten.", jump:+0.006, drift:+0.0003, dur:20},
    confirm:{txt:"Fix: Rocket Lab erhält Mega-Auftrag – größter Deal der Firmengeschichte!", jump:+0.016, drift:+0.0006, dur:32},
    deny:   {txt:"Mega-Auftrag geplatzt: Telekom-Firma entscheidet sich um.", jump:-0.013, drift:-0.0005, dur:30}},
+  {t:"TSLA",
+   rumor:  {txt:"Gerücht: Apple soll Tesla-Übernahme in Milliardenhöhe prüfen.", jump:+0.008, drift:+0.0003, dur:22},
+   confirm:{txt:"Bestätigt: Apple und Tesla geben Übernahme-Letter of Intent bekannt.", jump:+0.018, drift:+0.0006, dur:34},
+   deny:   {txt:"Apple-Tesla-Gespräche gescheitert – Kurs gibt Gewinne vollständig ab.", jump:-0.014, drift:-0.0005, dur:30}},
+  {t:"NVDA",
+   rumor:  {txt:"Spekulation: Regierung könnte NVIDIA aus Sicherheitsgründen unter Aufsicht stellen.", jump:-0.006, drift:-0.0003, dur:20},
+   confirm:{txt:"Bestätigt: Kartellamt leitet Missbrauchsverfahren gegen NVIDIA ein.", jump:-0.014, drift:-0.0005, dur:32},
+   deny:   {txt:"Entwarnung: Behörde stellt Verfahren gegen NVIDIA ein – Aufatmen am Markt.", jump:+0.012, drift:+0.0004, dur:28}},
+  {t:"SPCX",
+   rumor:  {txt:"Gerücht: FAA prüft Sicherheitsmängel an Starship-Hitzeschutzplatten.", jump:-0.007, drift:-0.0003, dur:22},
+   confirm:{txt:"FAA verhängt vorläufigen Startbann – Untersuchung dauert Wochen.", jump:-0.015, drift:-0.0005, dur:34},
+   deny:   {txt:"FAA-Prüfung abgeschlossen: Starship erhält grünes Licht – Erleichterung.", jump:+0.013, drift:+0.0005, dur:30}},
 ];
 
 /* ====================== Helpers ====================== */
@@ -807,7 +878,9 @@ function genMarket(seed, ticks){
 
 /* ====================== State ====================== */
 let players, round, selected, qtyMode;
+let chartMode = "line"; // "line" oder "candle" (Kerzenchart), nur Optik
 let tickCount, matchTicks, paused, over, timer;
+let chartRaf = null, lastTickAt = 0; // für flüssige Chart-Animation (rAF-Loop)
 /* Zeitanker der laufenden Runde: remote = gemeinsamer Lobby-Start (startAt),
    local = Rundenbeginn. Nur im Remote-Modus spielbestimmend. */
 let roundAnchor = 0;
@@ -1127,6 +1200,8 @@ function startRound(r){
 
   clearInterval(timer);
   timer = setInterval(tick, TICK_MS);
+  lastTickAt = performance.now();
+  startChartLoop();
   saveSnapshot("play");
   renderAll();
 }
@@ -1172,6 +1247,7 @@ function processTick(showPopup){
 
 function tick(){
   if(over) return;
+  lastTickAt = performance.now();
 
   if(mode === "remote"){
     /* Weltzeit-Anker: Spielzeit hängt nur an der Uhr, nie an Pausen oder
@@ -1486,6 +1562,15 @@ function renderAll(){
   drawChart();
 }
 
+/* rAF-Loop für flüssige Chart-Animation (60 fps, interpoliert letzten Punkt) */
+function startChartLoop(){
+  if(chartRaf) return;
+  (function loop(){ drawChart(); chartRaf = requestAnimationFrame(loop); })();
+}
+function stopChartLoop(){
+  if(chartRaf){ cancelAnimationFrame(chartRaf); chartRaf = null; }
+}
+
 /* "Schöne" Schrittweite für Gitterlinien (1-2-5-Raster) */
 function niceStep(range, targetLines){
   const raw = range / targetLines;
@@ -1509,20 +1594,56 @@ function drawChart(){
   const op = open_(selected);
   const p = players[round];
   const pos = p.pos[selected];
+  const path = market.paths[selected];
+
+  const L = 8, R = 46, T = 8, B = 22;       // Innenabstände (rechts Platz für Preis-Labels)
+
+  /* Glatte Animation: der aktuell entstehende Punkt/die offene Kerze wächst
+     innerhalb des Tick-Intervalls herein (0..1). */
+  let prog = 1;
+  if(lastTickAt && tickCount >= 1 && !paused && !newsPaused && !over)
+    prog = Math.min(1, (performance.now() - lastTickAt) / TICK_MS);
 
   /* Rollierendes Fenster: nur die letzten ~3 Minuten zeigen, Anfang abschneiden */
   const WINDOW = Math.round(180000 / TICK_MS);
-  const full = market.paths[selected].slice(0, tickCount + 1);
-  const startIdx = Math.max(0, full.length - WINDOW);
-  const data = full.slice(startIdx);
+  const startIdx = Math.max(0, tickCount + 1 - WINDOW);
+  const data = path.slice(startIdx, tickCount + 1);
+  const nPts = data.length;
+  const livePrice = nPts >= 2 ? data[nPts-2] + (data[nPts-1] - data[nPts-2]) * prog : (data[0] || op);
 
-  let min = Math.min(...data), max = Math.max(...data);
+  /* --- Kerzen aggregieren (~10 s pro Kerze), wenn der Kerzen-Modus aktiv ist.
+         Die letzte (offene) Kerze nutzt den animierten Live-Kurs als Schluss. --- */
+  const CT = Math.max(2, Math.round(10000 / TICK_MS)); // Ticks pro Kerze
+  let candles = null, visStartTick = startIdx;
+  if(chartMode === "candle"){
+    candles = [];
+    const lastC = Math.floor(tickCount / CT);
+    const firstC = Math.max(0, lastC - Math.ceil(WINDOW / CT) + 1);
+    visStartTick = firstC * CT;
+    for(let c = firstC; c <= lastC; c++){
+      const a = c*CT, b = Math.min(c*CT + CT - 1, tickCount);
+      let hi = path[a], lo = path[a];
+      for(let i=a;i<=b;i++){ if(path[i]>hi)hi=path[i]; if(path[i]<lo)lo=path[i]; }
+      const live = c === lastC;
+      const cl = live ? livePrice : path[b];
+      if(live){ if(cl>hi)hi=cl; if(cl<lo)lo=cl; }
+      candles.push({o: path[a], hi, lo, cl, live});
+    }
+  }
+
+  /* --- Skalierung: im Kerzen-Modus über Dochte (High/Low) --- */
+  let min, max;
+  if(candles){
+    min = Infinity; max = -Infinity;
+    for(const k of candles){ if(k.lo<min)min=k.lo; if(k.hi>max)max=k.hi; }
+  }else{
+    min = Math.min(...data); max = Math.max(...data);
+  }
   if(op >= min - (max-min)*0.3 && op <= max + (max-min)*0.3){ min = Math.min(min, op); max = Math.max(max, op); }
   if(pos){ min = Math.min(min, pos.avg); max = Math.max(max, pos.avg); }
   const pad = (max-min)*0.14 || 1;
   min -= pad; max += pad;
 
-  const L = 8, R = 46, T = 8, B = 22;       // Innenabstände (rechts Platz für Preis-Labels)
   const X = i => L + (w-L-R) * (data.length > 1 ? i/(data.length-1) : 0);
   const Y = v => h - B - (h-T-B) * ((v-min)/(max-min));
 
@@ -1539,9 +1660,9 @@ function drawChart(){
   }
 
   /* --- Vertikale Gitterlinien (Zeit, mm:ss, bezogen aufs sichtbare Fenster) --- */
-  const winStartS = startIdx * TICK_MS / 1000;
+  const winStartS = visStartTick * TICK_MS / 1000;
   const winEndS = tickCount * TICK_MS / 1000;
-  if(data.length > 10){
+  if(tickCount - visStartTick > 10){
     const tSteps = 4;
     for(let k = 1; k < tSteps; k++){
       const x = L + (w-L-R) * k/tSteps;
@@ -1563,23 +1684,51 @@ function drawChart(){
 
   /* --- Kursverlauf: Farbe relativ zum Einstand, wenn man Stücke hält
          (bei Short ist unter dem Einstand gut → Logik gedreht) --- */
-  const last = data[data.length-1];
   const ref = pos ? pos.avg : op;
-  const up = pos && pos.qty < 0 ? last <= ref : last >= ref;
+  const up = pos && pos.qty < 0 ? livePrice <= ref : livePrice >= ref;
   const col = up ? "#3DDC97" : "#FF5C72";
-  ctx.beginPath();
-  for(let i=0;i<data.length;i++){
-    i===0 ? ctx.moveTo(X(i),Y(data[i])) : ctx.lineTo(X(i),Y(data[i]));
-  }
-  ctx.strokeStyle = col; ctx.lineWidth = 1.8;
-  ctx.lineJoin = "round"; ctx.stroke();
+  /* X-Position des animierten letzten Punktes (Linien-Modus) */
+  const liveX = nPts >= 2 ? X(nPts-2) + (X(nPts-1) - X(nPts-2)) * prog : X(0);
+  const liveY = Y(livePrice);
 
-  /* Fläche unter der Kurve */
-  ctx.lineTo(X(data.length-1), h-B); ctx.lineTo(L, h-B); ctx.closePath();
-  const g = ctx.createLinearGradient(0,T,0,h-B);
-  g.addColorStop(0, up ? "rgba(61,220,151,.16)" : "rgba(255,92,114,.16)");
-  g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g; ctx.fill();
+  if(candles){
+    /* --- Kerzen --- */
+    const NC = candles.length;
+    const slot = (w-L-R) / Math.max(NC, 1);
+    const cw = Math.max(2, Math.min(slot*0.62, 13));
+    for(let i=0;i<NC;i++){
+      const k = candles[i];
+      const cx = L + slot*(i+0.5);
+      const kUp = k.cl >= k.o;
+      const kCol = kUp ? "#3DDC97" : "#FF5C72";
+      ctx.strokeStyle = kCol; ctx.fillStyle = kCol; ctx.lineWidth = 1;
+      /* Docht (High–Low) */
+      ctx.beginPath(); ctx.moveTo(cx, Y(k.hi)); ctx.lineTo(cx, Y(k.lo)); ctx.stroke();
+      /* Körper (Open–Close); offene Kerze leicht transparent */
+      const yo = Y(k.o), yc = Y(k.cl);
+      const top = Math.min(yo, yc), bh = Math.max(1, Math.abs(yc - yo));
+      ctx.globalAlpha = k.live ? 0.65 : 1;
+      ctx.fillRect(cx - cw/2, top, cw, bh);
+      ctx.globalAlpha = 1;
+    }
+  }else{
+    /* --- Linie --- */
+    ctx.beginPath();
+    for(let i=0;i<nPts;i++){
+      const px = i < nPts-1 ? X(i) : liveX;
+      const py = i < nPts-1 ? Y(data[i]) : liveY;
+      i===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+    }
+    ctx.strokeStyle = col; ctx.lineWidth = 1.8;
+    ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke();
+
+    /* Fläche unter der Kurve */
+    ctx.lineTo(liveX, h-B); ctx.lineTo(L, h-B); ctx.closePath();
+    const g = ctx.createLinearGradient(0,T,0,h-B);
+    g.addColorStop(0, up ? "rgba(61,220,151,.16)" : "rgba(255,92,114,.16)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g; ctx.fill();
+  }
 
   /* --- Einstandslinie des aktiven Spielers --- */
   if(pos){
@@ -1597,14 +1746,13 @@ function drawChart(){
     ctx.font = "10px ui-monospace,monospace";
   }
 
-  /* --- Letzter Kurs: Punkt + Preis-Tag am rechten Rand --- */
-  const lx = X(data.length-1), ly = Y(last);
-  ctx.beginPath(); ctx.arc(lx,ly,3.2,0,7); ctx.fillStyle = col; ctx.fill();
+  /* --- Letzter Kurs: Punkt (nur Linie) folgt der Animation, Preis-Tag am rechten Rand --- */
+  if(!candles){ ctx.beginPath(); ctx.arc(liveX,liveY,3.2,0,7); ctx.fillStyle = col; ctx.fill(); }
   ctx.fillStyle = col;
-  ctx.fillRect(w-R+2, ly-7, R-4, 14);
+  ctx.fillRect(w-R+2, liveY-7, R-4, 14);
   ctx.fillStyle = "#0B1020";
   ctx.font = "bold 10px ui-monospace,monospace";
-  ctx.fillText(last.toFixed(2), w-R+6, ly+3);
+  ctx.fillText(livePrice.toFixed(2), w-R+6, liveY+3);
 }
 
 /* ====================== News-Feed ====================== */
@@ -1636,6 +1784,7 @@ function replayNewsUpTo(tc){
 function endRound(){
   over = true;
   clearInterval(timer);
+  stopChartLoop();
   tickCount = matchTicks;
   renderAll();
   const p = players[round];
@@ -2115,6 +2264,12 @@ document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
   qtyMode = c.dataset.q;
   document.querySelectorAll(".chip").forEach(x => x.classList.toggle("active", x === c));
   renderAll();
+});
+/* Chart-Ansicht umschalten (Linie/Kerzen) – reine Optik, kein Spieleinfluss */
+document.querySelectorAll(".ctg").forEach(b => b.onclick = () => {
+  chartMode = b.dataset.cm;
+  document.querySelectorAll(".ctg").forEach(x => x.classList.toggle("active", x === b));
+  if(market) drawChart();
 });
 window.addEventListener("resize", () => { if(market) drawChart(); });
 

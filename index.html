@@ -60,6 +60,7 @@
   .dur{flex:1;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
        color:var(--muted);font-family:var(--mono);font-size:14px;cursor:pointer}
   .dur.active{border-color:var(--accent);color:var(--text);background:#1A2340;font-weight:700}
+  .mode-hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.4}
   .dur:disabled{opacity:.35;cursor:not-allowed}
   .code-err{font-family:var(--mono);font-size:12px;color:var(--down);margin-top:6px;min-height:16px}
   .code-badge{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:14px}
@@ -282,16 +283,26 @@
     <div class="start-hero">
       <div class="eyebrow">Nasdaq · SPCX IPO-Tag</div>
       <h1>Trading-Duell</h1>
-      <p>Zwei Trader, nacheinander, exakt derselbe Markt.<br>Wer holt das größere Plus raus?</p>
+      <p>Gleicher Markt, gleiche Chance.<br>Wer tradet am Ende das größere Plus raus?</p>
       <div class="rec" id="recLine" style="display:none"></div>
     </div>
     <button class="start-btn" id="resumeBtn" style="display:none">▶️ Spiel fortsetzen</button>
     <div class="field">
       <label>Modus</label>
       <div class="dur-row">
-        <button class="dur mode active" data-mode="local">📱 Ein Gerät</button>
+        <button class="dur mtop active" data-top="single">👤 Einzelspieler</button>
+        <button class="dur mtop" data-top="multi">👥 Mehrspieler</button>
+      </div>
+      <div class="dur-row" id="modeSub" style="display:none">
+        <button class="dur mode active" data-mode="local">📱 Gleiches Gerät</button>
         <button class="dur mode" data-mode="remote">📱📱 Zwei Geräte</button>
       </div>
+      <div class="mode-hint" id="modeHint"></div>
+      <div class="dur-row" id="soloSub">
+        <button class="dur solosub active" data-sb="false">🎯 Normal</button>
+        <button class="dur solosub" data-sb="true">🏖️ Sandbox</button>
+      </div>
+      <div class="mode-hint" id="soloHint"></div>
     </div>
     <div class="field" id="field1">
       <label id="label1">Spieler 1 (beginnt)</label>
@@ -301,12 +312,21 @@
       <label>Spieler 2</label>
       <input class="pl2" id="name2" type="text" maxlength="14" placeholder="Name" value="Spieler 2">
     </div>
-    <div class="field">
+    <div class="field" id="durField">
       <label>Zeit pro Spieler</label>
       <div class="dur-row">
         <button class="dur" data-m="5">5 Min</button>
         <button class="dur" data-m="10">10 Min</button>
         <button class="dur active" data-m="15">15 Min</button>
+      </div>
+    </div>
+    <div class="field" id="capField" style="display:none">
+      <label>Startkapital</label>
+      <div class="dur-row">
+        <button class="dur cap" data-cap="10000">10.000 $</button>
+        <button class="dur cap active" data-cap="25000">25.000 $</button>
+        <button class="dur cap" data-cap="50000">50.000 $</button>
+        <button class="dur cap" data-cap="100000">100.000 $</button>
       </div>
     </div>
     <div class="field" id="fieldCode" style="display:none">
@@ -320,14 +340,16 @@
     <div class="rules">
       Beide Spieler erleben <b style="color:var(--text)">denselben Kursverlauf und dieselben News</b> –
       nur so ist der Vergleich fair.
-      Jeder startet mit 25.000 $, SPCX beginnt beim Ausgabepreis von 135 $.
+      Jeder startet mit dem gewählten Startkapital, SPCX beginnt beim Ausgabepreis von 135 $.
       Am Ende zählt das Gesamtdepot (Bargeld + Positionen zum Schlusskurs).<br><br>
       <b style="color:var(--text)">🐻 Shorten:</b> Der Short-Button setzt auf fallende Kurse –
       eingedeckt wird per Kaufen. Maximal 1× Depotwert, kein Hebel. Auch schlechte News sind so eine Chance!<br><br>
-      <b style="color:var(--text)">📱 Ein Gerät:</b> Beide spielen nacheinander auf diesem Handy
-      (Spieler 2 schaut bei Runde 1 nicht zu 🙈), danach wird automatisch verglichen.<br><br>
-      <b style="color:var(--text)">📱📱 Zwei Geräte:</b> Du legst ein Spiel an und bekommst einen
-      6-stelligen Code. Der andere tippt ihn auf seinem Gerät ein – beide spielen exakt dasselbe Spiel.
+      <b style="color:var(--text)">👤 Einzelspieler:</b> Du spielst allein für dich und versuchst,
+      deinen eigenen Rekord zu knacken.<br><br>
+      <b style="color:var(--text)">👥 Mehrspieler · 📱 Gleiches Gerät:</b> Beide spielen nacheinander auf
+      diesem Handy (Spieler 2 schaut bei Runde 1 nicht zu 🙈), danach wird automatisch verglichen.<br><br>
+      <b style="color:var(--text)">👥 Mehrspieler · 📱📱 Zwei Geräte:</b> Du legst ein Spiel an und bekommst
+      einen 6-stelligen Code. Der andere tippt ihn auf seinem Gerät ein – beide spielen exakt dasselbe Spiel.
       Start zur übernächsten vollen Minute; in derselben Minute angelegt, geht's zeitgleich los. ⏱️
       Die Endwerte vergleicht ihr danach selbst.
     </div>
@@ -343,6 +365,7 @@
         <div class="countdown" id="countdown">15:00</div>
         <div class="round-tag" id="roundTag">Runde 1/2</div>
         <button class="pauseBtn" id="pauseBtn">⏸ Pause</button>
+        <button class="pauseBtn" id="endSandboxBtn" style="display:none">⏹ Beenden</button>
       </div>
       <div class="player-row">
         <div class="player-pill">
@@ -508,7 +531,7 @@
 "use strict";
 
 /* ====================== Konfiguration ====================== */
-const START_CASH = 25000;
+let START_CASH = 25000;
 const TICK_MS = 1000;
 /* Pool-Daten (dur, Event-Abstände, Drift pro Tick) sind auf 0,7-s-Ticks kalibriert –
    dieser Faktor rechnet sie auf die aktuelle Tick-Länge um, damit alles in
@@ -604,6 +627,8 @@ const OPENING_EVENT = {t:"SPCX",
    newsMult wird hier nicht angewendet, damit die Größenordnung planbar bleibt.
    Bewusst NICHT in den Insider-Tipps: Mega-Events bleiben unangekündigt. */
 const MEGA_REACT_TICKS = Math.round(20000 / TICK_MS);
+const MEGA_PRE_FRAC = 0.2;  // Anteil der Mega-Bewegung, der als Vor-Beben vorab hereinkriecht
+const MEGA_FADE_FRAC = 0.65; // Anteil der Mega-Bewegung, der nach dem Hoch wieder abgegeben wird
 const MEGA_POOL = [
   {t:"SPCX", txt:"💥 MEGA: Jahrhundert-Auftrag! Regierung lässt SpaceX die Mond-Basis bauen.", jump:+0.30, drift:+0.0008, dur:40},
   {t:"TSLA", txt:"💥 MEGA: Durchbruch! Teslas neuer Akku lädt in 90 Sekunden voll.",            jump:+0.28, drift:+0.0008, dur:40},
@@ -736,11 +761,13 @@ function genMarket(seed, ticks){
      gleichmäßig auf die Rampen-Ticks verteilt (factor^(1/n) je Tick).
      Rein deterministisch: der Faktor steht schon fest, er wird nur über
      mehr Ticks gestreckt – kein zusätzliches rnd(), Fairness bleibt. */
-  const pushJump = (at, sym, factor) => {
+  const pushJump = (at, sym, factor, forceRamp) => {
     const dev = Math.abs(factor - 1);
-    const rampTicks = dev < 0.04
-      ? 1                                                   // kleine News: sofort
-      : Math.max(2, Math.round(Math.min(dev * 50, 14) * 1000 / TICK_MS));
+    const rampTicks = forceRamp
+      ? forceRamp                                            // erzwungene Rampenlänge (z. B. Mega-Vorbeben)
+      : dev < 0.04
+        ? 1                                                  // kleine News: sofort
+        : Math.max(2, Math.round(Math.min(dev * 50, 14) * 1000 / TICK_MS));
     if(rampTicks <= 1){ pendingJumps.push({at, sym, factor}); return; }
     const per = Math.pow(factor, 1 / rampTicks);            // gleicher Tick-Schritt
     for(let k = 0; k < rampTicks; k++) pendingJumps.push({at: at + k, sym, factor: per});
@@ -766,13 +793,39 @@ function genMarket(seed, ticks){
     events.push({tick:i, ev:resolved, tag: resolved.jump > 0 ? "up" : resolved.jump < 0 ? "down" : "neutral"});
   }
 
-  /* Mega-Event: eigene, lange Zündschnur (MEGA_REACT_TICKS) und ohne newsMult */
+  /* Mega-Event: eigene, lange Zündschnur (MEGA_REACT_TICKS) und ohne newsMult.
+     Vor-Beben: ein kleiner Teil der Bewegung (~MEGA_PRE_FRAC) kriecht schon in
+     den ~12 Ticks VOR dem Hauptschlag in gleicher Richtung herein – ein
+     spürbares Warnsignal im Kurs, das aufmerksame Trader rechtzeitig
+     aussteigen (vor dem Crash) bzw. eindecken/aufspringen lässt. Der
+     Gesamtfaktor bleibt unverändert (preFactor * Rest == factor), nur ein
+     Teil der Bewegung wandert zeitlich nach vorne – kein zusätzliches rnd().
+     Spike-and-Fade: nach dem Hoch (Ende der Boost-Drift) ebbt ~MEGA_FADE_FRAC
+     der Bewegung langsam (~75 s) wieder ab – der Spike wird so zum echten
+     Verkaufsfenster statt zum neuen Dauerniveau. Reiner Zeit-Anhang, der den
+     bereits gestreuten factor weiterverwendet – kein zusätzliches rnd(). */
   function fireMega(i, ev){
     const dur = Math.round(ev.dur * TICK_SCALE);
     const hits = i + MEGA_REACT_TICKS;
     const targets = ev.t === "ALL" ? Object.keys(prices) : [ev.t];
+    const preTicks = Math.max(2, Math.round(MEGA_REACT_TICKS * 0.6));
+    const fadeStart = hits + dur;                            // Plateau nach der Boost-Drift
+    let fadeTicks = Math.round(75000 / TICK_MS);             // langsames Abebben
+    if(fadeStart < ticks - 4){                               // genug Platz bis Spielende?
+      fadeTicks = Math.min(fadeTicks, ticks - fadeStart);    // späte Megas faden schneller
+    }else{
+      fadeTicks = 0;                                         // kein Platz: kein Fade
+    }
     for(const s of targets){
-      pushJump(hits, s, 1 + ev.jump * (0.9 + rnd()*0.2));
+      const factor = 1 + ev.jump * (0.9 + rnd()*0.2);
+      const preFactor = Math.pow(factor, MEGA_PRE_FRAC);
+      pushJump(hits - preTicks, s, preFactor, preTicks);     // sanfter Vorlauf
+      pushJump(hits, s, factor / preFactor);                 // Hauptschlag (Rest)
+      if(fadeTicks > 1){
+        // Rückkehr auf ~ein Drittel der Bewegung; R = Zielniveau / Sprungniveau
+        const netTarget = 1 + (factor - 1) * (1 - MEGA_FADE_FRAC);
+        pushJump(fadeStart, s, netTarget / factor, fadeTicks);
+      }
     }
     if(ev.drift) effects.push({sym:ev.t, drift:ev.drift * TICK_SCALE, from:hits, until:hits + dur});
     if(ev.t !== "ALL") lastEventSym = ev.t;
@@ -885,15 +938,43 @@ let chartRaf = null, lastTickAt = 0; // für flüssige Chart-Animation (rAF-Loop
    local = Rundenbeginn. Nur im Remote-Modus spielbestimmend. */
 let roundAnchor = 0;
 
-/* Spielmodus: "local" = beide nacheinander auf einem Gerät (Pass & Play),
-   "remote" = ein Spieler pro Gerät, gekoppelt über den Spiel-Code. */
+/* Spielmodus: "solo" = Einzelspieler (eine Runde, nur für sich),
+   "local" = Mehrspieler am gleichen Gerät (Pass & Play, beide nacheinander),
+   "remote" = Mehrspieler auf zwei Geräten, gekoppelt über den Spiel-Code.
+   Timing: "solo" und "local" sind tick-basiert (pausierbar); nur "remote" läuft
+   nach Weltzeit. Ergebnis: "solo" und "remote" zeigen das eigene Ergebnis. */
 let mode = "local";
+let sandbox = false;
+let sandboxCash = 25000;
 
 let durationMin = 15;
 document.querySelectorAll(".dur[data-m]").forEach(b => b.onclick = () => {
   durationMin = +b.dataset.m;
   document.querySelectorAll(".dur[data-m]").forEach(x => x.classList.toggle("active", x === b));
 });
+
+document.querySelectorAll(".solosub").forEach(b => b.onclick = () => {
+  sandbox = b.dataset.sb === "true";
+  document.querySelectorAll(".solosub").forEach(x => x.classList.toggle("active", x === b));
+  applySoloUI();
+  updateStartBtn();
+});
+
+document.querySelectorAll(".cap").forEach(b => b.onclick = () => {
+  sandboxCash = +b.dataset.cap;
+  document.querySelectorAll(".cap").forEach(x => x.classList.toggle("active", x === b));
+});
+
+function applySoloUI(){
+  const solo = mode === "solo";
+  $("soloSub").style.display  = solo ? "" : "none";
+  $("soloHint").style.display = solo ? "" : "none";
+  $("capField").style.display = (solo && sandbox) ? "" : "none";
+  $("durField").style.display = (solo && sandbox) ? "none" : "";
+  $("soloHint").textContent   = sandbox
+    ? "Freies Üben ohne Zeitdruck – kein Rekord-Eintrag."
+    : "Du spielst allein und misst dich an deinem eigenen Rekord.";
+}
 
 /* Spiel-Code: 6 Ziffern, dient direkt als Markt-Seed.
    Code mod 3 kodiert die Spieldauer (5/10/15 Min), damit beide Geräte
@@ -911,25 +992,54 @@ function makeCode(durIdx){
 /* Start-Button-Text richtet sich nach Modus und (im Remote-Modus) danach,
    ob ein gültiger Code zum Beitreten eingetippt wurde. */
 function updateStartBtn(){
+  if(mode === "solo"){
+    $("startBtn").textContent = sandbox ? "Sandbox starten 🏖️" : "Spiel starten 🔔";
+    return;
+  }
   if(mode === "local"){ $("startBtn").textContent = "Duell starten 🔔"; return; }
   const valid = /^\d{6}$/.test(codeIn.value);
   $("startBtn").textContent = valid ? "Spiel beitreten 🔔" : "Spiel anlegen 🔔";
 }
 
+const MODE_HINTS = {
+  solo:   "Du spielst allein und misst dich an deinem eigenen Rekord.",
+  local:  "Beide nacheinander auf diesem Gerät – danach wird automatisch verglichen.",
+  remote: "Jeder auf seinem Gerät, gekoppelt per 6-stelligem Code – exakt derselbe Markt.",
+};
+
 function setMode(m){
   mode = m;
   document.querySelectorAll(".mode").forEach(b => b.classList.toggle("active", b.dataset.mode === m));
-  $("field2").style.display  = m === "local" ? "" : "none";
+  $("field2").style.display    = m === "local" ? "" : "none";   // 2. Name nur bei "Gleiches Gerät"
   $("fieldCode").style.display = m === "remote" ? "" : "none";
   $("label1").textContent = m === "local" ? "Spieler 1 (beginnt)" : "Dein Name";
-  if(m === "local"){
+  if(m !== "remote"){
     codeIn.value = "";
     document.querySelectorAll(".dur[data-m]").forEach(b => b.disabled = false);
   }
+  $("modeHint").textContent = MODE_HINTS[m] || "";
   $("codeErr").textContent = "";
   updateStartBtn();
+  applySoloUI();
 }
 document.querySelectorAll(".mode").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+
+/* Oberste Ebene: Einzelspieler vs. Mehrspieler. Mehrspieler blendet die
+   Unterauswahl (gleiches/zwei Geräte) ein. */
+function setTop(t){
+  document.querySelectorAll(".mtop").forEach(b => b.classList.toggle("active", b.dataset.top === t));
+  if(t === "single"){
+    $("modeSub").style.display = "none";
+    setMode("solo");
+  }else{
+    sandbox = false;
+    document.querySelectorAll(".solosub").forEach(b => b.classList.toggle("active", b.dataset.sb === "false"));
+    $("modeSub").style.display = "";
+    const sub = document.querySelector(".mode.active");
+    setMode(sub ? sub.dataset.mode : "local");
+  }
+}
+document.querySelectorAll(".mtop").forEach(b => b.onclick = () => setTop(b.dataset.top));
 
 const codeIn = $("codeIn");
 codeIn.addEventListener("input", () => {
@@ -946,7 +1056,9 @@ codeIn.addEventListener("input", () => {
 });
 
 function buildMarket(){
-  matchTicks = Math.round(durationMin * 60000 / TICK_MS);
+  matchTicks = sandbox
+    ? Math.round(60 * 60000 / TICK_MS)
+    : Math.round(durationMin * 60000 / TICK_MS);
   market = genMarket(gameCode, matchTicks);
 }
 
@@ -972,7 +1084,7 @@ const saveStore = s => { try{ localStorage.setItem(STORE_KEY, JSON.stringify(s))
    Eigener Schlüssel, getrennt von Namen/Rekord. Tutorial wird nie gesichert. */
 const GAME_KEY = "spcx-duell-game";
 function saveSnapshot(phase){
-  if(tutorial || over && phase !== "handover") return;
+  if(tutorial || sandbox || (over && phase !== "handover")) return;
   try{
     localStorage.setItem(GAME_KEY, JSON.stringify({
       v:1, mode, gameCode, durationMin, round,
@@ -985,7 +1097,7 @@ function loadSnapshot(){
   try{
     const s = JSON.parse(localStorage.getItem(GAME_KEY));
     if(!s || s.v !== 1) return null;
-    if(s.mode !== "local" && s.mode !== "remote") return null;
+    if(s.mode !== "local" && s.mode !== "remote" && s.mode !== "solo") return null;
     if(typeof s.gameCode !== "number" || !Array.isArray(s.players) || !s.players.length) return null;
     if(Date.now() - s.ts > 24*3600*1000) return null; // alte Stände nicht wiederbeleben
     return s;
@@ -1068,9 +1180,20 @@ $("resumeBtn").onclick = () => {
 };
 
 applyStore();
+setTop("single"); // Startauswahl: Einzelspieler – mode-Variable an die UI angleichen
 
 $("startBtn").onclick = () => {
   rememberNames();
+  if(mode === "solo"){
+    // Einzelspieler: ein Spieler, eine Runde, sofortiger Start (keine Lobby)
+    START_CASH = sandbox ? sandboxCash : 25000;
+    gameCode = makeCode(DURATIONS.indexOf(durationMin));
+    buildMarket();
+    players = [newPlayer($("name1").value.trim() || "Spieler 1", "var(--p1)")];
+    startRound(0);
+    return;
+  }
+  START_CASH = 25000;
   if(mode === "local"){
     gameCode = makeCode(DURATIONS.indexOf(durationMin));
     buildMarket();
@@ -1178,12 +1301,17 @@ function startRound(r){
   $("pauseBtn").textContent = "⏸ Pause";
   // Remote läuft strikt nach Weltzeit – keine Pause möglich; im Tutorial pausiert der Coach
   $("pauseBtn").style.display = (mode === "remote" || tutorial) ? "none" : "";
+  $("endSandboxBtn").style.display = sandbox ? "" : "none";
   roundAnchor = mode === "remote" ? startAt : Date.now();
   $("roundTag").textContent = tutorial
     ? "🎓 Tutorial"
-    : mode === "remote"
-      ? `Code ${String(gameCode).padStart(6,"0")}`
-      : `Runde ${r+1}/2`;
+    : (mode === "solo" && sandbox)
+      ? "🏖️ Sandbox"
+      : mode === "solo"
+        ? "Einzelspiel"
+        : mode === "remote"
+          ? `Code ${String(gameCode).padStart(6,"0")}`
+          : `Runde ${r+1}/2`;
 
   const p = players[round];
   $("pillDot").style.background = p.color;
@@ -1270,7 +1398,7 @@ function tick(){
   processTick(true);
   if(tutorial) tutOnTick();
 
-  if(tickCount >= matchTicks){ endRound(); return; }
+  if(!sandbox && tickCount >= matchTicks){ endRound(); return; }
   saveSnapshot("play");
   renderAll();
 }
@@ -1280,7 +1408,7 @@ function tick(){
 let npTimer = null;
 
 function showNewsPop(e){
-  if(mode === "local") newsPaused = true;
+  if(mode !== "remote") newsPaused = true; // solo & local: Popup pausiert; remote läuft weiter
   clearTimeout(npTimer);
   if(mode === "remote") npTimer = setTimeout(closeNewsPop, e.mega ? 12000 : 6000);
   const sym = e.ev.t;
@@ -1456,10 +1584,16 @@ function buildWatch(){
 }
 
 function renderAll(){
-  const remain = Math.max(0, Math.round((matchTicks - tickCount) * TICK_MS / 1000));
   const cd = $("countdown");
-  cd.textContent = String(Math.floor(remain/60)).padStart(2,"0") + ":" + String(remain%60).padStart(2,"0");
-  cd.classList.toggle("hot", remain <= 60);
+  if(sandbox){
+    const elapsed = Math.round(tickCount * TICK_MS / 1000);
+    cd.textContent = String(Math.floor(elapsed/60)).padStart(2,"0") + ":" + String(elapsed%60).padStart(2,"0");
+    cd.classList.remove("hot");
+  }else{
+    const remain = Math.max(0, Math.round((matchTicks - tickCount) * TICK_MS / 1000));
+    cd.textContent = String(Math.floor(remain/60)).padStart(2,"0") + ":" + String(remain%60).padStart(2,"0");
+    cd.classList.toggle("hot", remain <= 60);
+  }
 
   const p = players[round];
   const tv = totalOf(p);
@@ -1785,7 +1919,7 @@ function endRound(){
   over = true;
   clearInterval(timer);
   stopChartLoop();
-  tickCount = matchTicks;
+  if(sandbox) matchTicks = tickCount; else tickCount = matchTicks;
   renderAll();
   const p = players[round];
   const tot = totalOf(p);
@@ -1797,10 +1931,10 @@ function endRound(){
     return;
   }
 
-  updateRecord(p); // persönlichen Rekord auf diesem Gerät fortschreiben
+  if(!sandbox) updateRecord(p); // persönlichen Rekord auf diesem Gerät fortschreiben
 
-  // Remote: jedes Gerät spielt nur seine eine Runde – eigenes Ergebnis zeigen
-  if(mode === "remote"){
+  // Eine Runde, eigenes Ergebnis: Einzelspieler oder jedes Remote-Gerät
+  if(mode === "solo" || mode === "remote"){
     showResultSolo(p);
     return;
   }
@@ -2021,8 +2155,13 @@ $("cmpBtn").onclick = () => {
 function showResultSolo(p){
   clearSnapshot(); // Runde gespielt – Snapshot entfernen
   soloP = p;
-  $("resTitle").textContent = "Geschafft!";
-  $("resSub").textContent = "Tauscht eure Ergebnisse aus – dann gibt's den direkten Vergleich.";
+  const solo = mode === "solo"; // Einzelspieler: kein Gegner, kein Ergebnis-Austausch
+  $("resTitle").textContent = sandbox ? "Sandbox beendet!" : "Geschafft!";
+  $("resSub").textContent = sandbox
+    ? "Freies Üben – kein Rekord-Eintrag."
+    : solo
+      ? "Dein Ergebnis – schaffst du beim nächsten Mal mehr?"
+      : "Tauscht eure Ergebnisse aus – dann gibt's den direkten Vergleich.";
   $("resName1").textContent = p.name;
   document.querySelector("#resCard1 .dot").style.background = p.color;
   $("crown1").textContent = "";
@@ -2030,7 +2169,7 @@ function showResultSolo(p){
   $("resCard2").style.display = "none";
   setRes("1", p);
   buildAnalysis([p]);
-  $("cmpBox").style.display = "";
+  $("cmpBox").style.display = solo ? "none" : "";
   $("shareBtn").textContent = "📤 Mein Ergebnis kopieren";
   $("cmpIn").value = ""; $("cmpErr").textContent = "";
   $("resCode").textContent = String(gameCode).padStart(6,"0");
@@ -2231,8 +2370,9 @@ function exitTutorial(){
   $("newsPop").classList.remove("show");
   $("matchScreen").classList.remove("show");
   $("startScreen").classList.add("show");
-  // mode wieder an die Auswahl auf dem Startscreen angleichen
-  setMode(document.querySelector(".mode.active").dataset.mode);
+  // mode wieder an die Auswahl auf dem Startscreen angleichen (robust für Einzelspieler)
+  const topSel = document.querySelector(".mtop.active");
+  setTop(topSel ? topSel.dataset.top : "single");
   window.scrollTo(0,0);
 }
 
@@ -2256,6 +2396,7 @@ $("pauseBtn").onclick = function(){
   paused = !paused;
   this.textContent = paused ? "▶ Weiter" : "⏸ Pause";
 };
+$("endSandboxBtn").onclick = () => { if(!over) endRound(); };
 $("npSkip").onclick = closeNewsPop;
 $("buyBtn").onclick = () => trade("buy");
 $("sellBtn").onclick = () => trade("sell");

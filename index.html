@@ -60,6 +60,7 @@
   .dur{flex:1;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
        color:var(--muted);font-family:var(--mono);font-size:14px;cursor:pointer}
   .dur.active{border-color:var(--accent);color:var(--text);background:#1A2340;font-weight:700}
+  .mode-hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.4}
   .dur:disabled{opacity:.35;cursor:not-allowed}
   .code-err{font-family:var(--mono);font-size:12px;color:var(--down);margin-top:6px;min-height:16px}
   .code-badge{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:14px}
@@ -289,9 +290,14 @@
     <div class="field">
       <label>Modus</label>
       <div class="dur-row">
-        <button class="dur mode active" data-mode="local">📱 Ein Gerät</button>
+        <button class="dur mtop active" data-top="single">👤 Einzelspieler</button>
+        <button class="dur mtop" data-top="multi">👥 Mehrspieler</button>
+      </div>
+      <div class="dur-row" id="modeSub" style="display:none">
+        <button class="dur mode active" data-mode="local">📱 Gleiches Gerät</button>
         <button class="dur mode" data-mode="remote">📱📱 Zwei Geräte</button>
       </div>
+      <div class="mode-hint" id="modeHint"></div>
     </div>
     <div class="field" id="field1">
       <label id="label1">Spieler 1 (beginnt)</label>
@@ -324,10 +330,12 @@
       Am Ende zählt das Gesamtdepot (Bargeld + Positionen zum Schlusskurs).<br><br>
       <b style="color:var(--text)">🐻 Shorten:</b> Der Short-Button setzt auf fallende Kurse –
       eingedeckt wird per Kaufen. Maximal 1× Depotwert, kein Hebel. Auch schlechte News sind so eine Chance!<br><br>
-      <b style="color:var(--text)">📱 Ein Gerät:</b> Beide spielen nacheinander auf diesem Handy
-      (Spieler 2 schaut bei Runde 1 nicht zu 🙈), danach wird automatisch verglichen.<br><br>
-      <b style="color:var(--text)">📱📱 Zwei Geräte:</b> Du legst ein Spiel an und bekommst einen
-      6-stelligen Code. Der andere tippt ihn auf seinem Gerät ein – beide spielen exakt dasselbe Spiel.
+      <b style="color:var(--text)">👤 Einzelspieler:</b> Du spielst allein für dich und versuchst,
+      deinen eigenen Rekord zu knacken.<br><br>
+      <b style="color:var(--text)">👥 Mehrspieler · 📱 Gleiches Gerät:</b> Beide spielen nacheinander auf
+      diesem Handy (Spieler 2 schaut bei Runde 1 nicht zu 🙈), danach wird automatisch verglichen.<br><br>
+      <b style="color:var(--text)">👥 Mehrspieler · 📱📱 Zwei Geräte:</b> Du legst ein Spiel an und bekommst
+      einen 6-stelligen Code. Der andere tippt ihn auf seinem Gerät ein – beide spielen exakt dasselbe Spiel.
       Start zur übernächsten vollen Minute; in derselben Minute angelegt, geht's zeitgleich los. ⏱️
       Die Endwerte vergleicht ihr danach selbst.
     </div>
@@ -915,8 +923,11 @@ let chartRaf = null, lastTickAt = 0; // für flüssige Chart-Animation (rAF-Loop
    local = Rundenbeginn. Nur im Remote-Modus spielbestimmend. */
 let roundAnchor = 0;
 
-/* Spielmodus: "local" = beide nacheinander auf einem Gerät (Pass & Play),
-   "remote" = ein Spieler pro Gerät, gekoppelt über den Spiel-Code. */
+/* Spielmodus: "solo" = Einzelspieler (eine Runde, nur für sich),
+   "local" = Mehrspieler am gleichen Gerät (Pass & Play, beide nacheinander),
+   "remote" = Mehrspieler auf zwei Geräten, gekoppelt über den Spiel-Code.
+   Timing: "solo" und "local" sind tick-basiert (pausierbar); nur "remote" läuft
+   nach Weltzeit. Ergebnis: "solo" und "remote" zeigen das eigene Ergebnis. */
 let mode = "local";
 
 let durationMin = 15;
@@ -941,25 +952,48 @@ function makeCode(durIdx){
 /* Start-Button-Text richtet sich nach Modus und (im Remote-Modus) danach,
    ob ein gültiger Code zum Beitreten eingetippt wurde. */
 function updateStartBtn(){
+  if(mode === "solo"){  $("startBtn").textContent = "Spiel starten 🔔"; return; }
   if(mode === "local"){ $("startBtn").textContent = "Duell starten 🔔"; return; }
   const valid = /^\d{6}$/.test(codeIn.value);
   $("startBtn").textContent = valid ? "Spiel beitreten 🔔" : "Spiel anlegen 🔔";
 }
 
+const MODE_HINTS = {
+  solo:   "Du spielst allein und misst dich an deinem eigenen Rekord.",
+  local:  "Beide nacheinander auf diesem Gerät – danach wird automatisch verglichen.",
+  remote: "Jeder auf seinem Gerät, gekoppelt per 6-stelligem Code – exakt derselbe Markt.",
+};
+
 function setMode(m){
   mode = m;
   document.querySelectorAll(".mode").forEach(b => b.classList.toggle("active", b.dataset.mode === m));
-  $("field2").style.display  = m === "local" ? "" : "none";
+  $("field2").style.display    = m === "local" ? "" : "none";   // 2. Name nur bei "Gleiches Gerät"
   $("fieldCode").style.display = m === "remote" ? "" : "none";
   $("label1").textContent = m === "local" ? "Spieler 1 (beginnt)" : "Dein Name";
-  if(m === "local"){
+  if(m !== "remote"){
     codeIn.value = "";
     document.querySelectorAll(".dur[data-m]").forEach(b => b.disabled = false);
   }
+  $("modeHint").textContent = MODE_HINTS[m] || "";
   $("codeErr").textContent = "";
   updateStartBtn();
 }
 document.querySelectorAll(".mode").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+
+/* Oberste Ebene: Einzelspieler vs. Mehrspieler. Mehrspieler blendet die
+   Unterauswahl (gleiches/zwei Geräte) ein. */
+function setTop(t){
+  document.querySelectorAll(".mtop").forEach(b => b.classList.toggle("active", b.dataset.top === t));
+  if(t === "single"){
+    $("modeSub").style.display = "none";
+    setMode("solo");
+  }else{
+    $("modeSub").style.display = "";
+    const sub = document.querySelector(".mode.active");
+    setMode(sub ? sub.dataset.mode : "local");
+  }
+}
+document.querySelectorAll(".mtop").forEach(b => b.onclick = () => setTop(b.dataset.top));
 
 const codeIn = $("codeIn");
 codeIn.addEventListener("input", () => {
@@ -1015,7 +1049,7 @@ function loadSnapshot(){
   try{
     const s = JSON.parse(localStorage.getItem(GAME_KEY));
     if(!s || s.v !== 1) return null;
-    if(s.mode !== "local" && s.mode !== "remote") return null;
+    if(s.mode !== "local" && s.mode !== "remote" && s.mode !== "solo") return null;
     if(typeof s.gameCode !== "number" || !Array.isArray(s.players) || !s.players.length) return null;
     if(Date.now() - s.ts > 24*3600*1000) return null; // alte Stände nicht wiederbeleben
     return s;
@@ -1098,9 +1132,18 @@ $("resumeBtn").onclick = () => {
 };
 
 applyStore();
+setTop("single"); // Startauswahl: Einzelspieler – mode-Variable an die UI angleichen
 
 $("startBtn").onclick = () => {
   rememberNames();
+  if(mode === "solo"){
+    // Einzelspieler: ein Spieler, eine Runde, sofortiger Start (keine Lobby)
+    gameCode = makeCode(DURATIONS.indexOf(durationMin));
+    buildMarket();
+    players = [newPlayer($("name1").value.trim() || "Spieler 1", "var(--p1)")];
+    startRound(0);
+    return;
+  }
   if(mode === "local"){
     gameCode = makeCode(DURATIONS.indexOf(durationMin));
     buildMarket();
@@ -1211,9 +1254,11 @@ function startRound(r){
   roundAnchor = mode === "remote" ? startAt : Date.now();
   $("roundTag").textContent = tutorial
     ? "🎓 Tutorial"
-    : mode === "remote"
-      ? `Code ${String(gameCode).padStart(6,"0")}`
-      : `Runde ${r+1}/2`;
+    : mode === "solo"
+      ? "Einzelspiel"
+      : mode === "remote"
+        ? `Code ${String(gameCode).padStart(6,"0")}`
+        : `Runde ${r+1}/2`;
 
   const p = players[round];
   $("pillDot").style.background = p.color;
@@ -1310,7 +1355,7 @@ function tick(){
 let npTimer = null;
 
 function showNewsPop(e){
-  if(mode === "local") newsPaused = true;
+  if(mode !== "remote") newsPaused = true; // solo & local: Popup pausiert; remote läuft weiter
   clearTimeout(npTimer);
   if(mode === "remote") npTimer = setTimeout(closeNewsPop, e.mega ? 12000 : 6000);
   const sym = e.ev.t;
@@ -1829,8 +1874,8 @@ function endRound(){
 
   updateRecord(p); // persönlichen Rekord auf diesem Gerät fortschreiben
 
-  // Remote: jedes Gerät spielt nur seine eine Runde – eigenes Ergebnis zeigen
-  if(mode === "remote"){
+  // Eine Runde, eigenes Ergebnis: Einzelspieler oder jedes Remote-Gerät
+  if(mode === "solo" || mode === "remote"){
     showResultSolo(p);
     return;
   }
@@ -2051,8 +2096,11 @@ $("cmpBtn").onclick = () => {
 function showResultSolo(p){
   clearSnapshot(); // Runde gespielt – Snapshot entfernen
   soloP = p;
+  const solo = mode === "solo"; // Einzelspieler: kein Gegner, kein Ergebnis-Austausch
   $("resTitle").textContent = "Geschafft!";
-  $("resSub").textContent = "Tauscht eure Ergebnisse aus – dann gibt's den direkten Vergleich.";
+  $("resSub").textContent = solo
+    ? "Dein Ergebnis – schaffst du beim nächsten Mal mehr?"
+    : "Tauscht eure Ergebnisse aus – dann gibt's den direkten Vergleich.";
   $("resName1").textContent = p.name;
   document.querySelector("#resCard1 .dot").style.background = p.color;
   $("crown1").textContent = "";
@@ -2060,7 +2108,7 @@ function showResultSolo(p){
   $("resCard2").style.display = "none";
   setRes("1", p);
   buildAnalysis([p]);
-  $("cmpBox").style.display = "";
+  $("cmpBox").style.display = solo ? "none" : "";
   $("shareBtn").textContent = "📤 Mein Ergebnis kopieren";
   $("cmpIn").value = ""; $("cmpErr").textContent = "";
   $("resCode").textContent = String(gameCode).padStart(6,"0");
@@ -2261,8 +2309,9 @@ function exitTutorial(){
   $("newsPop").classList.remove("show");
   $("matchScreen").classList.remove("show");
   $("startScreen").classList.add("show");
-  // mode wieder an die Auswahl auf dem Startscreen angleichen
-  setMode(document.querySelector(".mode.active").dataset.mode);
+  // mode wieder an die Auswahl auf dem Startscreen angleichen (robust für Einzelspieler)
+  const topSel = document.querySelector(".mtop.active");
+  setTop(topSel ? topSel.dataset.top : "single");
   window.scrollTo(0,0);
 }
 

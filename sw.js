@@ -1,5 +1,5 @@
 /* SPCX Trading-Duell – Service Worker (offline-fähig) */
-const CACHE = "spcx-duell-v26";
+const CACHE = "spcx-duell-v27";
 const FILES = [
   "./",
   "./index.html",

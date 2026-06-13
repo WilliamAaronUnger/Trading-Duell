@@ -46,6 +46,8 @@
   .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent)}
   .start-hero h1{font-size:30px;font-weight:800;letter-spacing:-.02em;margin-top:8px}
   .start-hero p{color:var(--muted);font-size:14px;margin-top:8px;line-height:1.5}
+  .rec{margin-top:14px;text-align:center;font-family:var(--mono);font-size:13px;color:var(--muted)}
+  .rec b{color:var(--accent);font-weight:700}
   .field{margin-top:14px}
   .field label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.16em;
                text-transform:uppercase;color:var(--muted);margin-bottom:6px}
@@ -257,6 +259,7 @@
       <div class="eyebrow">Nasdaq · SPCX IPO-Tag</div>
       <h1>Trading-Duell</h1>
       <p>Zwei Trader, nacheinander, exakt derselbe Markt.<br>Wer holt das größere Plus raus?</p>
+      <div class="rec" id="recLine" style="display:none"></div>
     </div>
     <div class="field">
       <label>Modus</label>
@@ -303,6 +306,7 @@
       Start zur übernächsten vollen Minute; in derselben Minute angelegt, geht's zeitgleich los. ⏱️
       Die Endwerte vergleicht ihr danach selbst.
     </div>
+    <button class="lobby-cancel" id="clearBtn" style="margin-top:10px;display:none">🗑 Gespeicherte Daten löschen</button>
   </div>
 </div>
 
@@ -861,7 +865,59 @@ function newPlayer(name, color){
                  peak:START_CASH, trough:START_CASH, maxDD:0}};
 }
 
+/* ====================== Lokaler Speicher (Namen + Rekord) ====================== */
+/* Bewusst winzig: nur die zuletzt genutzten Namen und der beste je auf diesem
+   Gerät erzielte P&L – ein einziger JSON-Schlüssel, wenige hundert Byte.
+   Über "Daten löschen" komplett entfernbar. localStorage kann fehlen oder
+   gesperrt sein (Privatmodus), darum alles defensiv in try/catch. */
+const STORE_KEY = "spcx-duell";
+const loadStore = () => { try{ return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }catch(e){ return {}; } };
+const saveStore = s => { try{ localStorage.setItem(STORE_KEY, JSON.stringify(s)); }catch(e){} };
+
+/* Namen merken (beim Spielstart aufgerufen) */
+function rememberNames(){
+  const s = loadStore();
+  s.n1 = $("name1").value.trim().slice(0,14);
+  s.n2 = $("name2").value.trim().slice(0,14);
+  saveStore(s);
+}
+
+/* Rekord aktualisieren, wenn ein abgeschlossenes Ergebnis den Bestwert schlägt.
+   Tutorial zählt nicht (wird vom Aufrufer ausgeschlossen). */
+function updateRecord(p){
+  const s = loadStore();
+  if(!s.best || p.result.pnl > s.best.pnl){
+    s.best = {pnl: p.result.pnl, name: p.name.slice(0,14), dur: durationMin, date: Date.now()};
+    saveStore(s);
+  }
+}
+
+/* Startbildschirm: Namen vorbelegen, Rekordzeile + Löschen-Button anzeigen */
+function applyStore(){
+  const s = loadStore();
+  if(s.n1) $("name1").value = s.n1;
+  if(s.n2) $("name2").value = s.n2;
+  const rec = $("recLine");
+  if(s.best){
+    rec.innerHTML = `🏆 Rekord: <b>${sgn(s.best.pnl)}</b> · ${esc(s.best.name)} · ${s.best.dur} Min`;
+    rec.style.display = "";
+  }else{
+    rec.style.display = "none";
+  }
+  $("clearBtn").style.display = (s.n1 || s.n2 || s.best) ? "" : "none";
+}
+
+$("clearBtn").onclick = () => {
+  try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+  $("name1").value = "Spieler 1";
+  $("name2").value = "Spieler 2";
+  applyStore();
+};
+
+applyStore();
+
 $("startBtn").onclick = () => {
+  rememberNames();
   if(mode === "local"){
     gameCode = makeCode(DURATIONS.indexOf(durationMin));
     buildMarket();
@@ -952,6 +1008,7 @@ $("rematchBtn").onclick = () => {
   $("codeErr").textContent = "";
   $("resCard2").style.display = "";
   document.querySelectorAll(".dur[data-m]").forEach(b => b.disabled = false);
+  applyStore(); // evtl. neuer Rekord → Startbildschirm auffrischen
   updateStartBtn();
   window.scrollTo(0,0);
 };
@@ -1495,6 +1552,8 @@ function endRound(){
     tutFinish(p);
     return;
   }
+
+  updateRecord(p); // persönlichen Rekord auf diesem Gerät fortschreiben
 
   // Remote: jedes Gerät spielt nur seine eine Runde – eigenes Ergebnis zeigen
   if(mode === "remote"){

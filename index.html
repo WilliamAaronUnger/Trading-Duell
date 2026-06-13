@@ -604,6 +604,7 @@ const OPENING_EVENT = {t:"SPCX",
    newsMult wird hier nicht angewendet, damit die Größenordnung planbar bleibt.
    Bewusst NICHT in den Insider-Tipps: Mega-Events bleiben unangekündigt. */
 const MEGA_REACT_TICKS = Math.round(20000 / TICK_MS);
+const MEGA_PRE_FRAC = 0.2; // Anteil der Mega-Bewegung, der als Vor-Beben vorab hereinkriecht
 const MEGA_POOL = [
   {t:"SPCX", txt:"💥 MEGA: Jahrhundert-Auftrag! Regierung lässt SpaceX die Mond-Basis bauen.", jump:+0.30, drift:+0.0008, dur:40},
   {t:"TSLA", txt:"💥 MEGA: Durchbruch! Teslas neuer Akku lädt in 90 Sekunden voll.",            jump:+0.28, drift:+0.0008, dur:40},
@@ -736,11 +737,13 @@ function genMarket(seed, ticks){
      gleichmäßig auf die Rampen-Ticks verteilt (factor^(1/n) je Tick).
      Rein deterministisch: der Faktor steht schon fest, er wird nur über
      mehr Ticks gestreckt – kein zusätzliches rnd(), Fairness bleibt. */
-  const pushJump = (at, sym, factor) => {
+  const pushJump = (at, sym, factor, forceRamp) => {
     const dev = Math.abs(factor - 1);
-    const rampTicks = dev < 0.04
-      ? 1                                                   // kleine News: sofort
-      : Math.max(2, Math.round(Math.min(dev * 50, 14) * 1000 / TICK_MS));
+    const rampTicks = forceRamp
+      ? forceRamp                                            // erzwungene Rampenlänge (z. B. Mega-Vorbeben)
+      : dev < 0.04
+        ? 1                                                  // kleine News: sofort
+        : Math.max(2, Math.round(Math.min(dev * 50, 14) * 1000 / TICK_MS));
     if(rampTicks <= 1){ pendingJumps.push({at, sym, factor}); return; }
     const per = Math.pow(factor, 1 / rampTicks);            // gleicher Tick-Schritt
     for(let k = 0; k < rampTicks; k++) pendingJumps.push({at: at + k, sym, factor: per});
@@ -766,13 +769,23 @@ function genMarket(seed, ticks){
     events.push({tick:i, ev:resolved, tag: resolved.jump > 0 ? "up" : resolved.jump < 0 ? "down" : "neutral"});
   }
 
-  /* Mega-Event: eigene, lange Zündschnur (MEGA_REACT_TICKS) und ohne newsMult */
+  /* Mega-Event: eigene, lange Zündschnur (MEGA_REACT_TICKS) und ohne newsMult.
+     Vor-Beben: ein kleiner Teil der Bewegung (~MEGA_PRE_FRAC) kriecht schon in
+     den ~12 Ticks VOR dem Hauptschlag in gleicher Richtung herein – ein
+     spürbares Warnsignal im Kurs, das aufmerksame Trader rechtzeitig
+     aussteigen (vor dem Crash) bzw. eindecken/aufspringen lässt. Der
+     Gesamtfaktor bleibt unverändert (preFactor * Rest == factor), nur ein
+     Teil der Bewegung wandert zeitlich nach vorne – kein zusätzliches rnd(). */
   function fireMega(i, ev){
     const dur = Math.round(ev.dur * TICK_SCALE);
     const hits = i + MEGA_REACT_TICKS;
     const targets = ev.t === "ALL" ? Object.keys(prices) : [ev.t];
+    const preTicks = Math.max(2, Math.round(MEGA_REACT_TICKS * 0.6));
     for(const s of targets){
-      pushJump(hits, s, 1 + ev.jump * (0.9 + rnd()*0.2));
+      const factor = 1 + ev.jump * (0.9 + rnd()*0.2);
+      const preFactor = Math.pow(factor, MEGA_PRE_FRAC);
+      pushJump(hits - preTicks, s, preFactor, preTicks);     // sanfter Vorlauf
+      pushJump(hits, s, factor / preFactor);                 // Hauptschlag (Rest)
     }
     if(ev.drift) effects.push({sym:ev.t, drift:ev.drift * TICK_SCALE, from:hits, until:hits + dur});
     if(ev.t !== "ALL") lastEventSym = ev.t;

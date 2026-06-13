@@ -46,6 +46,8 @@
   .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent)}
   .start-hero h1{font-size:30px;font-weight:800;letter-spacing:-.02em;margin-top:8px}
   .start-hero p{color:var(--muted);font-size:14px;margin-top:8px;line-height:1.5}
+  .rec{margin-top:14px;text-align:center;font-family:var(--mono);font-size:13px;color:var(--muted)}
+  .rec b{color:var(--accent);font-weight:700}
   .field{margin-top:14px}
   .field label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.16em;
                text-transform:uppercase;color:var(--muted);margin-bottom:6px}
@@ -257,7 +259,9 @@
       <div class="eyebrow">Nasdaq · SPCX IPO-Tag</div>
       <h1>Trading-Duell</h1>
       <p>Zwei Trader, nacheinander, exakt derselbe Markt.<br>Wer holt das größere Plus raus?</p>
+      <div class="rec" id="recLine" style="display:none"></div>
     </div>
+    <button class="start-btn" id="resumeBtn" style="display:none">▶️ Spiel fortsetzen</button>
     <div class="field">
       <label>Modus</label>
       <div class="dur-row">
@@ -303,6 +307,7 @@
       Start zur übernächsten vollen Minute; in derselben Minute angelegt, geht's zeitgleich los. ⏱️
       Die Endwerte vergleicht ihr danach selbst.
     </div>
+    <button class="lobby-cancel" id="clearBtn" style="margin-top:10px;display:none">🗑 Gespeicherte Daten löschen</button>
   </div>
 </div>
 
@@ -861,7 +866,120 @@ function newPlayer(name, color){
                  peak:START_CASH, trough:START_CASH, maxDD:0}};
 }
 
+/* ====================== Lokaler Speicher (Namen + Rekord) ====================== */
+/* Bewusst winzig: nur die zuletzt genutzten Namen und der beste je auf diesem
+   Gerät erzielte P&L – ein einziger JSON-Schlüssel, wenige hundert Byte.
+   Über "Daten löschen" komplett entfernbar. localStorage kann fehlen oder
+   gesperrt sein (Privatmodus), darum alles defensiv in try/catch. */
+const STORE_KEY = "spcx-duell";
+const loadStore = () => { try{ return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }catch(e){ return {}; } };
+const saveStore = s => { try{ localStorage.setItem(STORE_KEY, JSON.stringify(s)); }catch(e){} };
+
+/* Laufendes Spiel sichern, damit man nach Neuladen/Schließen fortsetzen kann.
+   Der Markt selbst wird NICHT gespeichert – er entsteht deterministisch neu aus
+   dem Code; nur Spielzustand (Bargeld, Positionen, Stats, Tick) wandert rein.
+   Eigener Schlüssel, getrennt von Namen/Rekord. Tutorial wird nie gesichert. */
+const GAME_KEY = "spcx-duell-game";
+function saveSnapshot(phase){
+  if(tutorial || over && phase !== "handover") return;
+  try{
+    localStorage.setItem(GAME_KEY, JSON.stringify({
+      v:1, mode, gameCode, durationMin, round,
+      startAt: mode === "remote" ? startAt : 0,
+      tickCount, players, phase: phase || "play", ts: Date.now()
+    }));
+  }catch(e){}
+}
+function loadSnapshot(){
+  try{
+    const s = JSON.parse(localStorage.getItem(GAME_KEY));
+    if(!s || s.v !== 1) return null;
+    if(s.mode !== "local" && s.mode !== "remote") return null;
+    if(typeof s.gameCode !== "number" || !Array.isArray(s.players) || !s.players.length) return null;
+    if(Date.now() - s.ts > 24*3600*1000) return null; // alte Stände nicht wiederbeleben
+    return s;
+  }catch(e){ return null; }
+}
+const clearSnapshot = () => { try{ localStorage.removeItem(GAME_KEY); }catch(e){} };
+
+/* Namen merken (beim Spielstart aufgerufen) */
+function rememberNames(){
+  const s = loadStore();
+  s.n1 = $("name1").value.trim().slice(0,14);
+  s.n2 = $("name2").value.trim().slice(0,14);
+  saveStore(s);
+}
+
+/* Rekord aktualisieren, wenn ein abgeschlossenes Ergebnis den Bestwert schlägt.
+   Tutorial zählt nicht (wird vom Aufrufer ausgeschlossen). */
+function updateRecord(p){
+  const s = loadStore();
+  if(!s.best || p.result.pnl > s.best.pnl){
+    s.best = {pnl: p.result.pnl, name: p.name.slice(0,14), dur: durationMin, date: Date.now()};
+    saveStore(s);
+  }
+}
+
+/* Startbildschirm: Namen vorbelegen, Rekordzeile, Fortsetzen- + Löschen-Button */
+function applyStore(){
+  const s = loadStore();
+  if(s.n1) $("name1").value = s.n1;
+  if(s.n2) $("name2").value = s.n2;
+  const rec = $("recLine");
+  if(s.best){
+    rec.innerHTML = `🏆 Rekord: <b>${sgn(s.best.pnl)}</b> · ${esc(s.best.name)} · ${s.best.dur} Min`;
+    rec.style.display = "";
+  }else{
+    rec.style.display = "none";
+  }
+  const snap = loadSnapshot();
+  $("resumeBtn").style.display = snap ? "" : "none";
+  $("clearBtn").style.display = (s.n1 || s.n2 || s.best || snap) ? "" : "none";
+}
+
+$("clearBtn").onclick = () => {
+  try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+  clearSnapshot();
+  $("name1").value = "Spieler 1";
+  $("name2").value = "Spieler 2";
+  applyStore();
+};
+
+/* Gesichertes Spiel fortsetzen: Markt deterministisch aus dem Code neu erzeugen,
+   Spielzustand zurückspielen und an der gemerkten Tick-Position weitermachen. */
+$("resumeBtn").onclick = () => {
+  const snap = loadSnapshot();
+  if(!snap){ applyStore(); return; }
+  tutorial = false;
+  mode = snap.mode;
+  gameCode = snap.gameCode;
+  durationMin = snap.durationMin;
+  matchTicks = Math.round(durationMin * 60000 / TICK_MS);
+  market = genMarket(gameCode, matchTicks);
+  players = snap.players;
+  round = snap.round;
+  if(mode === "remote") startAt = snap.startAt;
+  $("startScreen").classList.remove("show");
+
+  if(snap.phase === "handover"){
+    // Lokal: Spieler 1 ist fertig, Übergabe an Spieler 2 wiederherstellen
+    over = true;
+    $("matchScreen").classList.add("show");
+    showHandover(players[0]);
+    return;
+  }
+
+  startRound(round);          // baut die Runden-UI auf und startet den Tick-Loop
+  tickCount = snap.tickCount;  // echte Position wiederherstellen (startRound setzt 0)
+  saveSnapshot("play");        // korrigierten Tick sofort sichern (startRound schrieb 0)
+  replayNewsUpTo(tickCount);   // vergangene Meldungen still in den Feed zeichnen
+  renderAll();
+};
+
+applyStore();
+
 $("startBtn").onclick = () => {
+  rememberNames();
   if(mode === "local"){
     gameCode = makeCode(DURATIONS.indexOf(durationMin));
     buildMarket();
@@ -952,6 +1070,8 @@ $("rematchBtn").onclick = () => {
   $("codeErr").textContent = "";
   $("resCard2").style.display = "";
   document.querySelectorAll(".dur[data-m]").forEach(b => b.disabled = false);
+  clearSnapshot(); // Spiel ist vorbei – kein Fortsetzen mehr anbieten
+  applyStore();    // evtl. neuer Rekord / kein Snapshot → Startbildschirm auffrischen
   updateStartBtn();
   window.scrollTo(0,0);
 };
@@ -989,6 +1109,7 @@ function startRound(r){
 
   clearInterval(timer);
   timer = setInterval(tick, TICK_MS);
+  saveSnapshot("play");
   renderAll();
 }
 
@@ -1044,6 +1165,7 @@ function tick(){
       processTick(tickCount === target);
     }
     if(tickCount >= matchTicks){ endRound(); return; }
+    saveSnapshot("play");
     renderAll();
     return;
   }
@@ -1055,6 +1177,7 @@ function tick(){
   if(tutorial) tutOnTick();
 
   if(tickCount >= matchTicks){ endRound(); return; }
+  saveSnapshot("play");
   renderAll();
 }
 
@@ -1214,6 +1337,7 @@ function trade(side){
   }
   // Fehler-Pfade kehren oben mit return zurück – hier war die Order erfolgreich
   if(tutorial) tutOnTrade(side);
+  saveSnapshot("play");
   renderAll();
 }
 
@@ -1466,8 +1590,8 @@ function drawChart(){
 }
 
 /* ====================== News-Feed ====================== */
-function pushNews(sym, text, tag){
-  const elapsed = Math.round(tickCount * TICK_MS / 1000);
+function pushNews(sym, text, tag, atTick){
+  const elapsed = Math.round((atTick === undefined ? tickCount : atTick) * TICK_MS / 1000);
   const t = String(Math.floor(elapsed/60)).padStart(2,"0") + ":" + String(elapsed%60).padStart(2,"0");
   const el = $("news");
   if(el.querySelector(".empty")) el.innerHTML = "";
@@ -1478,6 +1602,16 @@ function pushNews(sym, text, tag){
                    <span class="news-text">${text}</span>`;
   el.prepend(div);
   while(el.children.length > 12) el.removeChild(el.lastChild);
+}
+
+/* Beim Fortsetzen: alle bis zur aktuellen Tick-Position bereits gelaufenen
+   Meldungen still (ohne Popup) in chronologischer Reihenfolge nachzeichnen. */
+function replayNewsUpTo(tc){
+  const items = [];
+  for(const e of market.events) if(e.tick <= tc) items.push({tick:e.tick, sym:e.ev.t, txt:e.ev.txt, tag:e.tag});
+  for(const t of market.tips)   if(t.tick <= tc) items.push({tick:t.tick, sym:t.sym, txt:insiderText(t), tag:"insider"});
+  items.sort((a,b) => a.tick - b.tick);
+  for(const it of items) pushNews(it.sym, it.txt, it.tag, it.tick);
 }
 
 /* ====================== Runden-/Match-Ende ====================== */
@@ -1496,6 +1630,8 @@ function endRound(){
     return;
   }
 
+  updateRecord(p); // persönlichen Rekord auf diesem Gerät fortschreiben
+
   // Remote: jedes Gerät spielt nur seine eine Runde – eigenes Ergebnis zeigen
   if(mode === "remote"){
     showResultSolo(p);
@@ -1503,20 +1639,26 @@ function endRound(){
   }
 
   if(round === 0){
-    $("hoTitle").textContent = players[0].name + " ist fertig";
-    const ho = $("hoPnl");
-    ho.textContent = sgn(p.result.pnl);
-    ho.style.color = p.result.pnl >= 0 ? "var(--up)" : "var(--down)";
-    $("hoBadge").textContent = playerTitle(p);
-    $("hoBadges").innerHTML = badgesHtml(playerBadges(p));
-    $("hoStats").innerHTML = statsLine(p);
-    $("hoSub").innerHTML = `Handy weitergeben an <b style="color:var(--p2)">${esc(players[1].name)}</b>.<br>
-      Gleicher Markt, gleiche News – gleiche Chancen.`;
-    $("hoCode").textContent = gameCode;
-    $("handover").classList.add("show");
+    showHandover(p);
+    saveSnapshot("handover"); // Übergabe ist fortsetzbar, falls Spieler 2 neu lädt
   }else{
     showResult();
   }
+}
+
+/* Übergabe-Overlay nach Runde 1 (lokal) – auch beim Fortsetzen genutzt */
+function showHandover(p){
+  $("hoTitle").textContent = players[0].name + " ist fertig";
+  const ho = $("hoPnl");
+  ho.textContent = sgn(p.result.pnl);
+  ho.style.color = p.result.pnl >= 0 ? "var(--up)" : "var(--down)";
+  $("hoBadge").textContent = playerTitle(p);
+  $("hoBadges").innerHTML = badgesHtml(playerBadges(p));
+  $("hoStats").innerHTML = statsLine(p);
+  $("hoSub").innerHTML = `Handy weitergeben an <b style="color:var(--p2)">${esc(players[1].name)}</b>.<br>
+    Gleicher Markt, gleiche News – gleiche Chancen.`;
+  $("hoCode").textContent = gameCode;
+  $("handover").classList.add("show");
 }
 
 /* ====================== Auszeichnungen ====================== */
@@ -1710,6 +1852,7 @@ $("cmpBtn").onclick = () => {
 
 /* Remote: eigenes Ergebnis + Austausch-Box für den Vergleich */
 function showResultSolo(p){
+  clearSnapshot(); // Runde gespielt – Snapshot entfernen
   soloP = p;
   $("resTitle").textContent = "Geschafft!";
   $("resSub").textContent = "Tauscht eure Ergebnisse aus – dann gibt's den direkten Vergleich.";
@@ -1729,6 +1872,7 @@ function showResultSolo(p){
 }
 
 function showResult(){
+  clearSnapshot(); // Duell entschieden – Snapshot entfernen
   $("resCard2").style.display = "";
   $("cmpBox").style.display = "none";
   $("rematchBtn").textContent = "Revanche";

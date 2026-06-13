@@ -2,6 +2,11 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
+<!-- Sicherheit: alles nur von der eigenen Herkunft. Inline-Script/-Style ist
+     nötig (App lebt komplett in dieser Datei), externe Quellen, Plugins,
+     Fremd-Einbettung und Daten-Abfluss werden so unterbunden. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>SPCX Trading-Duell</title>
 <link rel="manifest" href="manifest.json">
@@ -631,6 +636,22 @@ function genMarket(seed, ticks){
     megaAt = Math.min(Math.round(ticks * (0.3 + rnd()*0.45)), ticks - (MEGA_REACT_TICKS + 20));
   }
 
+  /* Sprung einplanen: Kleine News knallen wie bisher in einem Tick rein.
+     Extreme Sprünge (vor allem Mega-Events) steigen dagegen über mehrere
+     Ticks als Kurve nach oben statt schlagartig – der Gesamtfaktor wird
+     gleichmäßig auf die Rampen-Ticks verteilt (factor^(1/n) je Tick).
+     Rein deterministisch: der Faktor steht schon fest, er wird nur über
+     mehr Ticks gestreckt – kein zusätzliches rnd(), Fairness bleibt. */
+  const pushJump = (at, sym, factor) => {
+    const dev = Math.abs(factor - 1);
+    const rampTicks = dev < 0.04
+      ? 1                                                   // kleine News: sofort
+      : Math.max(2, Math.round(Math.min(dev * 50, 14) * 1000 / TICK_MS));
+    if(rampTicks <= 1){ pendingJumps.push({at, sym, factor}); return; }
+    const per = Math.pow(factor, 1 / rampTicks);            // gleicher Tick-Schritt
+    for(let k = 0; k < rampTicks; k++) pendingJumps.push({at: at + k, sym, factor: per});
+  };
+
   /* Event auslösen: News erscheint bei Tick i, der Kurs reagiert erst
      REACT_TICKS später – so bleibt Zeit, auf die Meldung zu reagieren.
      Die rnd()-Aufrufe passieren trotzdem hier, damit die PRNG-Reihenfolge
@@ -644,7 +665,7 @@ function genMarket(seed, ticks){
     for(const s of targets){
       // newsMult: Hype-Werte reagieren stärker auf Schlagzeilen
       const mult = STOCK_DEFS[s].newsMult || 1;
-      if(resolved.jump) pendingJumps.push({at:hits, sym:s, factor: 1 + resolved.jump * mult * (0.85 + rnd()*0.3)});
+      if(resolved.jump) pushJump(hits, s, 1 + resolved.jump * mult * (0.85 + rnd()*0.3));
     }
     if(resolved.drift) effects.push({sym, drift:resolved.drift * TICK_SCALE, from:hits, until:hits + dur});
     if(sym !== "ALL") lastEventSym = sym;
@@ -657,7 +678,7 @@ function genMarket(seed, ticks){
     const hits = i + MEGA_REACT_TICKS;
     const targets = ev.t === "ALL" ? Object.keys(prices) : [ev.t];
     for(const s of targets){
-      pendingJumps.push({at:hits, sym:s, factor: 1 + ev.jump * (0.9 + rnd()*0.2)});
+      pushJump(hits, s, 1 + ev.jump * (0.9 + rnd()*0.2));
     }
     if(ev.drift) effects.push({sym:ev.t, drift:ev.drift * TICK_SCALE, from:hits, until:hits + dur});
     if(ev.t !== "ALL") lastEventSym = ev.t;
@@ -1489,7 +1510,7 @@ function endRound(){
     $("hoBadge").textContent = playerTitle(p);
     $("hoBadges").innerHTML = badgesHtml(playerBadges(p));
     $("hoStats").innerHTML = statsLine(p);
-    $("hoSub").innerHTML = `Handy weitergeben an <b style="color:var(--p2)">${players[1].name}</b>.<br>
+    $("hoSub").innerHTML = `Handy weitergeben an <b style="color:var(--p2)">${esc(players[1].name)}</b>.<br>
       Gleicher Markt, gleiche News – gleiche Chancen.`;
     $("hoCode").textContent = gameCode;
     $("handover").classList.add("show");
@@ -1634,7 +1655,7 @@ function unpackResult(str){
            worst:f[11] === "x" ? null : +f[11],
            allIns:+f[12], newsTrades:+f[13], investedTicks:+f[14],
            peak:+f[15], trough:+f[16], maxDD:+f[17],
-           tipTrades:+f[18], bestPct:+f[19], perSym:{}, _fav:f[20]},
+           tipTrades:+f[18], bestPct:+f[19], perSym:{}, _fav:f[20].slice(0,24)},
   };
 }
 

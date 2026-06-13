@@ -2,6 +2,11 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
+<!-- Sicherheit: alles nur von der eigenen Herkunft. Inline-Script/-Style ist
+     nötig (App lebt komplett in dieser Datei), externe Quellen, Plugins,
+     Fremd-Einbettung und Daten-Abfluss werden so unterbunden. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>SPCX Trading-Duell</title>
 <link rel="manifest" href="manifest.json">
@@ -1489,7 +1494,7 @@ function endRound(){
     $("hoBadge").textContent = playerTitle(p);
     $("hoBadges").innerHTML = badgesHtml(playerBadges(p));
     $("hoStats").innerHTML = statsLine(p);
-    $("hoSub").innerHTML = `Handy weitergeben an <b style="color:var(--p2)">${players[1].name}</b>.<br>
+    $("hoSub").innerHTML = `Handy weitergeben an <b style="color:var(--p2)">${esc(players[1].name)}</b>.<br>
       Gleicher Markt, gleiche News – gleiche Chancen.`;
     $("hoCode").textContent = gameCode;
     $("handover").classList.add("show");
@@ -1634,7 +1639,7 @@ function unpackResult(str){
            worst:f[11] === "x" ? null : +f[11],
            allIns:+f[12], newsTrades:+f[13], investedTicks:+f[14],
            peak:+f[15], trough:+f[16], maxDD:+f[17],
-           tipTrades:+f[18], bestPct:+f[19], perSym:{}, _fav:f[20]},
+           tipTrades:+f[18], bestPct:+f[19], perSym:{}, _fav:f[20].slice(0,24)},
   };
 }
 

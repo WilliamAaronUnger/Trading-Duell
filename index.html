@@ -1745,14 +1745,18 @@ function drawChart(){
   const nPts = data.length;
   const livePrice = nPts >= 2 ? data[nPts-2] + (data[nPts-1] - data[nPts-2]) * prog : (data[0] || op);
 
+  /* Animierter Kopf: deckt sich mit der livePrice-Interpolation und sitzt im
+     Linien-Modus immer am rechten Rand. */
+  const headTick = (tickCount - 1) + prog;
+  const CT = Math.max(2, Math.round(10000 / TICK_MS)); // Ticks pro Kerze
+  const lastC = Math.floor(tickCount / CT);
+
   /* --- Kerzen aggregieren (~10 s pro Kerze), wenn der Kerzen-Modus aktiv ist.
          Die letzte (offene) Kerze nutzt den animierten Live-Kurs als Schluss. --- */
-  const CT = Math.max(2, Math.round(10000 / TICK_MS)); // Ticks pro Kerze
-  let candles = null, visStartTick = startIdx;
+  let candles = null, visStartTick = startIdx, firstC = 0;
   if(chartMode === "candle"){
     candles = [];
-    const lastC = Math.floor(tickCount / CT);
-    const firstC = Math.max(0, lastC - Math.ceil(WINDOW / CT) + 1);
+    firstC = Math.max(0, lastC - Math.ceil(WINDOW / CT) + 1);
     visStartTick = firstC * CT;
     for(let c = firstC; c <= lastC; c++){
       const a = c*CT, b = Math.min(c*CT + CT - 1, tickCount);
@@ -1778,7 +1782,14 @@ function drawChart(){
   const pad = (max-min)*0.14 || 1;
   min -= pad; max += pad;
 
-  const X = i => L + (w-L-R) * (data.length > 1 ? i/(data.length-1) : 0);
+  /* Tick → X: konstante Breite pro Tick, rechtsbündig am Kopf ausgerichtet.
+     So scrollt die Kurve gleichmäßig nach links, statt bei jedem neuen Punkt
+     zu „atmen" (denn ein fester Fensterausschnitt = feste px/Tick). Im
+     Kerzen-Modus liegt der „Kopf" in der Mitte der offenen Kerze. */
+  const pxPerTick = (w-L-R) / (WINDOW - 1);
+  const headX = candles ? (lastC + 0.5) * CT : headTick;
+  const xt = t => (w-R) - (headX - t) * pxPerTick;
+  const X = i => xt(startIdx + i);
   const Y = v => h - B - (h-T-B) * ((v-min)/(max-min));
 
   ctx.font = "10px ui-monospace,monospace";
@@ -1793,15 +1804,15 @@ function drawChart(){
     ctx.fillText(v.toFixed(step < 1 ? 2 : step < 10 ? 1 : 0), w-R+5, y+3);
   }
 
-  /* --- Vertikale Gitterlinien (Zeit, mm:ss, bezogen aufs sichtbare Fenster) --- */
-  const winStartS = visStartTick * TICK_MS / 1000;
-  const winEndS = tickCount * TICK_MS / 1000;
+  /* --- Vertikale Gitterlinien (Zeit, mm:ss) – an Tick-Positionen gebunden,
+         damit sie mit der Kurve mitscrollen statt zu springen. --- */
   if(tickCount - visStartTick > 10){
     const tSteps = 4;
     for(let k = 1; k < tSteps; k++){
-      const x = L + (w-L-R) * k/tSteps;
+      const tk = visStartTick + (tickCount - visStartTick) * k/tSteps;
+      const x = xt(tk);
       ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, h-B); ctx.stroke();
-      const sec = Math.round(winStartS + (winEndS - winStartS) * k/tSteps);
+      const sec = Math.round(tk * TICK_MS / 1000);
       const lbl = String(Math.floor(sec/60)).padStart(2,"0") + ":" + String(sec%60).padStart(2,"0");
       ctx.fillText(lbl, x - 13, h-7);
     }
@@ -1821,18 +1832,18 @@ function drawChart(){
   const ref = pos ? pos.avg : op;
   const up = pos && pos.qty < 0 ? livePrice <= ref : livePrice >= ref;
   const col = up ? "#3DDC97" : "#FF5C72";
-  /* X-Position des animierten letzten Punktes (Linien-Modus) */
-  const liveX = nPts >= 2 ? X(nPts-2) + (X(nPts-1) - X(nPts-2)) * prog : X(0);
+  /* X-Position des animierten letzten Punktes (Linien-Modus: am rechten Rand) */
+  const liveX = xt(headTick);
   const liveY = Y(livePrice);
 
   if(candles){
     /* --- Kerzen --- */
     const NC = candles.length;
-    const slot = (w-L-R) / Math.max(NC, 1);
+    const slot = pxPerTick * CT;                 // feste Kerzenbreite (kein „Atmen")
     const cw = Math.max(2, Math.min(slot*0.62, 13));
     for(let i=0;i<NC;i++){
       const k = candles[i];
-      const cx = L + slot*(i+0.5);
+      const cx = xt((firstC + i) * CT + (CT-1)/2); // Kerzen-Mitte über die Tick-Achse
       const kUp = k.cl >= k.o;
       const kCol = kUp ? "#3DDC97" : "#FF5C72";
       ctx.strokeStyle = kCol; ctx.fillStyle = kCol; ctx.lineWidth = 1;
@@ -1857,7 +1868,7 @@ function drawChart(){
     ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke();
 
     /* Fläche unter der Kurve */
-    ctx.lineTo(liveX, h-B); ctx.lineTo(L, h-B); ctx.closePath();
+    ctx.lineTo(liveX, h-B); ctx.lineTo(X(0), h-B); ctx.closePath();
     const g = ctx.createLinearGradient(0,T,0,h-B);
     g.addColorStop(0, up ? "rgba(61,220,151,.16)" : "rgba(255,92,114,.16)");
     g.addColorStop(1, "rgba(0,0,0,0)");

@@ -104,12 +104,39 @@
   .t-up{color:var(--up)} .t-down{color:var(--down)} .t-sym{color:var(--text);font-weight:700}
 
   /* ============ Watchlist ============ */
-  .watch{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0 12px}
+  .watch-head{display:flex;align-items:center;justify-content:space-between;margin-top:14px}
+  .watch-title{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+  .stocks-btn{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text);
+              background:var(--panel);border:1px solid var(--line);border-radius:8px;
+              padding:5px 10px;cursor:pointer}
+  .stocks-btn:hover{border-color:var(--accent)}
+  .watch{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:8px 0 12px}
   .w-card{border:1px solid var(--line);border-radius:10px;background:var(--panel);
           padding:9px 8px;cursor:pointer;text-align:center}
   .w-card.active{border-color:var(--accent);background:#1A2340}
   .w-sym{font-family:var(--mono);font-size:13px;font-weight:700}
   .w-chg{font-family:var(--mono);font-size:11px;margin-top:3px;font-weight:600}
+
+  /* ============ Aktien-Auswahl (Overlay) ============ */
+  .stock-modal{max-width:480px;text-align:left}
+  .stock-modal h3{text-align:center}
+  .stock-list{display:flex;flex-direction:column;gap:6px;margin:14px 0 16px;max-height:56vh;overflow-y:auto}
+  .stock-row{display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;
+             border:1px solid var(--line);border-radius:10px;background:var(--panel-2)}
+  .stock-row:hover{border-color:var(--accent)}
+  .stock-row.sel{border-color:var(--accent);background:#1A2340}
+  .fav-star{flex:0 0 auto;font-size:20px;line-height:1;background:none;border:none;cursor:pointer;
+            color:#566081;padding:2px 4px}
+  .fav-star.on{color:#FFC65A}
+  .fav-star.dis{opacity:.35;cursor:not-allowed}
+  .sr-main{flex:1;min-width:0}
+  .sr-top{display:flex;align-items:baseline;gap:8px}
+  .sr-sym{font-family:var(--mono);font-size:13px;font-weight:700}
+  .sr-name{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sr-char{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sr-px{flex:0 0 auto;text-align:right;font-family:var(--mono)}
+  .sr-price{font-size:13px;font-weight:700}
+  .sr-chg{font-size:11px;font-weight:600;margin-top:2px}
 
   /* ============ Kurs + Chart ============ */
   .quote{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
@@ -381,6 +408,10 @@
 
   <div class="wrap match-grid">
     <div class="col-chart">
+    <div class="watch-head">
+      <span class="watch-title">Watchlist</span>
+      <button class="stocks-btn" id="openStocks">☆ Alle Aktien</button>
+    </div>
     <div class="watch" id="watch"></div>
 
     <div class="quote">
@@ -444,6 +475,16 @@
     <div class="sub" id="lobbySub"></div>
     <div class="lobby-start">Start um <b id="lobbyTime"></b> Uhr · noch <b id="lobbyCount"></b></div>
     <button class="lobby-cancel" id="lobbyCancel">Abbrechen</button>
+  </div>
+</div>
+
+<!-- ================= AKTIEN-AUSWAHL ================= -->
+<div class="overlay" id="stockModal">
+  <div class="modal stock-modal">
+    <h3>Alle Aktien</h3>
+    <div class="sub" id="stockHint">Tippe eine Aktie zum Handeln · ⭐ wählt bis zu 4 Watchlist-Favoriten</div>
+    <div class="stock-list" id="stockList"></div>
+    <button class="lobby-cancel" id="closeStocks">Schließen</button>
   </div>
 </div>
 
@@ -555,6 +596,18 @@ const STOCK_DEFS = {
         char:"🛡️ Stabiler Riese: schwankt wenig, kehrt zur Mitte zurück"},
   RKLB:{name:"Rocket Lab", start:38.65,  sigma:0.0011, drift:0, spikeP:0.006, spikeMag:0.010,
         char:"🎢 Zock-Papier: lange ruhig, dann plötzliche Sprünge"},
+  AMZN:{name:"Amazon",     start:185.00, sigma:0.0009, drift:0, meanRev:0.0015,
+        char:"🐢 Schwergewicht: bewegt sich bedächtig"},
+  AAPL:{name:"Apple",      start:228.00, sigma:0.0007, drift:0, meanRev:0.0025,
+        char:"🍎 Sicherer Hafen: ruhig und verlässlich"},
+  MSFT:{name:"Microsoft",  start:430.00, sigma:0.0008, drift:0.00001,
+        char:"🏢 Solider Wachstumswert: ruhiger Aufwärtstrend"},
+  GOOGL:{name:"Alphabet",  start:190.00, sigma:0.0010, drift:0, newsMult:1.15,
+        char:"🔎 Nachrichten-getrieben: reagiert spürbar auf Schlagzeilen"},
+  AMD:{name:"AMD",         start:165.00, sigma:0.0012, drift:0, momentum:0.40,
+        char:"⚡ Trendläufer: Bewegungen verstärken sich"},
+  META:{name:"Meta",       start:600.00, sigma:0.0011, drift:0, spikeP:0.005, spikeMag:0.011,
+        char:"🎭 Stimmungswert: kann sprunghaft drehen"},
 };
 
 /* News: kleinere Sprünge, dafür längere Drift-Phasen → fließendere Bewegungen.
@@ -603,6 +656,18 @@ const NEWS_POOL = [
   {t:"RKLB", txt:"Neue Montagehalle in Neuseeland eröffnet – Kapazität verdoppelt.", jump:+0.007, drift:+0.0003, dur:24},
   {t:"RKLB", txt:"Zulieferer meldet Engpass – Startkalender könnte rutschen.", jump:-0.008, drift:-0.0004, dur:28},
   {t:"RKLB", txt:"Konkurrent gewinnt Auftrag, den Rocket Lab angepeilt hatte.", jump:-0.007, drift:-0.0003, dur:26},
+  {t:"AMZN", txt:"AWS-Cloudsparte meldet beschleunigtes Wachstum – Marge zieht an.", jump:+0.009, drift:+0.0004, dur:30},
+  {t:"AMZN", txt:"Kartellklage gegen Amazons Marktplatz-Praktiken geht in nächste Runde.", jump:-0.008, drift:-0.0003, dur:28},
+  {t:"AAPL", txt:"Neues iPhone übertrifft die Vorbestellungsrekorde der Vorgänger.", jump:+0.008, drift:+0.0003, dur:28},
+  {t:"AAPL", txt:"Apple verschiebt KI-Funktionen – Analysten zweifeln am Zeitplan.", jump:-0.007, drift:-0.0003, dur:26},
+  {t:"MSFT", txt:"Microsoft hebt Copilot-Preise an – Umsatzfantasie treibt den Kurs.", jump:+0.008, drift:+0.0004, dur:28},
+  {t:"MSFT", txt:"Cloud-Ausfall legt Azure-Dienste stundenlang lahm.", jump:-0.008, drift:-0.0003, dur:26},
+  {t:"GOOGL",txt:"Gemini-Modell gewinnt KI-Benchmarks – Werbegeschäft floriert.", jump:+0.010, drift:+0.0004, dur:30},
+  {t:"GOOGL",txt:"Gericht erwägt Aufspaltung von Googles Werbe-Sparte.", jump:-0.010, drift:-0.0004, dur:30},
+  {t:"AMD",  txt:"AMD stellt neuen KI-Beschleuniger vor – greift NVIDIA direkt an.", jump:+0.011, drift:+0.0005, dur:30},
+  {t:"AMD",  txt:"Schwache Rechenzentrums-Nachfrage drückt AMDs Ausblick.", jump:-0.009, drift:-0.0004, dur:28},
+  {t:"META", txt:"Meta meldet Rekord-Werbeumsatz – Reels überholt die Konkurrenz.", jump:+0.010, drift:+0.0004, dur:30},
+  {t:"META", txt:"Reality-Labs verbrennt weiter Milliarden – Anleger verlieren Geduld.", jump:-0.009, drift:-0.0004, dur:28},
   {t:"ALL",  txt:"Inflationsdaten besser als erwartet – Markt dreht ins Plus.", jump:+0.004, drift:+0.0002, dur:36},
   {t:"ALL",  txt:"Fed-Mitglied dämpft Zinssenkungshoffnungen.", jump:-0.004, drift:-0.0002, dur:36},
   {t:"ALL",  txt:"Risk-off: Anleger schichten in Anleihen um.", jump:-0.003, drift:-0.0002, dur:30},
@@ -640,6 +705,9 @@ const MEGA_POOL = [
   {t:"TSLA", txt:"💥 MEGA: Zulassung erteilt! Vollautonomes Fahren auf allen US-Bundesstraßen genehmigt.", jump:+0.32, drift:+0.0009, dur:40},
   {t:"NVDA", txt:"💥 MEGA: KI-Superzyklus! NATO und EU kaufen gemeinsam 500.000 NVIDIA-Chips.", jump:+0.28, drift:+0.0008, dur:40},
   {t:"ALL",  txt:"💥 MEGA: Zinswende! Fed senkt Leitzins überraschend um 150 Basispunkte – Tech explodiert.", jump:+0.22, drift:+0.0006, dur:44},
+  {t:"AAPL", txt:"💥 MEGA: Apple enthüllt eigenen KI-Chip – Branche spricht von Quantensprung.", jump:+0.26, drift:+0.0008, dur:40},
+  {t:"AMZN", txt:"💥 MEGA: Amazon übernimmt großen KI-Konzern – Marktdominanz auf Jahre zementiert.", jump:+0.28, drift:+0.0008, dur:40},
+  {t:"MSFT", txt:"💥 MEGA: Microsoft sichert sich Exklusivrechte am führenden KI-Modell.", jump:+0.27, drift:+0.0008, dur:40},
 ];
 
 /* Momentum-News: beziehen sich auf die Aktie, die gerade am stärksten läuft (%SYM% wird ersetzt) */
@@ -704,6 +772,48 @@ const CHAIN_POOL = [
    deny:   {txt:"FAA-Prüfung abgeschlossen: Starship erhält grünes Licht – Erleichterung.", jump:+0.013, drift:+0.0005, dur:30}},
 ];
 
+/* Generische Vorlagen (%SYM% = Ticker, %NAME% = Firmenname). Garantieren, dass
+   JEDE Aktie – auch ohne handgeschriebene Stories – zuverlässig News bekommt.
+   Werden in genMarket pro Aktie instanziiert; Magnituden im Band der Einzel-News. */
+const GENERIC_NEWS = {
+  up: [
+    {txt:"%NAME% meldet überraschend starke Quartalszahlen.", jump:+0.009, drift:+0.0004, dur:30},
+    {txt:"Analystenhaus stuft %SYM% hoch – Kursziel angehoben.", jump:+0.008, drift:+0.0004, dur:28},
+    {txt:"%NAME% gewinnt Großauftrag – Auftragsbuch gut gefüllt.", jump:+0.010, drift:+0.0004, dur:30},
+    {txt:"Institutionelle Anleger bauen ihre %SYM%-Position weiter aus.", jump:+0.007, drift:+0.0003, dur:26},
+    {txt:"%NAME% kündigt Aktienrückkaufprogramm an.", jump:+0.008, drift:+0.0003, dur:28},
+    {txt:"Durchbruch bei %NAME%: neues Produkt begeistert die Branche.", jump:+0.009, drift:+0.0004, dur:28},
+    {txt:"%SYM% im Plus – Schnäppchenjäger und Momentum-Trader greifen zu.", jump:+0.007, drift:+0.0003, dur:24},
+  ],
+  down: [
+    {txt:"%NAME% verfehlt die Umsatzerwartungen der Analysten.", jump:-0.009, drift:-0.0004, dur:30},
+    {txt:"Abstufung: Analysten senken das Kursziel für %SYM%.", jump:-0.008, drift:-0.0004, dur:28},
+    {txt:"%NAME% warnt vor schwächerem Ausblick fürs Gesamtjahr.", jump:-0.010, drift:-0.0004, dur:30},
+    {txt:"Insider-Verkäufe bei %SYM% verunsichern den Markt.", jump:-0.007, drift:-0.0003, dur:26},
+    {txt:"Lieferprobleme belasten das Geschäft von %NAME%.", jump:-0.008, drift:-0.0003, dur:28},
+    {txt:"Regulierer nimmt %NAME% ins Visier – Anleger werden vorsichtig.", jump:-0.009, drift:-0.0004, dur:28},
+    {txt:"Gewinnmitnahmen drücken %SYM% – Stimmung kippt kurzfristig.", jump:-0.007, drift:-0.0003, dur:24},
+  ],
+};
+
+const GENERIC_CHAINS = [
+  {rumor:  {txt:"Gerücht: %NAME% soll vor einem Milliardendeal stehen.", jump:+0.005, drift:+0.0002, dur:20},
+   confirm:{txt:"Bestätigt: %NAME% unterzeichnet den Milliardendeal!", jump:+0.014, drift:+0.0005, dur:32},
+   deny:   {txt:"Dementi: %NAME%-Deal geplatzt – Konkurrent erhält den Zuschlag.", jump:-0.012, drift:-0.0004, dur:28}},
+  {rumor:  {txt:"Spekulation: Behörde prüft angeblich %NAME%.", jump:-0.005, drift:-0.0002, dur:20},
+   confirm:{txt:"Bestätigt: Formale Untersuchung gegen %NAME% eingeleitet.", jump:-0.013, drift:-0.0005, dur:30},
+   deny:   {txt:"Entwarnung: Keine Untersuchung gegen %NAME% – Kurs erholt sich.", jump:+0.011, drift:+0.0004, dur:28}},
+  {rumor:  {txt:"Gerücht: Großinvestor soll bei %NAME% einsteigen.", jump:+0.006, drift:+0.0003, dur:20},
+   confirm:{txt:"Bestätigt: Staranleger meldet große Beteiligung an %NAME%.", jump:+0.013, drift:+0.0005, dur:30},
+   deny:   {txt:"Dementi: Einstieg bei %NAME% war nur ein Gerücht.", jump:-0.011, drift:-0.0004, dur:28}},
+];
+
+const GENERIC_MEGA = [
+  {txt:"💥 MEGA: Sensation! %NAME% präsentiert einen revolutionären Durchbruch.", jump:+0.30, drift:+0.0008, dur:40},
+  {txt:"💥 MEGA: %NAME% schließt Jahrhundert-Partnerschaft – die Märkte rasten aus.", jump:+0.28, drift:+0.0008, dur:40},
+  {txt:"💥 MEGA: Schock bei %NAME% – Großanleger steigt schlagartig aus.", jump:-0.13, drift:-0.0004, dur:40},
+];
+
 /* ====================== Helpers ====================== */
 const $ = id => document.getElementById(id);
 const fmt = n => n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2}) + " $";
@@ -740,18 +850,47 @@ function genMarket(seed, ticks){
     paths[sym] = [d.start];
     prices[sym] = d.start;
   }
+
+  /* Platzhalter in News-Vorlagen füllen (%SYM% = Ticker, %NAME% = Firmenname). */
+  const fillTpl = (txt, sym) => {
+    const name = (STOCK_DEFS[sym] && STOCK_DEFS[sym].name) || sym;
+    return txt.replace(/%SYM%/g, sym).replace(/%NAME%/g, name);
+  };
+
+  /* Pro-Aktie-Kandidatenpool: handgeschriebene Einträge ∪ generische Vorlagen.
+     Garantiert, dass jede Aktie News bekommt. Verbraucht KEIN rnd() → fairness-neutral. */
+  const symList = Object.keys(prices);
+  const handBySym = {}; const allNews = [];
+  for(const ev of NEWS_POOL){
+    if(ev.t === "ALL"){ allNews.push(ev); continue; }
+    (handBySym[ev.t] ||= []).push(ev);
+  }
+  const candBySym = {};
+  for(const sym of symList)
+    candBySym[sym] = [...GENERIC_NEWS.up, ...GENERIC_NEWS.down, ...(handBySym[sym] || [])];
+
   let effects = [];
   let pendingJumps = [];
-  let lastIdx = -1;
   let lastEventSym = null; // bricht die Momentum-Schleife: nie zweimal dieselbe Aktie in Folge
   let nextEvent = Math.round((30 + Math.floor(rnd()*40)) * TICK_SCALE);
-  const chainsLeft = [...CHAIN_POOL]; // jede Kette höchstens einmal pro Spiel
   let chainQueue = [];                // geplante Auflösungen (Bestätigung/Dementi)
+
+  // Generische Ketten an jede Aktie binden, mit handgeschriebenen mischen (kein rnd())
+  const genChainInstances = [];
+  for(const sym of symList)
+    for(const tpl of GENERIC_CHAINS)
+      genChainInstances.push({t:sym, rumor:tpl.rumor, confirm:tpl.confirm, deny:tpl.deny});
+  const chainsLeft = [...CHAIN_POOL, ...genChainInstances]; // jede Kette höchstens einmal pro Spiel
 
   // Mega-Event vorab würfeln: ~50 % der Spiele, genau eines, im mittleren Spielteil
   let megaAt = -1, megaEv = null;
   if(rnd() < 0.5){
-    megaEv = MEGA_POOL[Math.floor(rnd()*MEGA_POOL.length)];
+    const genMegaInstances = [];
+    for(const sym of symList)
+      for(const tpl of GENERIC_MEGA)
+        genMegaInstances.push({t:sym, txt:tpl.txt, jump:tpl.jump, drift:tpl.drift, dur:tpl.dur});
+    const megaAll = [...MEGA_POOL, ...genMegaInstances];
+    megaEv = megaAll[Math.floor(rnd()*megaAll.length)];
     megaAt = Math.min(Math.round(ticks * (0.3 + rnd()*0.45)), ticks - (MEGA_REACT_TICKS + 20));
   }
 
@@ -779,7 +918,7 @@ function genMarket(seed, ticks){
      deterministisch bleibt. */
   function fire(i, ev, sym){
     const dur = Math.round(ev.dur * TICK_SCALE);
-    const resolved = {t:sym, txt:ev.txt.replace("%SYM%", sym),
+    const resolved = {t:sym, txt:fillTpl(ev.txt, sym),
                       jump:ev.jump, drift:ev.drift, dur};
     const targets = sym === "ALL" ? Object.keys(prices) : [sym];
     const hits = i + REACT_TICKS;
@@ -829,7 +968,7 @@ function genMarket(seed, ticks){
     }
     if(ev.drift) effects.push({sym:ev.t, drift:ev.drift * TICK_SCALE, from:hits, until:hits + dur});
     if(ev.t !== "ALL") lastEventSym = ev.t;
-    events.push({tick:i, ev:{t:ev.t, txt:ev.txt, jump:ev.jump, drift:ev.drift, dur},
+    events.push({tick:i, ev:{t:ev.t, txt:fillTpl(ev.txt, ev.t), jump:ev.jump, drift:ev.drift, dur},
                  tag: ev.jump > 0 ? "up" : "down", mega:true});
   }
 
@@ -870,11 +1009,19 @@ function genMarket(seed, ticks){
         at = Math.min(at, ticks - (REACT_TICKS + 8));
         chainQueue.push({at, chain});
       }else{
-        let idx;
-        do{ idx = Math.floor(rnd()*NEWS_POOL.length); }while(idx === lastIdx);
-        lastIdx = idx;
-        const ev = NEWS_POOL[idx];
-        fire(i, ev, ev.t);
+        // Klassische Einzel-News: erst ZIEL fair wählen, dann Text aus dessen Pool.
+        // So bekommt jede Aktie (auch neue) zuverlässig Schlagzeilen.
+        const P_ALL = 0.18; // Anteil marktweiter News
+        if(allNews.length && rnd() < P_ALL){
+          const ev = allNews[Math.floor(rnd()*allNews.length)];
+          fire(i, ev, "ALL");
+        }else{
+          let pickList = symList.filter(s => s !== lastEventSym);
+          if(pickList.length === 0) pickList = symList; // Edge: nur eine Aktie
+          const target = pickList[Math.floor(rnd()*pickList.length)];
+          const cand = candBySym[target];
+          fire(i, cand[Math.floor(rnd()*cand.length)], target);
+        }
       }
       nextEvent = i + Math.round((60 + Math.floor(rnd()*55)) * TICK_SCALE);
     }
@@ -932,6 +1079,8 @@ function genMarket(seed, ticks){
 /* ====================== State ====================== */
 let players, round, selected, qtyMode;
 let chartMode = "line"; // "line" oder "candle" (Kerzenchart), nur Optik
+const DEFAULT_FAVS = ["SPCX","TSLA","NVDA","RKLB"]; // Standard-Favoriten der Watchlist
+let favorites = DEFAULT_FAVS.slice(); // 4 Watchlist-Favoriten, pro Spiel zurückgesetzt (nur Optik)
 let tickCount, matchTicks, paused, over, timer;
 let chartRaf = null, lastTickAt = 0; // für flüssige Chart-Animation (rAF-Loop)
 /* Zeitanker der laufenden Runde: remote = gemeinsamer Lobby-Start (startAt),
@@ -1295,6 +1444,7 @@ function startRound(r){
   tickCount = 0; paused = false; over = false; newsPaused = false; lastNewsTick = -999;
   $("newsPop").classList.remove("show");
   selected = "SPCX"; qtyMode = "5";
+  favorites = DEFAULT_FAVS.slice(); // Favoriten je Spiel auf Standard zurücksetzen
   document.querySelectorAll(".chip").forEach(x => x.classList.toggle("active", x.dataset.q === "5"));
   $("news").innerHTML = '<div class="empty">Gleich geht\'s los …</div>';
   $("flash").textContent = "";
@@ -1573,7 +1723,7 @@ function totalOf(p){
 function buildWatch(){
   const el = $("watch");
   el.innerHTML = "";
-  for(const sym of Object.keys(STOCK_DEFS)){
+  for(const sym of favorites){
     const b = document.createElement("button");
     b.className = "w-card" + (sym === selected ? " active" : "");
     b.id = "w-" + sym;
@@ -1582,6 +1732,63 @@ function buildWatch(){
     el.appendChild(b);
   }
 }
+
+/* ====================== Aktien-Auswahl (Overlay) ====================== */
+function openStockModal(){
+  buildStockList();
+  $("stockModal").classList.add("show");
+}
+function closeStockModal(){
+  $("stockModal").classList.remove("show");
+}
+/* Stern umschalten: Favorit entfernen (min. 1 bleibt) bzw. hinzufügen (max. 4) */
+function toggleFav(sym){
+  const i = favorites.indexOf(sym);
+  if(i >= 0){
+    if(favorites.length > 1) favorites.splice(i, 1);
+  }else if(favorites.length < 4){
+    favorites.push(sym);
+  }else{
+    return; // voll – erst einen abwählen
+  }
+  buildWatch();
+  buildStockList();
+  renderAll();
+}
+function buildStockList(){
+  const el = $("stockList");
+  if(!el) return;
+  const full = favorites.length >= 4;
+  let html = "";
+  for(const sym of Object.keys(STOCK_DEFS)){
+    const d = STOCK_DEFS[sym];
+    const ch = (price(sym)/open_(sym) - 1) * 100;
+    const isFav = favorites.includes(sym);
+    const starDis = !isFav && full;        // Stern deaktiviert, wenn 4 voll und kein Favorit
+    html += `<div class="stock-row${sym === selected ? " sel" : ""}" data-sym="${sym}">
+      <button class="fav-star${isFav ? " on" : ""}${starDis ? " dis" : ""}" data-fav="${sym}"
+              title="${isFav ? "Favorit entfernen" : starDis ? "Erst einen Favoriten abwählen" : "Zu Favoriten"}">${isFav ? "★" : "☆"}</button>
+      <div class="sr-main">
+        <div class="sr-top"><span class="sr-sym">${sym}</span><span class="sr-name">${d.name}</span></div>
+        <div class="sr-char">${d.char}</div>
+      </div>
+      <div class="sr-px">
+        <div class="sr-price">${fmt(price(sym))}</div>
+        <div class="sr-chg" style="color:${ch >= 0 ? "var(--up)" : "var(--down)"}">${ch>=0?"+":""}${ch.toFixed(2)}%</div>
+      </div>
+    </div>`;
+  }
+  el.innerHTML = html;
+  el.querySelectorAll(".stock-row").forEach(row => {
+    row.onclick = () => { selected = row.dataset.sym; closeStockModal(); buildWatch(); renderAll(); };
+  });
+  el.querySelectorAll(".fav-star").forEach(star => {
+    star.onclick = e => { e.stopPropagation(); toggleFav(star.dataset.fav); };
+  });
+}
+$("openStocks").onclick = openStockModal;
+$("closeStocks").onclick = closeStockModal;
+$("stockModal").onclick = e => { if(e.target === $("stockModal")) closeStockModal(); };
 
 function renderAll(){
   const cd = $("countdown");
@@ -1621,6 +1828,9 @@ function renderAll(){
     d.textContent = (ch>=0?"+":"") + ch.toFixed(2) + "%";
     d.style.color = ch >= 0 ? "var(--up)" : "var(--down)";
   }
+
+  // Offenes Aktien-Overlay mitticken lassen
+  if($("stockModal").classList.contains("show")) buildStockList();
 
   // Kurs
   const px = price(selected), op = open_(selected);

@@ -27,12 +27,13 @@ const STOCK_DEFS = {
 };
 const ETF_SYM = "MKT", ETF_BASE = 100.00;
 const ETF_DEF = {name:"Markt-ETF", type:"index", start:ETF_BASE,
-                 char:"📊 Markt-ETF: ganzer Markt, ruhig, zahlt kleine Dividende"};
+                 char:"📊 Markt-ETF: ganzer Markt, ruhig, zahlt erhöhte Dividende fürs Sparen"};
 const defOf = sym => STOCK_DEFS[sym] || (sym === ETF_SYM ? ETF_DEF : undefined);
 const DISPLAY_SYMS = [...Object.keys(STOCK_DEFS), ETF_SYM];
 const FEE_PCT = 0.0015;                                  // 0,15 % Gebühr je Order
 const feeOf = v => Math.round(v * FEE_PCT * 100) / 100;  // auf Cent gerundet (keine Float-Drift)
-const DIV_PCT = 0.00004;                                 // ~1,7 % Brutto-Dividende übers Spiel
+const DIV_PCT = 0.00004;                                 // ~1,7 % Brutto-Dividende übers Spiel (Einzelwerte)
+const DIV_PCT_ETF = 0.00006;                             // ~2,5 % – Sparplan-Bonus, macht den Index-Stil konkurrenzfähig
 const DIV_PAYOUT = Math.max(1, Math.round(20000 / TICK_MS)); // Dividende wird alle ~20 s sichtbar ausgezahlt
 const isDividendSym = sym => { const d = defOf(sym); return !!d && (d.type === "dividend" || sym === ETF_SYM); };
 const NEWS_POOL = [

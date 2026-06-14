@@ -155,6 +155,10 @@
 
   /* ============ Vorlauf-Countdown ============ */
   .pre-num{font-family:var(--mono);font-size:96px;font-weight:800;color:var(--accent);line-height:1.1;margin-top:6px}
+  /* Tipp-Einblendung während der Wartezeit (Lobby + Vorlauf) */
+  .tip-line{margin-top:14px;font-size:13px;line-height:1.5;color:var(--muted);min-height:2.6em;
+            border-top:1px solid var(--line);padding-top:12px;max-width:380px;transition:opacity .35s}
+  #preTip{margin-left:auto;margin-right:auto;border-top:none;padding-top:18px}
 
   /* ============ Kurs + Chart ============ */
   .quote{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
@@ -508,6 +512,7 @@
   <div style="text-align:center">
     <div class="eyebrow">Bereitmachen …</div>
     <div class="pre-num" id="preNum">5</div>
+    <div class="tip-line" id="preTip"></div>
   </div>
 </div>
 
@@ -519,6 +524,7 @@
     <div class="lobby-code" id="lobbyCode"></div>
     <div class="sub" id="lobbySub"></div>
     <div class="lobby-start">Start um <b id="lobbyTime"></b> Uhr · noch <b id="lobbyCount"></b></div>
+    <div class="tip-line" id="lobbyTip"></div>
     <button class="lobby-cancel" id="lobbyCancel">Abbrechen</button>
   </div>
 </div>
@@ -1474,6 +1480,33 @@ $("startBtn").onclick = () => {
    und spielen zeitgleich – ganz ohne Server. */
 let lobbyTimer = null, startAt = 0;
 
+/* Spieltipps für die Wartezeit (Lobby + Vorlauf). Reine Optik – kein rnd()/Fairness-Bezug. */
+const TIPS = [
+  "📰 News wirken erst ~8 Sekunden nach der Schlagzeile – nutze die Lücke zum Handeln.",
+  "🤫 Insider-Tipps kündigen ein Ereignis ~50 Sekunden vorher an – positioniere dich früh.",
+  "🐻 Mit dem Short-Button verdienst du an fallenden Kursen – auch schlechte News sind eine Chance.",
+  "💸 Jede Order kostet 0,15 % Gebühr – ständiges Hin und Her frisst Gewinn.",
+  "💰 Dividenden-Aktien wie AAPL, MSFT oder NVDA zahlen fürs Halten – Geduld lohnt sich.",
+  "📊 Der Markt-ETF »MKT« bündelt alle Werte: ruhig und ideal für die Langfrist-Strategie.",
+  "🚀 SPCX reagiert besonders heftig auf News – hohes Risiko, hohe Chance.",
+  "💥 Selten schlägt ein Mega-Event ein – ein Vor-Beben im Kurs warnt dich vorher.",
+  "🕯️ Die Kerzen-Ansicht zeigt Schwankungen und Wendepunkte deutlicher als die Linie.",
+  "⭐ Über »☆ Alle Aktien« legst du deine 4 Watchlist-Favoriten fest.",
+  "🎢 Zock-Papiere wie RKLB liegen lange ruhig und springen dann plötzlich.",
+  "📈 Gewinne zählen erst, wenn du sie sicherst – verkaufen nicht vergessen.",
+  "🏁 Am Ende zählt das Gesamtdepot: Bargeld plus Positionen zum Schlusskurs.",
+];
+let tipTimer = null, tipIdx = 0, tipEls = [];
+function startTips(ids){
+  stopTips();
+  tipEls = ids;
+  tipIdx = Math.floor(Math.random() * TIPS.length); // nur Anzeige → Math.random ok
+  const show = () => { const t = TIPS[tipIdx++ % TIPS.length]; for(const id of tipEls){ const el = $(id); if(el) el.textContent = t; } };
+  show();
+  tipTimer = setInterval(show, 4500);
+}
+function stopTips(){ clearInterval(tipTimer); tipTimer = null; }
+
 const hhmm = ms => {
   const d = new Date(ms);
   return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
@@ -1492,6 +1525,7 @@ function openLobby(joined){
   $("lobbyTime").textContent = hhmm(startAt);
   updateLobby();
   $("lobby").classList.add("show");
+  startTips(["lobbyTip", "preTip"]); // Tipps während der Wartezeit (auch im Vorlauf-Fenster)
   clearInterval(lobbyTimer);
   lobbyTimer = setInterval(updateLobby, 250);
 }
@@ -1517,6 +1551,7 @@ function updateLobby(){
 
 $("lobbyCancel").onclick = () => {
   clearInterval(lobbyTimer);
+  stopTips();
   $("lobby").classList.remove("show");
 };
 
@@ -1590,6 +1625,7 @@ function startRound(r){
 
   // Spielzeit erst nach dem Vorlauf starten
   const beginTicking = () => {
+    stopTips(); // Spiel läuft – keine Wartetipps mehr
     roundAnchor = mode === "remote" ? startAt : Date.now();
     clearInterval(timer);
     timer = setInterval(tick, TICK_MS);
@@ -1611,6 +1647,7 @@ function runPreStart(cb){
   const num = $("preNum");
   num.textContent = n;
   $("preStart").classList.add("show");
+  startTips(["preTip"]); // ein paar Tipps auch im Solo/Local-Vorlauf
   clearInterval(preTimer);
   preTimer = setInterval(() => {
     n--;

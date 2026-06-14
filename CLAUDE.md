@@ -15,9 +15,11 @@ There is no build system, package manager, linter, or test suite. The app is pla
 
 ## Architecture
 
-The entire application — styles, markup, and game logic — lives in a single file: `index.html`. The other files are PWA scaffolding (`sw.js`, `manifest.json`, icons).
+The application is split across four hand-maintained files (no build step): `index.html` (markup/structure only), `styles.css` (all CSS, formerly the inline `<style>`), `data.js` (the content **data** — `STOCK_DEFS`/`ETF_DEF`, all news/event pools `NEWS_POOL`/`MEGA_POOL`/`MOMENTUM_POOL`/`CHAIN_POOL`/`GENERIC_*`/`OPENING_EVENT`, plus `TIPS`, `AWARDS`, `TUT_STEPS`, `MODE_HINTS`, `DURATIONS`, `DEFAULT_FAVS`, `KING_BADGE` and the tuning constants `TICK_MS`/`TICK_SCALE`/`REACT_TICKS`/`FEE_PCT`/`DIV_PCT`/`DIV_PAYOUT`/`MEGA_*` and the small data accessors `defOf`/`isDividendSym`/`DISPLAY_SYMS`/`feeOf`), and `game.js` (all logic: helpers, `mulberry32`/`genMarket`, state, tick loop, trading, rendering, news feed, round/match end, stats, tutorial, controls). The other files are PWA scaffolding (`sw.js`, `manifest.json`, icons).
 
-The inline `<script>` in `index.html` is organized into commented sections (`/* ====== ... ====== */`) in this order: configuration, helpers, market generation, state, tick loop, trading, rendering, news feed, round/match end, controls.
+These are **classic** scripts (not ES modules), loaded `data.js` **before** `game.js` at the end of `<body>`; both share one global lexical scope, exactly as the former single inline script did — so top-level `const`/`let` in `data.js` are visible to `game.js` (and vice-versa at call time). No `import`/`export`. Keep `file://` opening working by not introducing modules. When adding/renaming any of these files, update `sw.js`'s `FILES` list **and** bump its `CACHE` version. `data.js` must stay free of parse-time references to `game.js` symbols (its internal order already satisfies dependencies, e.g. `TICK_MS` before `MEGA_REACT_TICKS`, `STOCK_DEFS` before `defOf`).
+
+`game.js` is organized into commented sections (`/* ====== ... ====== */`) in this order: helpers, market generation, state, tick loop, trading, rendering, news feed, round/match end, controls.
 
 ### Core design: deterministic pre-generated market
 

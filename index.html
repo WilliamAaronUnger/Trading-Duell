@@ -199,7 +199,18 @@
   .flash.ok{color:var(--up)} .flash.err{color:var(--down)}
 
   /* ============ Depot ============ */
+  #depotPanel{position:relative}
   .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .div-line{font-family:var(--mono);font-size:12px;color:var(--up);background:rgba(61,220,151,.08);
+            border:1px solid rgba(61,220,151,.25);border-radius:8px;padding:6px 9px;margin-bottom:12px}
+  .div-pending{color:var(--muted);font-weight:400}
+  .div-toast{position:absolute;top:8px;right:10px;font-family:var(--mono);font-size:12px;font-weight:700;
+             color:#072;background:var(--up);border-radius:8px;padding:5px 9px;
+             opacity:0;transform:translateY(-6px);pointer-events:none;z-index:5}
+  .div-toast.show{animation:divPop 1.8s ease-out}
+  @keyframes divPop{0%{opacity:0;transform:translateY(-6px)}12%{opacity:1;transform:translateY(0)}
+                    78%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-6px)}}
+  @media (prefers-reduced-motion: reduce){.div-toast.show{animation:none;opacity:1}}
   .stat{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
   .stat .lbl{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
   .stat .val{font-family:var(--mono);font-size:14px;font-weight:700;margin-top:3px}
@@ -490,12 +501,14 @@
 
     <div class="col-side">
     <div class="panel" id="depotPanel">
+      <div class="div-toast" id="divToast"></div>
       <h2>Depot · <span id="depName"></span></h2>
       <div class="stats">
         <div class="stat"><div class="lbl">Bargeld</div><div class="val" id="cash"></div></div>
         <div class="stat"><div class="lbl">Gesamt</div><div class="val" id="total"></div></div>
         <div class="stat"><div class="lbl">+/−</div><div class="val" id="pnl"></div></div>
       </div>
+      <div class="div-line" id="divLine" style="display:none"></div>
       <div id="posWrap"></div>
     </div>
 
@@ -679,6 +692,7 @@ const DISPLAY_SYMS = [...Object.keys(STOCK_DEFS), ETF_SYM];
 const FEE_PCT = 0.0015;                                  // 0,15 % Gebühr je Order
 const feeOf = v => Math.round(v * FEE_PCT * 100) / 100;  // auf Cent gerundet (keine Float-Drift)
 const DIV_PCT = 0.00004;                                 // ~1,7 % Brutto-Dividende übers Spiel
+const DIV_PAYOUT = Math.max(1, Math.round(20000 / TICK_MS)); // Dividende wird alle ~20 s sichtbar ausgezahlt
 const isDividendSym = sym => { const d = defOf(sym); return !!d && (d.type === "dividend" || sym === ETF_SYM); };
 
 /* News: kleinere Sprünge, dafür längere Drift-Phasen → fließendere Bewegungen.
@@ -1300,7 +1314,7 @@ function buildMarket(){
 }
 
 function newPlayer(name, color){
-  return {name, cash:START_CASH, pos:{}, color, result:null,
+  return {name, cash:START_CASH, pos:{}, color, result:null, pendingDiv:0,
           stats:{trades:0, buys:0, sells:0, shorts:0, volume:0, realized:0, best:null, worst:null,
                  allIns:0, newsTrades:0, tipTrades:0, bestPct:0, investedTicks:0, perSym:{},
                  peak:START_CASH, trough:START_CASH, maxDD:0, feesPaid:0, dividends:0}};
@@ -1674,6 +1688,27 @@ function insiderText(t){
     : `Vertrauliche Quelle: Bei ${t.sym} ziehen dunkle Wolken auf …`;
 }
 
+/* Aufgelaufene Dividende auszahlen: aufs Bargeld gutschreiben, in die Statistik,
+   und (außerhalb des Catch-ups) als kurzer Toast sichtbar machen. */
+function payDividend(p, announce){
+  const paid = p.pendingDiv || 0;
+  if(paid <= 0){ p.pendingDiv = 0; return; }
+  p.pendingDiv = 0;
+  p.cash += paid;
+  p.stats.dividends = (p.stats.dividends || 0) + paid;
+  if(announce) showDivToast(paid);
+}
+let divToastTimer = null;
+function showDivToast(amt){
+  const el = $("divToast");
+  if(!el) return;
+  el.textContent = "💰 +" + fmt(amt) + " $ Dividende";
+  el.classList.remove("show"); void el.offsetWidth; // Reflow → Animation neu starten
+  el.classList.add("show");
+  clearTimeout(divToastTimer);
+  divToastTimer = setTimeout(() => el.classList.remove("show"), 1800);
+}
+
 /* Events und Insider-Tipps des aktuellen Ticks verarbeiten.
    showPopup=false beim Catch-up nach Tab-Schlaf (kein Popup-Stau). */
 function processTick(showPopup){
@@ -1693,12 +1728,11 @@ function processTick(showPopup){
   }
   const p = players[round], s = p.stats;
 
-  // Dividenden: Dividenden-Aktien (und der ETF) schreiben Long-Haltern pro Tick
-  // eine kleine Dividende gut. Deterministisch (kein rnd()) → in beiden Runden gleich.
-  let div = 0;
+  // Dividenden: Dividenden-Aktien (und der ETF) sammeln pro Tick einen kleinen Betrag
+  // an; ausgezahlt wird sichtbar gebündelt alle ~20 s. Deterministisch (kein rnd()).
   for(const [sym, pos] of Object.entries(p.pos))
-    if(pos.qty > 0 && isDividendSym(sym)) div += pos.qty * price(sym) * DIV_PCT * TICK_SCALE;
-  if(div){ p.cash += div; s.dividends = (s.dividends || 0) + div; }
+    if(pos.qty > 0 && isDividendSym(sym)) p.pendingDiv = (p.pendingDiv || 0) + pos.qty * price(sym) * DIV_PCT * TICK_SCALE;
+  if(p.pendingDiv > 0 && tickCount % DIV_PAYOUT === 0) payDividend(p, showPopup);
 
   // Statistik: investierte Zeit, Depot-Spitze/-Tief, max. Rücksetzer
   if(Object.keys(p.pos).length) s.investedTicks++;
@@ -2077,6 +2111,17 @@ function renderAll(){
   pnlEl.textContent = sgn(livePnl);
   pnlEl.style.color = livePnl >= 0 ? "var(--up)" : "var(--down)";
 
+  // Dividenden-Zeile: zeigt, wohin die Dividende fließt (aufs Bargeld) – Gesamtsumme
+  const divEl = $("divLine");
+  const divTot = (p.stats.dividends || 0) + (p.pendingDiv || 0);
+  if(divTot >= 0.005){
+    divEl.innerHTML = `💰 Dividende kassiert: <b>+${fmt(p.stats.dividends || 0)} $</b>` +
+      (p.pendingDiv >= 0.005 ? ` <span class="div-pending">(+${fmt(p.pendingDiv)} läuft auf)</span>` : "");
+    divEl.style.display = "";
+  }else{
+    divEl.style.display = "none";
+  }
+
   const wrap = $("posWrap");
   const syms = Object.keys(p.pos);
   if(syms.length === 0){
@@ -2089,7 +2134,8 @@ function renderAll(){
       const ppnl = ((cur - pos.avg) * pos.qty) || 0; // "|| 0" fängt das negative Null-Artefakt ab
       const ppct = ((cur/pos.avg - 1) * 100 * (pos.qty < 0 ? -1 : 1)) || 0;
       const c = ppnl >= 0 ? "var(--up)" : "var(--down)";
-      const tag = pos.qty < 0 ? ' <span style="color:var(--down);font-size:9px;font-weight:700">SHORT</span>' : "";
+      const tag = pos.qty < 0 ? ' <span style="color:var(--down);font-size:9px;font-weight:700">SHORT</span>'
+                : (pos.qty > 0 && isDividendSym(sym)) ? ' <span title="zahlt Dividende">💰</span>' : "";
       rows += `<tr><td>${sym}${tag}</td><td>${pos.qty}</td><td>${fmt(pos.avg)}</td>
                <td style="color:${c}">${ppnl>=0?"+":""}${fmt(ppnl)}</td>
                <td style="color:${c}">${ppct>=0?"+":""}${ppct.toFixed(2)}%</td></tr>`;
@@ -2344,8 +2390,9 @@ function endRound(){
   clearInterval(timer);
   stopChartLoop();
   if(sandbox) matchTicks = tickCount; else tickCount = matchTicks;
-  renderAll();
   const p = players[round];
+  payDividend(p, false); // letzte aufgelaufene Dividende noch auszahlen
+  renderAll();
   const tot = totalOf(p);
   p.result = {total: tot, pnl: tot - START_CASH};
 

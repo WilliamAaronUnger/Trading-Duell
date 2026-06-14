@@ -138,6 +138,24 @@
   .sr-price{font-size:13px;font-weight:700}
   .sr-chg{font-size:11px;font-weight:600;margin-top:2px}
 
+  /* ============ Statistik-Seite ============ */
+  .stat-head{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+             color:var(--muted);margin:16px 0 8px}
+  .stat-game{display:flex;align-items:center;gap:10px;padding:9px 11px;margin-bottom:6px;
+             border:1px solid var(--line);border-radius:10px;background:var(--panel-2)}
+  .sg-main{flex:1;min-width:0}
+  .sg-top{font-size:13px}
+  .sg-tag{font-size:13px}
+  .sg-sub{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sg-pnl{font-family:var(--mono);font-size:15px;font-weight:800;flex-shrink:0}
+  .sg-act{display:flex;gap:4px;flex-shrink:0}
+  .sg-btn{background:var(--panel);border:1px solid var(--line);border-radius:8px;cursor:pointer;
+          font-size:15px;padding:4px 8px;line-height:1}
+  .sg-btn:hover{border-color:var(--accent)}
+
+  /* ============ Vorlauf-Countdown ============ */
+  .pre-num{font-family:var(--mono);font-size:96px;font-weight:800;color:var(--accent);line-height:1.1;margin-top:6px}
+
   /* ============ Kurs + Chart ============ */
   .quote{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
   .px{font-family:var(--mono);font-size:32px;font-weight:700;letter-spacing:-.02em}
@@ -314,6 +332,7 @@
       <div class="rec" id="recLine" style="display:none"></div>
     </div>
     <button class="start-btn" id="resumeBtn" style="display:none">▶️ Spiel fortsetzen</button>
+    <button class="lobby-cancel" id="statsBtn" style="margin-top:0">📊 Meine Statistik</button>
     <div class="field">
       <label>Modus</label>
       <div class="dur-row">
@@ -381,6 +400,24 @@
       Die Endwerte vergleicht ihr danach selbst.
     </div>
     <button class="lobby-cancel" id="clearBtn" style="margin-top:10px;display:none">🗑 Gespeicherte Daten löschen</button>
+  </div>
+</div>
+
+<!-- ================= STATISTIK ================= -->
+<div class="screen" id="statsScreen">
+  <div class="wrap">
+    <div class="start-hero">
+      <div class="eyebrow">Deine letzten Spiele · nur auf diesem Gerät</div>
+      <h1>Statistik</h1>
+    </div>
+    <div id="statsBody"></div>
+    <div class="field" id="statsCmpBox" style="display:none;text-align:left">
+      <label id="statsCmpLabel">Gegner-Code zu diesem Spiel einfügen</label>
+      <input id="statsCmpIn" type="text" placeholder="SPCX4.…" autocomplete="off">
+      <div class="code-err" id="statsCmpErr"></div>
+      <button class="lobby-cancel" id="statsCmpBtn" style="margin-top:0">⚔️ Vergleichen</button>
+    </div>
+    <button class="start-btn" id="statsBack" style="margin-top:14px">← Zurück</button>
   </div>
 </div>
 
@@ -466,6 +503,14 @@
   </div>
 </div>
 
+<!-- ================= VORLAUF (3-2-1 vor Solo/Local-Start) ================= -->
+<div class="overlay" id="preStart">
+  <div style="text-align:center">
+    <div class="eyebrow">Bereitmachen …</div>
+    <div class="pre-num" id="preNum">5</div>
+  </div>
+</div>
+
 <!-- ================= LOBBY (Spiel angelegt, Warten auf Start) ================= -->
 <div class="overlay" id="lobby">
   <div class="modal">
@@ -530,7 +575,7 @@
       <button class="start-btn" id="shareBtn" style="margin-top:14px;height:44px;font-size:14px">📤 Mein Ergebnis kopieren</button>
       <div class="field" style="text-align:left">
         <label>Ergebnis des Gegners einfügen</label>
-        <input id="cmpIn" type="text" placeholder="SPCX3.…" autocomplete="off">
+        <input id="cmpIn" type="text" placeholder="SPCX4.…" autocomplete="off">
         <div class="code-err" id="cmpErr"></div>
       </div>
       <button class="lobby-cancel" id="cmpBtn" style="margin-top:0">⚔️ Vergleichen</button>
@@ -587,28 +632,48 @@ const REACT_TICKS = Math.round(8000 / TICK_MS);
    - momentum: jüngerer Trend verstärkt sich selbst (Momentum-Wert)
    - meanRev:  Kurs wird zur Eröffnung zurückgezogen (stabiler Riese)
    - spikeP/spikeMag: seltene, plötzliche Einzelsprünge (Zock-Papier) */
+/* type steuert nur die Balance (Dividenden), NICHT die Marktgenerierung:
+   dividend = zahlt pro Tick eine kleine Dividende an Long-Halter,
+   growth/risk = keine Dividende. */
 const STOCK_DEFS = {
-  SPCX:{name:"SpaceX",     start:135.00, sigma:0.0015, drift:0.00001, newsMult:1.25,
+  SPCX:{name:"SpaceX",     type:"growth",   start:135.00, sigma:0.0015, drift:0.00001, newsMult:1.25,
         char:"🚀 Hype-Wert: reagiert besonders heftig auf News"},
-  TSLA:{name:"Tesla",      start:312.40, sigma:0.0010, drift:0, momentum:0.45,
+  TSLA:{name:"Tesla",      type:"growth",   start:312.40, sigma:0.0010, drift:0, momentum:0.45,
         char:"📈 Momentum-Wert: Trends verstärken sich selbst"},
-  NVDA:{name:"NVIDIA",     start:176.80, sigma:0.0008, drift:0, meanRev:0.002,
-        char:"🛡️ Stabiler Riese: schwankt wenig, kehrt zur Mitte zurück"},
-  RKLB:{name:"Rocket Lab", start:38.65,  sigma:0.0011, drift:0, spikeP:0.006, spikeMag:0.010,
+  NVDA:{name:"NVIDIA",     type:"dividend", start:176.80, sigma:0.0008, drift:0, meanRev:0.002,
+        char:"🛡️ Stabiler Riese: schwankt wenig, zahlt Dividende"},
+  RKLB:{name:"Rocket Lab", type:"risk",     start:38.65,  sigma:0.0011, drift:0, spikeP:0.006, spikeMag:0.010,
         char:"🎢 Zock-Papier: lange ruhig, dann plötzliche Sprünge"},
-  AMZN:{name:"Amazon",     start:185.00, sigma:0.0009, drift:0, meanRev:0.0015,
-        char:"🐢 Schwergewicht: bewegt sich bedächtig"},
-  AAPL:{name:"Apple",      start:228.00, sigma:0.0007, drift:0, meanRev:0.0025,
-        char:"🍎 Sicherer Hafen: ruhig und verlässlich"},
-  MSFT:{name:"Microsoft",  start:430.00, sigma:0.0008, drift:0.00001,
-        char:"🏢 Solider Wachstumswert: ruhiger Aufwärtstrend"},
-  GOOGL:{name:"Alphabet",  start:190.00, sigma:0.0010, drift:0, newsMult:1.15,
+  AMZN:{name:"Amazon",     type:"dividend", start:185.00, sigma:0.0009, drift:0, meanRev:0.0015,
+        char:"🐢 Schwergewicht: bedächtig, zahlt Dividende"},
+  AAPL:{name:"Apple",      type:"dividend", start:228.00, sigma:0.0007, drift:0, meanRev:0.0025,
+        char:"🍎 Sicherer Hafen: ruhig, zahlt Dividende"},
+  MSFT:{name:"Microsoft",  type:"dividend", start:430.00, sigma:0.0008, drift:0.00001,
+        char:"🏢 Solider Wachstumswert: ruhiger Aufwärtstrend, Dividende"},
+  GOOGL:{name:"Alphabet",  type:"growth",   start:190.00, sigma:0.0010, drift:0, newsMult:1.15,
         char:"🔎 Nachrichten-getrieben: reagiert spürbar auf Schlagzeilen"},
-  AMD:{name:"AMD",         start:165.00, sigma:0.0012, drift:0, momentum:0.40,
+  AMD:{name:"AMD",         type:"growth",   start:165.00, sigma:0.0012, drift:0, momentum:0.40,
         char:"⚡ Trendläufer: Bewegungen verstärken sich"},
-  META:{name:"Meta",       start:600.00, sigma:0.0011, drift:0, spikeP:0.005, spikeMag:0.011,
+  META:{name:"Meta",       type:"risk",     start:600.00, sigma:0.0011, drift:0, spikeP:0.005, spikeMag:0.011,
         char:"🎭 Stimmungswert: kann sprunghaft drehen"},
 };
+
+/* Handelbarer Gesamtmarkt-Index (Sparplan-Strategie). Bewusst AUSSERHALB von
+   STOCK_DEFS, damit alle rnd()-Schleifen in genMarket ihn automatisch ausschließen
+   (er ist abgeleitet, kein Random-Walk, nie News-Ziel). Sein Pfad wird am Ende von
+   genMarket aus den 10 echten Aktien gemittelt. */
+const ETF_SYM = "MKT", ETF_BASE = 100.00;
+const ETF_DEF = {name:"Markt-ETF", type:"index", start:ETF_BASE,
+                 char:"📊 Markt-ETF: ganzer Markt, ruhig, zahlt kleine Dividende"};
+const defOf = sym => STOCK_DEFS[sym] || (sym === ETF_SYM ? ETF_DEF : undefined);
+/* alle anzeig-/handelbaren Symbole (echte Aktien + Index) */
+const DISPLAY_SYMS = [...Object.keys(STOCK_DEFS), ETF_SYM];
+
+/* ---- Balance-Stellschrauben (playtest-bedürftig) ---- */
+const FEE_PCT = 0.0015;                                  // 0,15 % Gebühr je Order
+const feeOf = v => Math.round(v * FEE_PCT * 100) / 100;  // auf Cent gerundet (keine Float-Drift)
+const DIV_PCT = 0.00004;                                 // ~1,7 % Brutto-Dividende übers Spiel
+const isDividendSym = sym => { const d = defOf(sym); return !!d && (d.type === "dividend" || sym === ETF_SYM); };
 
 /* News: kleinere Sprünge, dafür längere Drift-Phasen → fließendere Bewegungen.
    Pool bewusst ausbalanciert: SPCX dominiert nicht – auch TSLA/NVDA/RKLB
@@ -1073,13 +1138,30 @@ function genMarket(seed, ticks){
   }
   tips.sort((a,b) => a.tick - b.tick);
 
+  addEtfPath(paths, ticks);
   return {paths, events, tips};
+}
+
+/* Markt-ETF-Pfad ableiten: gleichgewichteter Index (jede Aktie auf ihren
+   Eröffnungskurs normiert, gemittelt, × ETF_BASE). Rein abgeleitet aus den
+   bereits fertigen Pfaden → verbraucht KEIN rnd(), bricht die Fairness nicht.
+   Niedrige Vola ergibt sich automatisch (Varianz ≈ 1/√Anzahl). */
+function addEtfPath(paths, ticks){
+  const syms = Object.keys(STOCK_DEFS);
+  const N = syms.length;
+  const etf = [];
+  for(let t = 0; t <= ticks; t++){
+    let acc = 0;
+    for(const s of syms) acc += paths[s][t] / STOCK_DEFS[s].start;
+    etf.push(acc / N * ETF_BASE);
+  }
+  paths[ETF_SYM] = etf;
 }
 
 /* ====================== State ====================== */
 let players, round, selected, qtyMode;
 let chartMode = "line"; // "line" oder "candle" (Kerzenchart), nur Optik
-const DEFAULT_FAVS = ["SPCX","TSLA","NVDA","RKLB"]; // Standard-Favoriten der Watchlist
+const DEFAULT_FAVS = ["SPCX","MKT","NVDA","RKLB"]; // Standard-Favoriten der Watchlist (inkl. Markt-ETF)
 let favorites = DEFAULT_FAVS.slice(); // 4 Watchlist-Favoriten, pro Spiel zurückgesetzt (nur Optik)
 let tickCount, matchTicks, paused, over, timer;
 let chartRaf = null, lastTickAt = 0; // für flüssige Chart-Animation (rAF-Loop)
@@ -1215,7 +1297,7 @@ function newPlayer(name, color){
   return {name, cash:START_CASH, pos:{}, color, result:null,
           stats:{trades:0, buys:0, sells:0, shorts:0, volume:0, realized:0, best:null, worst:null,
                  allIns:0, newsTrades:0, tipTrades:0, bestPct:0, investedTicks:0, perSym:{},
-                 peak:START_CASH, trough:START_CASH, maxDD:0}};
+                 peak:START_CASH, trough:START_CASH, maxDD:0, feesPaid:0, dividends:0}};
 }
 
 /* ====================== Lokaler Speicher (Namen + Rekord) ====================== */
@@ -1236,7 +1318,7 @@ function saveSnapshot(phase){
   if(tutorial || sandbox || (over && phase !== "handover")) return;
   try{
     localStorage.setItem(GAME_KEY, JSON.stringify({
-      v:1, mode, gameCode, durationMin, round,
+      v:2, mode, gameCode, durationMin, round,
       startAt: mode === "remote" ? startAt : 0,
       tickCount, players, phase: phase || "play", ts: Date.now()
     }));
@@ -1245,7 +1327,7 @@ function saveSnapshot(phase){
 function loadSnapshot(){
   try{
     const s = JSON.parse(localStorage.getItem(GAME_KEY));
-    if(!s || s.v !== 1) return null;
+    if(!s || s.v !== 2) return null;
     if(s.mode !== "local" && s.mode !== "remote" && s.mode !== "solo") return null;
     if(typeof s.gameCode !== "number" || !Array.isArray(s.players) || !s.players.length) return null;
     if(Date.now() - s.ts > 24*3600*1000) return null; // alte Stände nicht wiederbeleben
@@ -1270,6 +1352,17 @@ function updateRecord(p){
     s.best = {pnl: p.result.pnl, name: p.name.slice(0,14), dur: durationMin, date: Date.now()};
     saveStore(s);
   }
+}
+
+/* Abgeschlossenes Spiel in die lokale Historie schreiben (neueste zuerst, max. 20).
+   Der eingebettete packResult-Code macht jeden Eintrag teil- und vergleichbar. */
+function appendGameHistory(p){
+  const s = loadStore();
+  if(!Array.isArray(s.games)) s.games = [];
+  s.games.unshift({date: Date.now(), pnl: p.result.pnl, total: p.result.total,
+                   durationMin, name: p.name.slice(0,14), mode, fav: favSym(p), code: packResult(p)});
+  if(s.games.length > 20) s.games.length = 20;
+  saveStore(s);
 }
 
 /* Startbildschirm: Namen vorbelegen, Rekordzeile, Fortsetzen- + Löschen-Button */
@@ -1425,6 +1518,15 @@ $("round2Btn").onclick = () => {
 };
 
 $("rematchBtn").onclick = () => {
+  if(cmpFromStats){ // Vergleich kam aus der Statistik – dorthin zurück
+    cmpFromStats = false;
+    $("rematchBtn").textContent = "Revanche";
+    $("overlay").classList.remove("show");
+    renderStats();
+    $("statsScreen").classList.add("show");
+    window.scrollTo(0, 0);
+    return;
+  }
   $("overlay").classList.remove("show");
   $("matchScreen").classList.remove("show");
   $("startScreen").classList.add("show");
@@ -1442,6 +1544,7 @@ $("rematchBtn").onclick = () => {
 function startRound(r){
   round = r;
   tickCount = 0; paused = false; over = false; newsPaused = false; lastNewsTick = -999;
+  clearInterval(preTimer); preTimer = null; $("preStart").classList.remove("show");
   $("newsPop").classList.remove("show");
   selected = "SPCX"; qtyMode = "5";
   favorites = DEFAULT_FAVS.slice(); // Favoriten je Spiel auf Standard zurücksetzen
@@ -1475,13 +1578,42 @@ function startRound(r){
   $("startScreen").classList.remove("show");
   $("matchScreen").classList.add("show");
   window.scrollTo(0,0);
+  renderAll(); // Anfangszustand schon zeigen (eingefroren während des Vorlaufs)
 
-  clearInterval(timer);
-  timer = setInterval(tick, TICK_MS);
-  lastTickAt = performance.now();
-  startChartLoop();
-  saveSnapshot("play");
-  renderAll();
+  // Spielzeit erst nach dem Vorlauf starten
+  const beginTicking = () => {
+    roundAnchor = mode === "remote" ? startAt : Date.now();
+    clearInterval(timer);
+    timer = setInterval(tick, TICK_MS);
+    lastTickAt = performance.now();
+    startChartLoop();
+    saveSnapshot("play");
+    renderAll();
+  };
+  // 5-Sekunden-Vorlauf nur für Solo & Local (tick-basiert). Remote ist weltzeit-
+  // verankert (Lobby ist der Vorlauf) und das Tutorial startet sofort gecoacht.
+  if((mode === "solo" || mode === "local") && !tutorial) runPreStart(beginTicking);
+  else beginTicking();
+}
+
+/* 3-2-1-Vorlauf: zählt ~5 s herunter, dann ruft cb() den eigentlichen Start auf. */
+let preTimer = null;
+function runPreStart(cb){
+  let n = 5;
+  const num = $("preNum");
+  num.textContent = n;
+  $("preStart").classList.add("show");
+  clearInterval(preTimer);
+  preTimer = setInterval(() => {
+    n--;
+    if(n <= 0){
+      clearInterval(preTimer); preTimer = null;
+      num.textContent = "Los!";
+      setTimeout(() => { $("preStart").classList.remove("show"); cb(); }, 450);
+    }else{
+      num.textContent = n;
+    }
+  }, 1000);
 }
 
 /* ====================== Tick (spielt vorberechneten Markt ab) ====================== */
@@ -1489,7 +1621,7 @@ let newsPaused = false;
 let lastNewsTick = -999; // für die News-Junkie-Statistik
 
 function price(sym){ return market.paths[sym][Math.min(tickCount, matchTicks)]; }
-function open_(sym){ return STOCK_DEFS[sym].start; }
+function open_(sym){ return defOf(sym).start; }
 
 function insiderText(t){
   return t.dir > 0
@@ -1514,8 +1646,16 @@ function processTick(showPopup){
       if(showPopup) showNewsPop({ev:{t:t.sym, txt:"🤫 " + insiderText(t)}, tag:t.dir > 0 ? "up" : "down", insider:true});
     }
   }
-  // Statistik: investierte Zeit, Depot-Spitze/-Tief, max. Rücksetzer
   const p = players[round], s = p.stats;
+
+  // Dividenden: Dividenden-Aktien (und der ETF) schreiben Long-Haltern pro Tick
+  // eine kleine Dividende gut. Deterministisch (kein rnd()) → in beiden Runden gleich.
+  let div = 0;
+  for(const [sym, pos] of Object.entries(p.pos))
+    if(pos.qty > 0 && isDividendSym(sym)) div += pos.qty * price(sym) * DIV_PCT * TICK_SCALE;
+  if(div){ p.cash += div; s.dividends = (s.dividends || 0) + div; }
+
+  // Statistik: investierte Zeit, Depot-Spitze/-Tief, max. Rücksetzer
   if(Object.keys(p.pos).length) s.investedTicks++;
   const tv = totalOf(p);
   if(tv > s.peak) s.peak = tv;
@@ -1614,7 +1754,8 @@ function curQty(){
   const p = players[round];
   const pos = p.pos[selected];
   if(qtyMode === "max"){
-    const afford = Math.floor(p.cash / price(selected));
+    // Gebühr schon einplanen, damit "Max" nicht an Cents scheitert
+    const afford = Math.floor(p.cash / (price(selected) * (1 + FEE_PCT)));
     // Bei Short-Position deckt "Max" höchstens alles ein
     return Math.max(1, pos && pos.qty < 0 ? Math.min(afford, -pos.qty) : afford);
   }
@@ -1653,26 +1794,29 @@ function trade(side){
   if(side === "buy"){
     if(pos && pos.qty < 0){
       // Short eindecken: zurückkaufen, Gewinn = (Short-Kurs − Kaufkurs) × Stück
-      const q = Math.min(qty, -pos.qty, Math.floor(p.cash / px));
+      const q = Math.min(qty, -pos.qty, Math.floor(p.cash / (px * (1 + FEE_PCT))));
       if(q < 1){ flash.textContent = "Nicht genug Bargeld zum Eindecken."; flash.className = "flash err"; return; }
       const profit = (pos.avg - px) * q;
-      p.cash -= q * px;
+      const fee = feeOf(q * px);
+      p.cash -= q * px + fee;
+      p.stats.feesPaid += fee;
       pos.qty += q;
       if(pos.qty === 0) delete p.pos[selected];
       noteTrade(p, q * px, "buy");
       noteClose(p, profit, pos.avg * q);
-      flash.textContent = `Eingedeckt: ${q} × ${selected} @ ${fmt(px)} (${sgn(profit)})`;
+      flash.textContent = `Eingedeckt: ${q} × ${selected} @ ${fmt(px)} (${sgn(profit)}) · Gebühr ${fmt(fee)}`;
       flash.className = "flash ok";
     }else{
-      const cost = qty * px;
-      if(cost > p.cash + 0.001){ flash.textContent = "Nicht genug Bargeld."; flash.className = "flash err"; return; }
-      p.cash -= cost;
+      const cost = qty * px, fee = feeOf(cost);
+      if(cost + fee > p.cash + 0.001){ flash.textContent = "Nicht genug Bargeld."; flash.className = "flash err"; return; }
+      p.cash -= cost + fee;
+      p.stats.feesPaid += fee;
       const lp = pos || {qty:0, avg:0};
       lp.avg = (lp.avg*lp.qty + cost) / (lp.qty + qty);
       lp.qty += qty;
       p.pos[selected] = lp;
       noteTrade(p, cost, "buy");
-      flash.textContent = `Gekauft: ${qty} × ${selected} @ ${fmt(px)}`;
+      flash.textContent = `Gekauft: ${qty} × ${selected} @ ${fmt(px)} · Gebühr ${fmt(fee)}`;
       flash.className = "flash ok";
     }
   }else if(side === "sell"){
@@ -1682,12 +1826,14 @@ function trade(side){
     }
     const sellQty = qtyMode === "max" ? pos.qty : Math.min(qty, pos.qty);
     const profit = (px - pos.avg) * sellQty;
-    p.cash += sellQty * px;
+    const fee = feeOf(sellQty * px);
+    p.cash += sellQty * px - fee;
+    p.stats.feesPaid += fee;
     pos.qty -= sellQty;
     if(pos.qty === 0) delete p.pos[selected];
     noteTrade(p, sellQty * px, "sell");
     noteClose(p, profit, pos.avg * sellQty);
-    flash.textContent = `Verkauft: ${sellQty} × ${selected} @ ${fmt(px)}`;
+    flash.textContent = `Verkauft: ${sellQty} × ${selected} @ ${fmt(px)} · Gebühr ${fmt(fee)}`;
     flash.className = "flash ok";
   }else{
     // Short eröffnen/aufstocken: Erlös kommt aufs Konto, Rückkauf-Pflicht bleibt
@@ -1697,14 +1843,16 @@ function trade(side){
     const cap = maxShortQty(p, px);
     const q = qtyMode === "max" ? cap : Math.min(qty, cap);
     if(q < 1){ flash.textContent = "Short-Limit erreicht (max. 1× Depotwert)."; flash.className = "flash err"; return; }
-    p.cash += q * px;
+    const fee = feeOf(q * px);
+    p.cash += q * px - fee;
+    p.stats.feesPaid += fee;
     const sp = pos || {qty:0, avg:0};
     sp.avg = (sp.avg * -sp.qty + q * px) / (-sp.qty + q);
     sp.qty -= q;
     p.pos[selected] = sp;
     noteTrade(p, q * px, "sell");
     p.stats.shorts++;
-    flash.textContent = `Short: ${q} × ${selected} @ ${fmt(px)} 🐻`;
+    flash.textContent = `Short: ${q} × ${selected} @ ${fmt(px)} 🐻 · Gebühr ${fmt(fee)}`;
     flash.className = "flash ok";
   }
   // Fehler-Pfade kehren oben mit return zurück – hier war die Order erfolgreich
@@ -1761,8 +1909,8 @@ function buildStockList(){
   if(!el) return;
   const full = favorites.length >= 4;
   let html = "";
-  for(const sym of Object.keys(STOCK_DEFS)){
-    const d = STOCK_DEFS[sym];
+  for(const sym of DISPLAY_SYMS){
+    const d = defOf(sym);
     const ch = (price(sym)/open_(sym) - 1) * 100;
     const isFav = favorites.includes(sym);
     const starDis = !isFav && full;        // Stern deaktiviert, wenn 4 voll und kein Favorit
@@ -1812,7 +1960,7 @@ function renderAll(){
 
   // Tape
   let tape = "";
-  for(const sym of Object.keys(STOCK_DEFS)){
+  for(const sym of DISPLAY_SYMS){
     const px = price(sym), op = open_(sym);
     const ch = (px/op - 1) * 100;
     const cls = ch >= 0 ? "t-up" : "t-down";
@@ -1821,7 +1969,7 @@ function renderAll(){
   $("tape").innerHTML = tape + tape;
 
   // Watchlist
-  for(const sym of Object.keys(STOCK_DEFS)){
+  for(const sym of DISPLAY_SYMS){
     const card = $("w-" + sym);
     if(!card) continue;
     const ch = (price(sym)/open_(sym) - 1) * 100;
@@ -1854,7 +2002,7 @@ function renderAll(){
     ek.style.display = "none";
   }
 
-  $("qName").innerHTML = `${STOCK_DEFS[selected].name} · Eröffnung ${fmt(op)}<br><span class="char-line">${STOCK_DEFS[selected].char}</span>`;
+  $("qName").innerHTML = `${defOf(selected).name} · Eröffnung ${fmt(op)}<br><span class="char-line">${defOf(selected).char}</span>`;
   $("tradeSym").textContent = selected;
 
   // Order: Kaufen deckt bei Short-Position ein, Verkaufen nur für Longs,
@@ -2162,7 +2310,7 @@ function endRound(){
     return;
   }
 
-  if(!sandbox) updateRecord(p); // persönlichen Rekord auf diesem Gerät fortschreiben
+  if(!sandbox){ updateRecord(p); appendGameHistory(p); } // Rekord + Historie auf diesem Gerät fortschreiben
 
   // Eine Runde, eigenes Ergebnis: Einzelspieler oder jedes Remote-Gerät
   if(mode === "solo" || mode === "remote"){
@@ -2274,6 +2422,8 @@ function buildAnalysis(list){
     ["Käufe / Verkäufe",   p => `${p.stats.buys} / ${p.stats.sells}`],
     ["Short-Orders",       p => p.stats.shorts],
     ["Handelsvolumen",     p => fmt(p.stats.volume)],
+    ["Gebühren gezahlt",   p => (p.stats.feesPaid||0) < 0.005 ? "–" : `<span style="color:var(--down)">−${fmt(p.stats.feesPaid)}</span>`],
+    ["Dividenden",         p => (p.stats.dividends||0) < 0.005 ? "–" : `<span style="color:var(--up)">+${fmt(p.stats.dividends)}</span>`],
     ["Realisierte Gewinne",p => `<span style="color:${col(p.stats.realized)}">${sgn(p.stats.realized)}</span>`],
     ["Bester Deal",        p => p.stats.best  === null ? "–" : `<span style="color:${col(p.stats.best)}">${sgn(p.stats.best)}</span>`],
     ["Schwächster Deal",   p => p.stats.worst === null ? "–" : `<span style="color:${col(p.stats.worst)}">${sgn(p.stats.worst)}</span>`],
@@ -2309,19 +2459,24 @@ function packResult(p){
              s.worst === null ? "x" : s.worst.toFixed(2),
              s.allIns, s.newsTrades, s.investedTicks,
              s.peak.toFixed(2), s.trough.toFixed(2), s.maxDD.toFixed(2),
-             s.tipTrades, s.bestPct.toFixed(4), favSym(p)];
-  return "SPCX3." + btoa(unescape(encodeURIComponent(f.join("|"))));
+             s.tipTrades, s.bestPct.toFixed(4), favSym(p),
+             (s.feesPaid||0).toFixed(2), (s.dividends||0).toFixed(2)];
+  return "SPCX4." + btoa(unescape(encodeURIComponent(f.join("|"))));
 }
 
-function unpackResult(str){
-  if(!str.startsWith("SPCX3.")) return null;
+// expectCode: gegen welchen Spiel-Code geprüft wird (Default = laufendes Spiel;
+// für den Historien-Vergleich wird der Code des jeweiligen Eintrags übergeben).
+function unpackResult(str, expectCode){
+  if(!str.startsWith("SPCX4.")) return null;
   let f;
   try{ f = decodeURIComponent(escape(atob(str.slice(6)))).split("|"); }catch(e){ return null; }
-  if(f.length !== 21) return null;
-  if(+f[0] !== gameCode) return {wrongGame:true};
-  const nums = [2,3,4,5,6,7,8,9,12,13,14,15,16,17,18,19].map(i => parseFloat(f[i]));
+  if(f.length !== 23) return null;
+  const code = +f[0];
+  if(code !== (expectCode === undefined ? gameCode : expectCode)) return {wrongGame:true};
+  const nums = [2,3,4,5,6,7,8,9,12,13,14,15,16,17,18,19,21,22].map(i => parseFloat(f[i]));
   if(nums.some(isNaN)) return null;
   return {
+    gameCode: code,
     name: f[1].slice(0,14) || "Gegner",
     result:{pnl:+f[2], total:+f[3]},
     stats:{trades:+f[4], buys:+f[5], sells:+f[6], shorts:+f[7], volume:+f[8], realized:+f[9],
@@ -2329,7 +2484,8 @@ function unpackResult(str){
            worst:f[11] === "x" ? null : +f[11],
            allIns:+f[12], newsTrades:+f[13], investedTicks:+f[14],
            peak:+f[15], trough:+f[16], maxDD:+f[17],
-           tipTrades:+f[18], bestPct:+f[19], perSym:{}, _fav:f[20].slice(0,24)},
+           tipTrades:+f[18], bestPct:+f[19], perSym:{}, _fav:f[20].slice(0,24),
+           feesPaid:+f[21], dividends:+f[22]},
   };
 }
 
@@ -2380,6 +2536,104 @@ $("cmpBtn").onclick = () => {
   if(opp.wrongGame){ $("cmpErr").textContent = "Das Ergebnis stammt aus einem anderen Spiel."; return; }
   $("cmpErr").textContent = "";
   renderCompare(soloP, opp);
+};
+
+/* ====================== Statistik-Seite ====================== */
+let statsGames = [], statsCmpIdx = -1, cmpFromStats = false;
+
+const peekCode = str => {           // Spiel-Code (Feld 0) aus einem SPCX4-String lesen
+  if(!str || !str.startsWith("SPCX4.")) return null;
+  try{ return +decodeURIComponent(escape(atob(str.slice(6)))).split("|")[0]; }catch(e){ return null; }
+};
+
+function statGameHtml(g, i, tag){
+  const dStr = new Date(g.date).toLocaleDateString("de-DE", {day:"2-digit", month:"2-digit", year:"2-digit"});
+  const c = g.pnl >= 0 ? "var(--up)" : "var(--down)";
+  return `<div class="stat-game">
+    <div class="sg-main">
+      <div class="sg-top">${tag ? `<span class="sg-tag">${tag}</span> ` : ""}<b>${esc(g.name)}</b> · ${g.durationMin} Min · ${dStr}</div>
+      <div class="sg-sub">Lieblingsaktie ${esc(g.fav || "–")}</div>
+    </div>
+    <div class="sg-pnl" style="color:${c}">${sgn(g.pnl)}</div>
+    <div class="sg-act">
+      <button class="sg-btn" data-share="${i}" title="Ergebnis-Code kopieren">📤</button>
+      <button class="sg-btn" data-cmp="${i}" title="Mit Gegner vergleichen">⚔️</button>
+    </div>
+  </div>`;
+}
+
+function renderStats(){
+  const s = loadStore();
+  statsGames = Array.isArray(s.games) ? s.games : [];
+  $("statsCmpBox").style.display = "none"; statsCmpIdx = -1;
+  const body = $("statsBody");
+  if(!statsGames.length){
+    body.innerHTML = '<div class="rec" style="display:block;margin-top:24px">Noch keine Spiele gespielt – leg los! 🚀</div>';
+    return;
+  }
+  let best = 0, worst = 0;
+  statsGames.forEach((g, i) => { if(g.pnl > statsGames[best].pnl) best = i; if(g.pnl < statsGames[worst].pnl) worst = i; });
+  let html = '<div class="stat-head">🏆 Bestes & 📉 schlechtestes Spiel</div>';
+  html += statGameHtml(statsGames[best], best, "🏆");
+  if(worst !== best) html += statGameHtml(statsGames[worst], worst, "📉");
+  html += '<div class="stat-head">🕒 Letzte 5</div>';
+  statsGames.slice(0, 5).forEach((g, i) => html += statGameHtml(g, i, "")); // slice 0..4 == Original-Index
+  body.innerHTML = html;
+  body.querySelectorAll("[data-share]").forEach(b => b.onclick = () => shareStatsGame(+b.dataset.share, b));
+  body.querySelectorAll("[data-cmp]").forEach(b => b.onclick = () => openStatsCompare(+b.dataset.cmp));
+}
+
+async function shareStatsGame(i, btn){
+  const txt = statsGames[i].code;
+  try{
+    if(navigator.share) await navigator.share({text: txt});
+    else await navigator.clipboard.writeText(txt);
+    const o = btn.textContent; btn.textContent = "✅"; setTimeout(() => btn.textContent = o, 1500);
+  }catch(e){ window.prompt("Zum Kopieren markieren:", txt); }
+}
+
+function openStatsCompare(i){
+  statsCmpIdx = i;
+  $("statsCmpIn").value = ""; $("statsCmpErr").textContent = "";
+  $("statsCmpLabel").textContent = `Gegner-Code zu „${esc(statsGames[i].name)}" (${statsGames[i].durationMin} Min) einfügen`;
+  $("statsCmpBox").style.display = "";
+  $("statsCmpBox").scrollIntoView({behavior:"smooth", block:"center"});
+}
+
+$("statsCmpBtn").onclick = () => {
+  if(statsCmpIdx < 0) return;
+  const entry = statsGames[statsCmpIdx];
+  const gc = peekCode(entry.code);
+  const me = unpackResult(entry.code, gc);
+  if(!me || me.wrongGame){ $("statsCmpErr").textContent = "Eigener Eintrag beschädigt."; return; }
+  const opp = unpackResult($("statsCmpIn").value.trim(), gc);
+  if(!opp){ $("statsCmpErr").textContent = "Code nicht lesbar – komplett kopiert?"; return; }
+  if(opp.wrongGame){ $("statsCmpErr").textContent = "Dieses Ergebnis stammt aus einem anderen Spiel."; return; }
+  $("statsCmpErr").textContent = "";
+  // Markt des Eintrags deterministisch rekonstruieren → Analyse/Benchmark stimmen
+  sandbox = false; gameCode = gc; durationMin = entry.durationMin; buildMarket();
+  me.color = "var(--p1)";
+  $("resName1").textContent = me.name;
+  document.querySelector("#resCard1 .dot").style.background = "var(--p1)";
+  $("crown1").textContent = ""; $("resCard1").classList.remove("win");
+  renderCompare(me, opp);
+  $("resCode").textContent = String(gc).padStart(6, "0");
+  $("rematchBtn").textContent = "← Zurück zur Statistik";
+  cmpFromStats = true;
+  $("statsScreen").classList.remove("show");
+  $("overlay").classList.add("show");
+};
+
+$("statsBtn").onclick = () => {
+  renderStats();
+  $("startScreen").classList.remove("show");
+  $("statsScreen").classList.add("show");
+  window.scrollTo(0, 0);
+};
+$("statsBack").onclick = () => {
+  $("statsScreen").classList.remove("show");
+  $("startScreen").classList.add("show");
+  window.scrollTo(0, 0);
 };
 
 /* Remote: eigenes Ergebnis + Austausch-Box für den Vergleich */
@@ -2510,6 +2764,7 @@ function genTutorialMarket(){
                   jump:+0.20, drift:+0.0008, dur:40}, tag:"up", mega:true},
   ];
   const tips = [{tick:48, eventTick:64, sym:"RKLB", dir:1}];
+  addEtfPath(paths, TUT_TICKS); // damit price("MKT") auch im Tutorial existiert
   return {paths, events, tips};
 }
 
@@ -2538,7 +2793,8 @@ const TUT_STEPS = {
           "So erkennst du Schwankungen und Wendepunkte deutlicher als in der Linie."},
   6:{lbl:"Schritt 6/10 · Verkaufen", pause:true, cm:"line", glow:"sellBtn",
      text:"📈 Schön gelaufen! Gewinne zählen aber erst, wenn du sie sicherst: " +
-          "Tippe jetzt auf <b>Verkaufen</b>."},
+          "Tippe jetzt auf <b>Verkaufen</b>. 💸 Achtung: Jede Order kostet eine kleine " +
+          "Gebühr (0,15 %) – ständiges Hin und Her frisst Gewinn, Geduld lohnt sich."},
   7:{lbl:"Schritt 7/10 · News", pause:true, btn:"Verstanden", next:8,
      text:"💰 Gewinn gesichert! Jetzt die wichtigste Mechanik: <b>News</b>. Gleich erscheint eine " +
           "Breaking News – der Kurs reagiert aber erst <b>~8 Sekunden später</b>. " +
@@ -2619,6 +2875,8 @@ function tutFinish(p){
     `<b style="color:${pnl >= 0 ? "var(--up)" : "var(--down)"}">${sgn(pnl)}</b>. ` +
     `Du kennst jetzt Kaufen, Verkaufen & Short, den Einstand & dein Depot, den Kerzen-Chart, ` +
     `News mit Reaktionslücke, Insider-Tipps, alle 10 Aktien samt Favoriten – und Mega-Events. ` +
+    `💡 Extra: Jede Order kostet 0,15 % <b>Gebühr</b>, manche Aktien & der <b>Markt-ETF (MKT)</b> ` +
+    `zahlen <b>Dividende</b> fürs Halten – Geduld ist eine echte Strategie. ` +
     `Im echten Duell zählt genau dein Ergebnis – nur dass dein Gegner denselben Markt bekommt. Viel Erfolg!`;
   const b = $("coachBtn");
   b.style.display = "";

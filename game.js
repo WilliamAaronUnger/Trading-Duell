@@ -859,7 +859,8 @@ function processTick(showPopup){
   // Dividenden: Dividenden-Aktien (und der ETF) sammeln pro Tick einen kleinen Betrag
   // an; ausgezahlt wird sichtbar gebündelt alle ~20 s. Deterministisch (kein rnd()).
   for(const [sym, pos] of Object.entries(p.pos))
-    if(pos.qty > 0 && isDividendSym(sym)) p.pendingDiv = (p.pendingDiv || 0) + pos.qty * price(sym) * DIV_PCT * TICK_SCALE;
+    if(pos.qty > 0 && isDividendSym(sym))
+      p.pendingDiv = (p.pendingDiv || 0) + pos.qty * price(sym) * (sym === ETF_SYM ? DIV_PCT_ETF : DIV_PCT) * TICK_SCALE;
   if(p.pendingDiv > 0 && tickCount % DIV_PAYOUT === 0) payDividend(p, showPopup);
 
   // Statistik: investierte Zeit, Depot-Spitze/-Tief, max. Rücksetzer

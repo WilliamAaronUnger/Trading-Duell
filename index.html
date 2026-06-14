@@ -1501,8 +1501,16 @@ function updateLobby(){
   if(left <= 0){
     clearInterval(lobbyTimer);
     $("lobby").classList.remove("show");
-    startRound(0);
+    $("preStart").classList.remove("show");
+    startRound(0); // exakt bei startAt – kein lokales Delay, beide Geräte synchron
     return;
+  }
+  if(left <= 5000){
+    // Letzte 5 s: vom Lobby- ins Vorlauf-Fenster wechseln. An die Weltuhr geankert,
+    // daher zählen beide Geräte denselben Wert und starten gleichzeitig bei startAt.
+    $("lobby").classList.remove("show");
+    $("preNum").textContent = Math.ceil(left/1000);
+    $("preStart").classList.add("show");
   }
   $("lobbyCount").textContent = Math.ceil(left/1000) + " s";
 }

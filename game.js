@@ -1261,12 +1261,14 @@ function renderAll(){
   pnlEl.textContent = sgn(livePnl);
   pnlEl.style.color = livePnl >= 0 ? "var(--up)" : "var(--down)";
 
-  // Dividenden-Zeile: zeigt, wohin die Dividende fließt (aufs Bargeld) – Gesamtsumme
+  // Dividenden-Zeile: zeigt, wohin die Dividende fließt (aufs Bargeld) – Gesamtsumme.
+  // Die "läuft auf"-Zeile wird IMMER gerendert (auch bei 0), damit die Box nicht bei jeder
+  // Auszahlung zwischen ein/zwei Zeilen springt – konstante Höhe.
   const divEl = $("divLine");
   const divTot = (p.stats.dividends || 0) + (p.pendingDiv || 0);
   if(divTot >= 0.005){
     divEl.innerHTML = `💰 Dividende kassiert: <b>+${fmt(p.stats.dividends || 0)}</b>` +
-      (p.pendingDiv >= 0.005 ? ` <span class="div-pending">(+${fmt(p.pendingDiv)} läuft auf)</span>` : "");
+      `<span class="div-pending">(+${fmt(p.pendingDiv || 0)} läuft auf)</span>`;
     divEl.style.display = "";
   }else{
     divEl.style.display = "none";

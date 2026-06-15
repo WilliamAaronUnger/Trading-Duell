@@ -1265,7 +1265,7 @@ function renderAll(){
   const divEl = $("divLine");
   const divTot = (p.stats.dividends || 0) + (p.pendingDiv || 0);
   if(divTot >= 0.005){
-    divEl.innerHTML = `💰 Dividende kassiert: <b>+${fmt(p.stats.dividends || 0)} $</b>` +
+    divEl.innerHTML = `💰 Dividende kassiert: <b>+${fmt(p.stats.dividends || 0)}</b>` +
       (p.pendingDiv >= 0.005 ? ` <span class="div-pending">(+${fmt(p.pendingDiv)} läuft auf)</span>` : "");
     divEl.style.display = "";
   }else{

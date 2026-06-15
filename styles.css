@@ -185,7 +185,7 @@
   .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
   .div-line{font-family:var(--mono);font-size:12px;color:var(--up);background:rgba(61,220,151,.08);
             border:1px solid rgba(61,220,151,.25);border-radius:8px;padding:6px 9px;margin-bottom:12px}
-  .div-pending{color:var(--muted);font-weight:400}
+  .div-pending{display:block;margin-top:2px;color:var(--muted);font-weight:400;font-size:12px}
   .div-toast{position:absolute;top:8px;right:10px;font-family:var(--mono);font-size:12px;font-weight:700;
              color:#072;background:var(--up);border-radius:8px;padding:5px 9px;
              opacity:0;transform:translateY(-6px);pointer-events:none;z-index:5}

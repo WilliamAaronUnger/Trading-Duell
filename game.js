@@ -309,6 +309,7 @@ function genMarket(seed, ticks){
   tips.sort((a,b) => a.tick - b.tick);
 
   addEtfPath(paths, ticks);
+  addActivePath(paths, ticks);
   return {paths, events, tips};
 }
 
@@ -326,6 +327,21 @@ function addEtfPath(paths, ticks){
     etf.push(acc / N * ETF_BASE);
   }
   paths[ETF_SYM] = etf;
+}
+
+/* Aktiv-Fonds-Pfad ableiten: gewichteter, auf Eröffnung normierter Wachstumskorb,
+   dann Hebel auf die Abweichung vom Start (ACTIVE_LEV) → deutlich höhere Vola.
+   Ebenfalls rein abgeleitet aus den fertigen Pfaden → KEIN rnd(), fairness-neutral. */
+function addActivePath(paths, ticks){
+  let wsum = 0; for(const s in ACTIVE_WEIGHTS) wsum += ACTIVE_WEIGHTS[s];
+  const act = [];
+  for(let t = 0; t <= ticks; t++){
+    let acc = 0;
+    for(const s in ACTIVE_WEIGHTS) acc += ACTIVE_WEIGHTS[s] * (paths[s][t] / STOCK_DEFS[s].start);
+    const lev = 1 + ACTIVE_LEV * (acc / wsum - 1); // t=0 → 1 → Start = ETF2_BASE
+    act.push(Math.max(1, lev * ETF2_BASE));
+  }
+  paths[ETF2_SYM] = act;
 }
 
 /* ====================== State ====================== */
@@ -963,7 +979,7 @@ function curQty(){
   const pos = p.pos[selected];
   if(qtyMode === "max"){
     // Gebühr schon einplanen, damit "Max" nicht an Cents scheitert
-    const afford = Math.floor(p.cash / (price(selected) * (1 + FEE_PCT)));
+    const afford = Math.floor(p.cash / (price(selected) * (1 + feeRate(selected))));
     // Bei Short-Position deckt "Max" höchstens alles ein
     return Math.max(1, pos && pos.qty < 0 ? Math.min(afford, -pos.qty) : afford);
   }
@@ -1002,10 +1018,10 @@ function trade(side){
   if(side === "buy"){
     if(pos && pos.qty < 0){
       // Short eindecken: zurückkaufen, Gewinn = (Short-Kurs − Kaufkurs) × Stück
-      const q = Math.min(qty, -pos.qty, Math.floor(p.cash / (px * (1 + FEE_PCT))));
+      const q = Math.min(qty, -pos.qty, Math.floor(p.cash / (px * (1 + feeRate(selected)))));
       if(q < 1){ flash.textContent = "Nicht genug Bargeld zum Eindecken."; flash.className = "flash err"; return; }
       const profit = (pos.avg - px) * q;
-      const fee = feeOf(q * px);
+      const fee = feeOf(q * px, selected);
       p.cash -= q * px + fee;
       p.stats.feesPaid += fee;
       pos.qty += q;
@@ -1015,7 +1031,7 @@ function trade(side){
       flash.textContent = `Eingedeckt: ${q} × ${selected} @ ${fmt(px)} (${sgn(profit)}) · Gebühr ${fmt(fee)}`;
       flash.className = "flash ok";
     }else{
-      const cost = qty * px, fee = feeOf(cost);
+      const cost = qty * px, fee = feeOf(cost, selected);
       if(cost + fee > p.cash + 0.001){ flash.textContent = "Nicht genug Bargeld."; flash.className = "flash err"; return; }
       p.cash -= cost + fee;
       p.stats.feesPaid += fee;
@@ -1034,7 +1050,7 @@ function trade(side){
     }
     const sellQty = qtyMode === "max" ? pos.qty : Math.min(qty, pos.qty);
     const profit = (px - pos.avg) * sellQty;
-    const fee = feeOf(sellQty * px);
+    const fee = feeOf(sellQty * px, selected);
     p.cash += sellQty * px - fee;
     p.stats.feesPaid += fee;
     pos.qty -= sellQty;
@@ -1051,7 +1067,7 @@ function trade(side){
     const cap = maxShortQty(p, px);
     const q = qtyMode === "max" ? cap : Math.min(qty, cap);
     if(q < 1){ flash.textContent = "Short-Limit erreicht (max. 1× Depotwert)."; flash.className = "flash err"; return; }
-    const fee = feeOf(q * px);
+    const fee = feeOf(q * px, selected);
     p.cash += q * px - fee;
     p.stats.feesPaid += fee;
     const sp = pos || {qty:0, avg:0};
@@ -1967,7 +1983,8 @@ function genTutorialMarket(){
                   jump:+0.20, drift:+0.0008, dur:40}, tag:"up", mega:true},
   ];
   const tips = [{tick:48, eventTick:64, sym:"RKLB", dir:1}];
-  addEtfPath(paths, TUT_TICKS); // damit price("MKT") auch im Tutorial existiert
+  addEtfPath(paths, TUT_TICKS);    // damit price("MKT") auch im Tutorial existiert
+  addActivePath(paths, TUT_TICKS); // ebenso price("ACT")
   return {paths, events, tips};
 }
 

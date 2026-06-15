@@ -28,10 +28,20 @@ const STOCK_DEFS = {
 const ETF_SYM = "MKT", ETF_BASE = 100.00;
 const ETF_DEF = {name:"Markt-ETF", type:"index", start:ETF_BASE,
                  char:"📊 Markt-ETF: ganzer Markt, ruhig, zahlt erhöhte Dividende fürs Sparen"};
-const defOf = sym => STOCK_DEFS[sym] || (sym === ETF_SYM ? ETF_DEF : undefined);
-const DISPLAY_SYMS = [...Object.keys(STOCK_DEFS), ETF_SYM];
-const FEE_PCT = 0.0015;                                  // 0,15 % Gebühr je Order
-const feeOf = v => Math.round(v * FEE_PCT * 100) / 100;  // auf Cent gerundet (keine Float-Drift)
+/* Zweites synthetisches Instrument: aktiver, gehebelter Wachstumskorb – hohe Vola,
+   hohe Ordergebühr, KEINE Dividende, KEIN garantierter Vorteil. Wie MKT abgeleitet. */
+const ETF2_SYM = "ACT", ETF2_BASE = 100.00;
+const ETF2_DEF = {name:"Aktiv-Fonds", type:"active", start:ETF2_BASE,
+                  char:"⚡ Aktiv-Fonds: gehebelter Wachstumskorb – hohe Chance, hohes Risiko, teure Order"};
+const ACTIVE_LEV = 3.0;            // Hebel auf die %-Abweichung des Korbs (~Vola der wildesten Aktie)
+const ACTIVE_FEE_PCT = 0.005;      // 0,5 % Ordergebühr (≈3× normal)
+// Korbgewichte: Wachstums-/Risiko-Werte stark über-, Dividendenwerte untergewichtet
+const ACTIVE_WEIGHTS = {SPCX:3, TSLA:2.5, RKLB:2, AMD:2, META:2, GOOGL:1.5, NVDA:1, AMZN:0.5, AAPL:0.5, MSFT:0.5};
+const defOf = sym => STOCK_DEFS[sym] || (sym === ETF_SYM ? ETF_DEF : sym === ETF2_SYM ? ETF2_DEF : undefined);
+const DISPLAY_SYMS = [...Object.keys(STOCK_DEFS), ETF_SYM, ETF2_SYM];
+const FEE_PCT = 0.0015;                                  // 0,15 % Gebühr je Order (Normalfall)
+const feeRate = sym => sym === ETF2_SYM ? ACTIVE_FEE_PCT : FEE_PCT;   // Aktiv-Fonds teurer
+const feeOf = (v, sym) => Math.round(v * feeRate(sym) * 100) / 100;   // auf Cent gerundet (keine Float-Drift)
 const DIV_PCT = 0.00004;                                 // ~1,7 % Brutto-Dividende übers Spiel (Einzelwerte)
 const DIV_PCT_ETF = 0.00006;                             // ~2,5 % – Sparplan-Bonus, macht den Index-Stil konkurrenzfähig
 const DIV_PAYOUT = Math.max(1, Math.round(20000 / TICK_MS)); // Dividende wird alle ~20 s sichtbar ausgezahlt
@@ -230,6 +240,7 @@ const TIPS = [
   "💸 Jede Order kostet 0,15 % Gebühr – ständiges Hin und Her frisst Gewinn.",
   "💰 Dividenden-Aktien wie AAPL, MSFT oder NVDA zahlen fürs Halten – Geduld lohnt sich.",
   "📊 Der Markt-ETF »MKT« bündelt alle Werte: ruhig und ideal für die Langfrist-Strategie.",
+  "⚡ Der Aktiv-Fonds »ACT« schwankt stark und kostet mehr Gebühr – hohe Chance, hohes Risiko.",
   "🚀 SPCX reagiert besonders heftig auf News – hohes Risiko, hohe Chance.",
   "💥 Selten schlägt ein Mega-Event ein – ein Vor-Beben im Kurs warnt dich vorher.",
   "🕯️ Die Kerzen-Ansicht zeigt Schwankungen und Wendepunkte deutlicher als die Linie.",

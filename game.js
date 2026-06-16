@@ -1105,6 +1105,34 @@ function buildWatch(){
   }
 }
 
+/* Aktie wechseln (Wischen / ‹›-Pfeile): zyklisch durch ALLE Werte – inkl. MKT & ACT,
+   nicht nur die Favoriten. Die Watchlist hebt die aktive Aktie weiter hervor. */
+function cycleSelected(dir){
+  const n = DISPLAY_SYMS.length;
+  let i = DISPLAY_SYMS.indexOf(selected);
+  if(i < 0) i = 0;
+  selected = DISPLAY_SYMS[(i + dir + n) % n];
+  buildWatch();
+  renderAll();
+  if(market) drawChart(); // sofort spiegeln, auch wenn die rAF-Schleife gerade ruht
+}
+/* Horizontale Wischgeste auf ein Element legen → nach links = weiter, nach rechts = zurück.
+   Passiv (blockiert vertikales Scrollen nicht); entscheidet erst beim Loslassen. */
+function addSwipeNav(el){
+  if(!el) return;
+  let x0 = 0, y0 = 0, t0 = 0, on = false;
+  el.addEventListener("touchstart", e => {
+    if(e.touches.length !== 1){ on = false; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now(); on = true;
+  }, {passive:true});
+  el.addEventListener("touchend", e => {
+    if(!on) return; on = false;
+    const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+    if(Date.now() - t0 < 700 && Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5)
+      cycleSelected(dx < 0 ? 1 : -1);
+  }, {passive:true});
+}
+
 /* ====================== Aktien-Auswahl (Overlay) ====================== */
 function openStockModal(){
   buildStockList();
@@ -2110,6 +2138,12 @@ function setChartMode(cm){
 }
 document.querySelectorAll(".ctg").forEach(b => b.onclick = () => setChartMode(b.dataset.cm));
 window.addEventListener("resize", () => { if(market) drawChart(); });
+
+// Aktie horizontal durchblättern: Wischen auf Chart + Quote, plus ‹›-Pfeile am Chart
+addSwipeNav($("chartWrap"));
+addSwipeNav($("quote"));
+$("navPrev").onclick = () => cycleSelected(-1);
+$("navNext").onclick = () => cycleSelected(1);
 
 /* PWA: Service Worker registrieren (nur wenn über http(s) geladen) */
 if("serviceWorker" in navigator && location.protocol.startsWith("http")){

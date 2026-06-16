@@ -162,7 +162,11 @@
         <button class="ctg" data-cm="candle">📊 Kerzen</button>
       </div>
     </div>
-    <canvas id="chart" height="190"></canvas>
+    <div class="chart-wrap" id="chartWrap">
+      <canvas id="chart" height="190"></canvas>
+      <button class="chart-nav prev" id="navPrev" aria-label="Vorherige Aktie">‹</button>
+      <button class="chart-nav next" id="navNext" aria-label="Nächste Aktie">›</button>
+    </div>
 
     <div class="panel">
       <h2>Order · <span id="tradeSym">SPCX</span></h2>

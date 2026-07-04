@@ -39,21 +39,24 @@ Laufender Aufwand danach: keiner (Gratis-Tarif, 100k Requests/Tag; ein Duell bra
 
 ## Teil B — Umsetzung (Repo)
 
-### 1. `worker.js` (neu, ~120–150 Zeilen, liegt im Repo, wird NICHT von der PWA geladen)
-ES-Module-Worker (`export default {fetch}`), KV-Binding `GAMES`, alle Antworten JSON + CORS
-(Allow-Origin auf die Pages-Origin). Endpunkte:
+### 1. `worker.js` — ✅ umgesetzt (liegt im Repo, wird NICHT von der PWA geladen)
+ES-Module-Worker (`export default {fetch}`), KV-Binding `GAMES`, JSON + CORS. Zwei
+Verfeinerungen gegenüber dem Grobplan (Begründung im Datei-Header):
+- **Start durch den Ersteller statt Doppel-„ready"**: KV ist eventually consistent; ein
+  einziger Schreiber für `startAt`/Seed vermeidet Schreib-Rennen. Beitritt gilt als bereit.
+- **Spieler-Tokens**: `create`/`join` geben je ein Token zurück; `start` und `result`-PUT
+  verlangen es — sonst könnte der Gegner fremde Ergebnis-Slots vorab füllen.
 
 | Methode/Pfad | Zweck | Regeln |
 |---|---|---|
-| `POST /game` `{dur}` | Spiel anlegen | erzeugt 6-stelligen Join-Code (kollisionsgeprüft) + geheimen 32-bit-Seed; speichert `{seed,dur,created}`; **gibt nur `{code,dur}` zurück** |
-| `POST /game/{code}/join` | Beitritt | markiert `joined`; zweiter Beitritt → 409 |
-| `POST /game/{code}/ready` `{p:1|2}` | bereit melden | wenn beide bereit: `startAt = now + 8000` fixieren |
-| `GET /game/{code}` | Lobby-/Spielstatus pollen | `{joined,ready1,ready2,startAt, seed?}` — **`seed` nur enthalten, wenn `startAt` gesetzt** |
-| `PUT /game/{code}/result/{p}` | Ergebnis abgeben | **write-once** (zweiter PUT → 409), Größenlimit ≤ 600 Zeichen, nur `SPCX5.`-Präfix |
+| `POST /game` `{dur}` | Spiel anlegen | Join-Code kollisionsgeprüft, `code % 3` = Dauer-Index (Konvention wie offline); geheimer 32-bit-Seed bleibt beim Server; → `{code,dur,token}` |
+| `POST /game/{code}/join` | Beitritt | einmalig (sonst 409) → `{dur,token}` |
+| `POST /game/{code}/start` `{token}` | Start fixieren | nur Ersteller-Token; erst nach Beitritt; idempotent; `startAt = now + 10 s` → `{startAt,seed}` |
+| `GET /game/{code}` | Status pollen | `{joined,dur,startAt, seed?}` — **`seed` nur, wenn `startAt` gesetzt** |
+| `PUT /game/{code}/result/{p}` | Ergebnis abgeben | Header `x-token`; **write-once** (409), ≤ 600 Zeichen, nur `SPCX5.`-Präfix |
 | `GET /game/{code}/result/{p}` | Gegner-Ergebnis holen | 404 solange nicht da |
 
-Alle KV-Einträge mit `expirationTtl: 86400` (24 h) → räumt sich selbst auf. Eingaben strikt
-validieren (Code `\d{6}`, `p` ∈ {1,2}, Body-Limits) — die Regeln sind normales, testbares JS.
+Alle KV-Einträge mit `expirationTtl: 86400` (24 h) → räumt sich selbst auf.
 
 ### 2. Worker-Tests (Node, im bestehenden Harness-Stil)
 `env.GAMES` als Map-Stub; den `fetch`-Handler direkt aufrufen. Fälle: kompletter Happy-Path

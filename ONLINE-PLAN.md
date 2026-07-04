@@ -1,8 +1,11 @@
 # Plan: Online-Stufe 1 — Cloudflare Worker (Auto-Ergebnisvergleich + echte Lobby + Geheim-Seed)
 
-Status: **Worker + Tests fertig** (`worker.js`, `worker.test.js` → `node worker.test.js`,
-33/33 grün). Cloudflare-Setup (Teil A, Schritte 1–4) ist erledigt; als Nächstes Teil A
-Schritt 5 (Code einfügen) und danach die Client-Integration (Teil B.3).
+Status: **Stufe 1 komplett umgesetzt** — Worker deployed
+(`https://spcx-duell.william-aaron-unger.workers.dev`, als `ONLINE_API` in `data.js` und in
+der CSP eingetragen), Client integriert (echte Lobby, Geheim-Seed, Auto-Ergebnisvergleich,
+`SPCX5`-Payload mit Seed-Prüfung, stiller Offline-Fallback). Verifiziert per Node:
+`worker.test.js` 33/33 und Zwei-Client-Ende-zu-Ende-Simulation gegen den echten Handler
+(19 Checks). Offen: Gerätetest (Teil A Schritt 7) und die späteren Stufen (Live-P&L …).
 Evaluation & Begründung der Backend-Wahl: siehe `IDEAS.md` (Abschnitt 🌐).
 
 ## Ziel

@@ -396,6 +396,11 @@ function applySoloUI(){
    Code mod 3 kodiert die Spieldauer (5/10/15 Min), damit beide Geräte
    automatisch dieselbe Tick-Anzahl und damit denselben Markt bekommen. */
 let gameCode = null;
+/* Online-Duell: geheimer Markt-Seed vom Server (Code ≠ Seed → niemand kann vorspielen).
+   null = klassisch offline, dann ist der Spiel-Code selbst der Seed. */
+let marketSeed = null;
+/* Laufendes Online-Spiel {code, token, p:1|2, seed} oder null (offline). */
+let onlineGame = null;
 
 function makeCode(durIdx){
   let c = 100000 + Math.floor(Math.random()*900000);
@@ -469,7 +474,7 @@ function buildMarket(){
   matchTicks = sandbox
     ? Math.round(60 * 60000 / TICK_MS)
     : Math.round(durationMin * 60000 / TICK_MS);
-  market = genMarket(gameCode, matchTicks);
+  market = genMarket(marketSeed == null ? gameCode : marketSeed, matchTicks);
 }
 
 function newPlayer(name, color){
@@ -499,6 +504,7 @@ function saveSnapshot(phase){
     localStorage.setItem(GAME_KEY, JSON.stringify({
       v:2, mode, gameCode, durationMin, round,
       startAt: mode === "remote" ? startAt : 0,
+      marketSeed, online: onlineGame, // Online-Spiel: Seed ≠ Code + Token fürs Ergebnis-Hochladen
       tickCount, players, phase: phase || "play", ts: Date.now()
     }));
   }catch(e){}
@@ -578,8 +584,10 @@ $("resumeBtn").onclick = () => {
   mode = snap.mode;
   gameCode = snap.gameCode;
   durationMin = snap.durationMin;
+  marketSeed = (typeof snap.marketSeed === "number") ? snap.marketSeed : null;
+  onlineGame = snap.online || null;
   matchTicks = Math.round(durationMin * 60000 / TICK_MS);
-  market = genMarket(gameCode, matchTicks);
+  market = genMarket(marketSeed == null ? gameCode : marketSeed, matchTicks);
   players = snap.players;
   round = snap.round;
   if(mode === "remote") startAt = snap.startAt;
@@ -603,8 +611,9 @@ $("resumeBtn").onclick = () => {
 applyStore();
 setTop("single"); // Startauswahl: Einzelspieler – mode-Variable an die UI angleichen
 
-$("startBtn").onclick = () => {
+$("startBtn").onclick = async () => {
   rememberNames();
+  onlineGame = null; marketSeed = null; // frischer Zustand für jedes neue Spiel
   if(mode === "solo"){
     // Einzelspieler: ein Spieler, eine Runde, sofortiger Start (keine Lobby)
     START_CASH = sandbox ? sandboxCash : 25000;
@@ -626,20 +635,44 @@ $("startBtn").onclick = () => {
     return;
   }
 
-  // Remote: ein Spieler auf diesem Gerät, gekoppelt über den Code
+  // Remote: ein Spieler auf diesem Gerät, gekoppelt über den Code.
+  // Zuerst online versuchen (echte Lobby + geheimer Seed); ohne Server: wie bisher offline.
   const raw = codeIn.value.trim();
   if(raw && !/^\d{6}$/.test(raw)){
     $("codeErr").textContent = "Der Spiel-Code hat 6 Ziffern.";
     return;
   }
   const joined = !!raw;
-  if(joined){
-    gameCode = +raw;
-    durationMin = DURATIONS[gameCode % 3];
-  }else{
-    gameCode = makeCode(DURATIONS.indexOf(durationMin));
+  const btn = $("startBtn"), oldTxt = btn.textContent;
+  btn.disabled = true; btn.textContent = "Verbinde …";
+  try{
+    if(joined){
+      gameCode = +raw;
+      durationMin = DURATIONS[gameCode % 3];
+      try{
+        const j = await apiJson("/game/" + raw + "/join", {method:"POST"});
+        onlineGame = {code: raw, token: j.token, p: 2, seed: null};
+        durationMin = j.dur; // die verbindliche Dauer kennt der Server
+      }catch(e){
+        if(String(e && e.message).includes("409")){
+          $("codeErr").textContent = "Diesem Online-Spiel ist schon jemand beigetreten.";
+          return;
+        }
+        // 404/Netzfehler: Offline-Duell wie bisher (Code = Seed)
+      }
+    }else{
+      try{
+        const c = await apiJson("/game", {method:"POST", body: JSON.stringify({dur: durationMin})});
+        onlineGame = {code: c.code, token: c.token, p: 1, seed: null};
+        gameCode = +c.code;
+      }catch(e){
+        gameCode = makeCode(DURATIONS.indexOf(durationMin)); // Offline-Fallback
+      }
+    }
+  }finally{
+    btn.disabled = false; btn.textContent = oldTxt; updateStartBtn();
   }
-  buildMarket();
+  if(!onlineGame) buildMarket(); // online kommt der geheime Seed erst mit dem Start
   players = [newPlayer(
     $("name1").value.trim() || (joined ? "Spieler 2" : "Spieler 1"),
     joined ? "var(--p2)" : "var(--p1)"
@@ -671,26 +704,46 @@ const hhmm = ms => {
 };
 
 function openLobby(joined){
-  startAt = (Math.floor(Date.now()/60000) + 2) * 60000;
   $("lobbyEyebrow").textContent = joined ? "Spiel beigetreten" : "Spiel angelegt";
   $("lobbyHead").textContent = joined ? "Auf die Plätze!" : "Bereitmachen!";
   $("lobbyCode").textContent = String(gameCode).padStart(6, "0");
-  $("lobbySub").innerHTML = joined
-    ? "Exakt dasselbe Spiel wie auf dem anderen Gerät – gleiche Kurse, gleiche News.<br>" +
-      "Wurde es dort in derselben Minute angelegt, startet ihr zeitgleich."
-    : `Code fürs zweite Gerät – dort vor <b style="color:var(--text)">${hhmm(startAt - 60000)}</b> Uhr
-       beitreten, dann startet ihr zeitgleich.`;
-  $("lobbyTime").textContent = hhmm(startAt);
   $("lobbyShare").textContent = "📤 Einladung teilen";
   // QR-Code des Einladungs-Links zeigen (nur wenn es eine teilbare http(s)-URL gibt)
   const joinUrl = shareUrl("join", String(gameCode).padStart(6, "0"));
   const qrOk = joinUrl && typeof drawQR === "function" && drawQR($("lobbyQR"), joinUrl, {size:200});
   $("lobbyQRWrap").style.display = qrOk ? "" : "none";
-  updateLobby();
+  clearInterval(lobbyTimer);
+  $("lobbyStartBtn").style.display = "none";
+  if(onlineGame){
+    // Online: der Ersteller startet, sobald der Gegner da ist; der geheime Markt-Seed
+    // kommt erst mit dem fixierten Start. Bis dahin: Lobby-Status pollen.
+    startAt = 0;
+    $("lobbySub").innerHTML = joined
+      ? "Beigetreten ✓ – exakt dasselbe Spiel, gleiche Kurse, gleiche News."
+      : "Code oder QR ans andere Gerät – sobald dein Gegner beitritt, kannst du starten.";
+    $("lobbyStartRow").style.display = "none";
+    $("lobbyOpp").style.display = "";
+    $("lobbyOpp").textContent = joined
+      ? "Warte auf den Start durch den Ersteller …"
+      : "Gegner: noch nicht beigetreten …";
+    lobbyTimer = setInterval(pollLobby, 1500);
+    pollLobby();
+  }else{
+    // Offline wie gehabt: Start zur übernächsten vollen Minute (serverloser Gleichstand)
+    startAt = (Math.floor(Date.now()/60000) + 2) * 60000;
+    $("lobbySub").innerHTML = joined
+      ? "Exakt dasselbe Spiel wie auf dem anderen Gerät – gleiche Kurse, gleiche News.<br>" +
+        "Wurde es dort in derselben Minute angelegt, startet ihr zeitgleich."
+      : `Code fürs zweite Gerät – dort vor <b style="color:var(--text)">${hhmm(startAt - 60000)}</b> Uhr
+         beitreten, dann startet ihr zeitgleich.`;
+    $("lobbyOpp").style.display = "none";
+    $("lobbyStartRow").style.display = "";
+    $("lobbyTime").textContent = hhmm(startAt);
+    updateLobby();
+    lobbyTimer = setInterval(updateLobby, 250);
+  }
   $("lobby").classList.add("show");
   startTips(["lobbyTip", "preTip"]); // Tipps während der Wartezeit (auch im Vorlauf-Fenster)
-  clearInterval(lobbyTimer);
-  lobbyTimer = setInterval(updateLobby, 250);
 }
 
 function updateLobby(){
@@ -715,8 +768,95 @@ function updateLobby(){
 $("lobbyCancel").onclick = () => {
   clearInterval(lobbyTimer);
   stopTips();
+  onlineGame = null; marketSeed = null; // Online-Spiel verwaist einfach (24-h-TTL räumt auf)
   $("lobby").classList.remove("show");
 };
+
+/* ====================== Online (Cloudflare Worker) ====================== */
+/* Kleine fetch-Hülle mit Timeout. Jeder Fehler wirft → die Aufrufer fallen still auf den
+   Offline-Pfad zurück; das Spiel hängt nie an der Cloud. ONLINE_API leer = Schicht aus. */
+async function api(path, opts, timeoutMs){
+  if(!ONLINE_API) throw new Error("offline");
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs || 4000);
+  try{
+    const res = await fetch(ONLINE_API + path, Object.assign({signal: ctl.signal}, opts));
+    if(!res.ok) throw new Error("http " + res.status);
+    return res;
+  }finally{ clearTimeout(t); }
+}
+const apiJson = async (path, opts) => (await api(path, opts)).json();
+
+/* Lobby-Status pollen (~1,5 s): Ersteller sieht den Beitritt und bekommt den Start-Knopf;
+   der Beigetretene wartet auf startAt + Seed. Netz-Aussetzer: einfach nächste Runde. */
+async function pollLobby(){
+  if(!onlineGame || startAt) return;
+  let st;
+  try{ st = await apiJson("/game/" + onlineGame.code); }catch(e){ return; }
+  if(st.startAt){ armOnlineStart(st.startAt, st.seed); return; }
+  if(onlineGame.p === 1 && st.joined){
+    $("lobbyOpp").textContent = "Gegner beigetreten ✓";
+    $("lobbyStartBtn").style.display = "";
+  }
+}
+$("lobbyStartBtn").onclick = async function(){
+  if(!onlineGame) return;
+  this.disabled = true;
+  try{
+    const s = await apiJson("/game/" + onlineGame.code + "/start",
+                            {method: "POST", body: JSON.stringify({token: onlineGame.token})});
+    armOnlineStart(s.startAt, s.seed);
+  }catch(e){
+    $("lobbyOpp").textContent = "Start fehlgeschlagen – bitte nochmal versuchen.";
+  }finally{ this.disabled = false; }
+};
+/* Start ist fixiert, der geheime Seed da: Markt jetzt bauen und auf den gemeinsamen
+   Zeitpunkt herunterzählen (beide Geräte teilen dasselbe wall-clock startAt). */
+function armOnlineStart(at, seed){
+  if(!onlineGame || startAt) return;
+  marketSeed = seed >>> 0;
+  onlineGame.seed = marketSeed;
+  buildMarket();
+  startAt = at;
+  $("lobbyStartBtn").style.display = "none";
+  $("lobbyOpp").textContent = "Gegner bereit ✓ – los geht's!";
+  $("lobbyStartRow").style.display = "";
+  $("lobbyTime").textContent = hhmm(startAt);
+  clearInterval(lobbyTimer);
+  lobbyTimer = setInterval(updateLobby, 250);
+  updateLobby();
+}
+
+/* Nach Rundenende: eigenes Ergebnis hochladen (write-once; 409 nach Resume ist ok)
+   und auf das des Gegners pollen → der Vergleich öffnet sich von selbst. */
+async function onlineShareResult(p){
+  if(!onlineGame || onlineGame.seed == null) return;
+  $("cmpWait").style.display = "";
+  try{
+    await api("/game/" + onlineGame.code + "/result/" + onlineGame.p,
+              {method: "PUT", body: packResult(p), headers: {"x-token": onlineGame.token}});
+  }catch(e){ /* 409 = schon hochgeladen, Netzfehler = manueller Austausch bleibt */ }
+  return pollOppResult();
+}
+let oppTimer = null;
+function pollOppResult(){
+  clearTimeout(oppTimer);
+  const og = onlineGame, opp = og.p === 1 ? "2" : "1", deadline = Date.now() + 15*60000;
+  const tick = async () => {
+    if(onlineGame !== og || Date.now() > deadline){ $("cmpWait").style.display = "none"; return; }
+    try{
+      const txt = await (await api("/game/" + og.code + "/result/" + opp)).text();
+      const o = unpackResult(txt);
+      if(o && !o.wrongGame && (o.seed === undefined || (o.seed >>> 0) === og.seed)){
+        $("cmpWait").style.display = "none";
+        renderCompare(soloP, o);
+        return;
+      }
+    }catch(e){ /* 404: Gegner spielt noch */ }
+    oppTimer = setTimeout(tick, 3000);
+  };
+  return tick();
+}
 
 /* Einladung teilen: Link mit vorbefülltem Beitritts-Code (?join=…) – der Gegner
    tippt ihn an und muss nur noch seinen Namen eingeben und beitreten. */
@@ -1713,23 +1853,28 @@ function packResult(p){
              s.allIns, s.newsTrades, s.investedTicks,
              s.peak.toFixed(2), s.trough.toFixed(2), s.maxDD.toFixed(2),
              s.tipTrades, s.bestPct.toFixed(4), favSym(p),
-             (s.feesPaid||0).toFixed(2), (s.dividends||0).toFixed(2)];
-  return "SPCX4." + btoa(unescape(encodeURIComponent(f.join("|"))));
+             (s.feesPaid||0).toFixed(2), (s.dividends||0).toFixed(2),
+             (marketSeed == null ? gameCode : marketSeed) >>> 0]; // Feld 23: Markt-Seed (Online ≠ Code)
+  return "SPCX5." + btoa(unescape(encodeURIComponent(f.join("|"))));
 }
 
 // expectCode: gegen welchen Spiel-Code geprüft wird (Default = laufendes Spiel;
 // für den Historien-Vergleich wird der Code des jeweiligen Eintrags übergeben).
 function unpackResult(str, expectCode){
-  if(!str.startsWith("SPCX4.")) return null;
+  // SPCX5 = aktuell (trägt den Markt-Seed mit), SPCX4 = ältere Ergebnisse ohne Seed
+  const v5 = str.startsWith("SPCX5."), v4 = str.startsWith("SPCX4.");
+  if(!v5 && !v4) return null;
   let f;
   try{ f = decodeURIComponent(escape(atob(str.slice(6)))).split("|"); }catch(e){ return null; }
-  if(f.length !== 23) return null;
+  if(f.length !== (v5 ? 24 : 23)) return null;
   const code = +f[0];
   if(code !== (expectCode === undefined ? gameCode : expectCode)) return {wrongGame:true};
   const nums = [2,3,4,5,6,7,8,9,12,13,14,15,16,17,18,19,21,22].map(i => parseFloat(f[i]));
   if(nums.some(isNaN)) return null;
+  if(v5 && isNaN(+f[23])) return null;
   return {
     gameCode: code,
+    seed: v5 ? (+f[23] >>> 0) : undefined,
     name: f[1].slice(0,14) || "Gegner",
     result:{pnl:+f[2], total:+f[3]},
     stats:{trades:+f[4], buys:+f[5], sells:+f[6], shorts:+f[7], volume:+f[8], realized:+f[9],
@@ -1748,7 +1893,7 @@ function extractResultCode(raw){
   raw = (raw || "").trim();
   const link = raw.match(/[?&]vs=([^&\s]+)/);          // kompletter Teil-Link eingefügt
   if(link){ try{ return decodeURIComponent(link[1]); }catch(e){} }
-  const code = raw.match(/SPCX4\.[A-Za-z0-9+/=]+/);    // Code irgendwo im Text
+  const code = raw.match(/SPCX[45]\.[A-Za-z0-9+/=]+/); // Code irgendwo im Text
   return code ? code[0] : raw;
 }
 
@@ -1811,6 +1956,12 @@ $("cmpBtn").onclick = () => {
   const opp = unpackResult(extractResultCode($("cmpIn").value));
   if(!opp){ $("cmpErr").textContent = "Code nicht lesbar – komplett kopiert?"; return; }
   if(opp.wrongGame){ $("cmpErr").textContent = "Das Ergebnis stammt aus einem anderen Spiel."; return; }
+  // Gleicher Code, aber anderer Markt (z. B. Online-Seed vs. Offline-Beitritt) → unfair, ablehnen
+  const expSeed = (marketSeed == null ? gameCode : marketSeed) >>> 0;
+  if(opp.seed !== undefined && opp.seed !== expSeed){
+    $("cmpErr").textContent = "Anderer Markt – ein Gerät hat offline mit demselben Code gespielt.";
+    return;
+  }
   $("cmpErr").textContent = "";
   renderCompare(soloP, opp);
 };
@@ -1818,8 +1969,8 @@ $("cmpBtn").onclick = () => {
 /* ====================== Statistik-Seite ====================== */
 let statsGames = [], statsCmpIdx = -1, cmpFromStats = false;
 
-const peekCode = str => {           // Spiel-Code (Feld 0) aus einem SPCX4-String lesen
-  if(!str || !str.startsWith("SPCX4.")) return null;
+const peekCode = str => {           // Spiel-Code (Feld 0) aus einem SPCX4/SPCX5-String lesen
+  if(!str || !/^SPCX[45]\./.test(str)) return null;
   try{ return +decodeURIComponent(escape(atob(str.slice(6)))).split("|")[0]; }catch(e){ return null; }
 };
 
@@ -1891,9 +2042,16 @@ function runStatsCompare(entry, oppRaw, errEl){
   const opp = unpackResult(extractResultCode(oppRaw), gc);
   if(!opp){ errEl.textContent = "Code nicht lesbar – komplett kopiert?"; return false; }
   if(opp.wrongGame){ errEl.textContent = "Dieses Ergebnis stammt aus einem anderen Spiel."; return false; }
+  // Markt-Seed abgleichen: beide müssen denselben Markt gespielt haben (Online: Seed ≠ Code)
+  const expSeed = (me.seed !== undefined ? me.seed : gc) >>> 0;
+  if(opp.seed !== undefined && opp.seed !== expSeed){
+    errEl.textContent = "Anderer Markt – dieses Ergebnis passt nicht zu deinem Spiel."; return false;
+  }
   errEl.textContent = "";
   // Markt des Eintrags deterministisch rekonstruieren → Analyse/Benchmark stimmen
-  sandbox = false; gameCode = gc; durationMin = entry.durationMin; buildMarket();
+  sandbox = false; gameCode = gc; durationMin = entry.durationMin;
+  marketSeed = (me.seed !== undefined && me.seed !== (gc >>> 0)) ? me.seed : null;
+  buildMarket();
   me.color = "var(--p1)";
   $("resName1").textContent = me.name;
   document.querySelector("#resCard1 .dot").style.background = "var(--p1)";
@@ -1945,9 +2103,12 @@ function showResultSolo(p){
   $("cmpBox").style.display = solo ? "none" : "";
   $("shareBtn").textContent = "📤 Mein Ergebnis teilen";
   $("cmpIn").value = ""; $("cmpErr").textContent = "";
+  $("cmpWait").style.display = "none";
   $("resCode").textContent = String(gameCode).padStart(6,"0");
   $("rematchBtn").textContent = "Neues Spiel";
   $("overlay").classList.add("show");
+  // Online-Duell: Ergebnis hochladen und auf den Gegner warten → Vergleich öffnet sich selbst
+  if(!solo && !sandbox && onlineGame) onlineShareResult(p);
 }
 
 function showResult(){
@@ -2218,9 +2379,9 @@ function handleShareParams(){
   let p;
   try{ p = new URLSearchParams(location.search); }catch(e){ return; }
   if(p.get("join") === null && p.get("vs") === null) return;
-  const href = location.href;                                            // vor dem Aufräumen sichern
+  const q = location.search;                                             // vor dem Aufräumen sichern
   try{ history.replaceState(null, "", location.pathname); }catch(e){}    // nicht erneut auslösen (Reload/PWA)
-  routeSharedText(href);
+  routeSharedText(q);
 }
 handleShareParams();
 

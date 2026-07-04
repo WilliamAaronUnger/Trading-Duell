@@ -3,6 +3,9 @@
 const TICK_MS = 1000;
 const TICK_SCALE = 700 / TICK_MS;
 const REACT_TICKS = Math.round(8000 / TICK_MS);
+/* Online-Schicht (Cloudflare Worker, siehe worker.js/ONLINE-PLAN.md): Lobby, geheimer
+   Markt-Seed, Auto-Ergebnisvergleich. Leerer String = Online komplett aus (rein offline). */
+const ONLINE_API = "https://spcx-duell.william-aaron-unger.workers.dev";
 const STOCK_DEFS = {
   SPCX:{name:"SpaceX",     type:"growth",   start:135.00, sigma:0.0015, drift:0.00001, newsMult:1.25,
         char:"🚀 Hype-Wert: reagiert besonders heftig auf News"},

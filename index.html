@@ -6,7 +6,7 @@
      gleiche Herkunft → 'self'). style 'unsafe-inline' bleibt für die vielen style="…"-
      Attribute nötig. Externe Quellen, Plugins, Fremd-Einbettung und Daten-Abfluss
      werden so unterbunden. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://spcx-duell.william-aaron-unger.workers.dev; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>SPCX Trading-Duell</title>
@@ -96,8 +96,9 @@
       diesem Handy (Spieler 2 schaut bei Runde 1 nicht zu 🙈), danach wird automatisch verglichen.<br><br>
       <b style="color:var(--text)">👥 Mehrspieler · 📱📱 Zwei Geräte:</b> Du legst ein Spiel an und bekommst
       einen 6-stelligen Code. Der andere tippt ihn auf seinem Gerät ein – beide spielen exakt dasselbe Spiel.
-      Start zur übernächsten vollen Minute; in derselben Minute angelegt, geht's zeitgleich los. ⏱️
-      Die Endwerte vergleicht ihr danach selbst.
+      Mit Internet wartet die Lobby auf deinen Gegner, ihr startet per Knopf exakt gleichzeitig
+      und der Vergleich öffnet sich am Ende von selbst. ⏱️ Ohne Internet gilt der Minuten-Start
+      und ihr tauscht die Ergebnis-Codes selbst aus.
     </div>
     <button class="lobby-cancel" id="clearBtn" style="margin-top:10px;display:none">🗑 Gespeicherte Daten löschen</button>
   </div>
@@ -113,7 +114,7 @@
     <div id="statsBody"></div>
     <div class="field" id="statsCmpBox" style="display:none;text-align:left">
       <label id="statsCmpLabel">Gegner-Code zu diesem Spiel einfügen</label>
-      <input id="statsCmpIn" type="text" placeholder="SPCX4.…" autocomplete="off">
+      <input id="statsCmpIn" type="text" placeholder="SPCX5.…" autocomplete="off">
       <div class="code-err" id="statsCmpErr"></div>
       <button class="lobby-cancel" id="statsCmpBtn" style="margin-top:0">⚔️ Vergleichen</button>
     </div>
@@ -221,7 +222,9 @@
     <h3 id="lobbyHead">Bereitmachen!</h3>
     <div class="lobby-code" id="lobbyCode"></div>
     <div class="sub" id="lobbySub"></div>
-    <div class="lobby-start">Start um <b id="lobbyTime"></b> Uhr · noch <b id="lobbyCount"></b></div>
+    <div class="lobby-start" id="lobbyStartRow">Start um <b id="lobbyTime"></b> Uhr · noch <b id="lobbyCount"></b></div>
+    <div class="lobby-start" id="lobbyOpp" style="display:none"></div>
+    <button class="start-btn" id="lobbyStartBtn" style="display:none;margin-top:16px;height:46px;font-size:15px">▶️ Jetzt starten</button>
     <div class="tip-line" id="lobbyTip"></div>
     <button class="start-btn" id="lobbyShare" style="margin-top:20px;height:46px;font-size:15px">📤 Einladung teilen</button>
     <div class="qr-wrap" id="lobbyQRWrap" style="display:none">
@@ -292,10 +295,11 @@
     </div>
     <div class="ana" id="analysis"></div>
     <div id="cmpBox" style="display:none">
+      <div class="code-err" id="cmpWait" style="display:none;color:var(--accent)">⏳ Warte auf das Ergebnis des Gegners – der Vergleich öffnet sich automatisch …</div>
       <button class="start-btn" id="shareBtn" style="margin-top:14px;height:44px;font-size:14px">📤 Mein Ergebnis teilen</button>
       <div class="field" style="text-align:left">
         <label>Ergebnis des Gegners einfügen</label>
-        <input id="cmpIn" type="text" placeholder="SPCX4.…" autocomplete="off">
+        <input id="cmpIn" type="text" placeholder="SPCX5.…" autocomplete="off">
         <div class="code-err" id="cmpErr"></div>
       </div>
       <button class="lobby-cancel" id="cmpBtn" style="margin-top:0">⚔️ Vergleichen</button>

@@ -649,7 +649,13 @@ $("startBtn").onclick = async () => {
     if(joined){
       gameCode = +raw;
       durationMin = DURATIONS[gameCode % 3];
-      try{
+      const own = loadLobbyState();
+      if(own && own.code === raw){
+        // Eigenes Spiel (z. B. nach Reload den Code erneut eingetippt):
+        // Rolle samt Token wiederherstellen statt dem eigenen Spiel beizutreten
+        onlineGame = {code: own.code, token: own.token, p: own.p, seed: null};
+        durationMin = own.dur;
+      }else try{
         const j = await apiJson("/game/" + raw + "/join", {method:"POST"});
         onlineGame = {code: raw, token: j.token, p: 2, seed: null};
         durationMin = j.dur; // die verbindliche Dauer kennt der Server
@@ -673,11 +679,13 @@ $("startBtn").onclick = async () => {
     btn.disabled = false; btn.textContent = oldTxt; updateStartBtn();
   }
   if(!onlineGame) buildMarket(); // online kommt der geheime Seed erst mit dem Start
+  const guest = onlineGame ? onlineGame.p === 2 : joined; // Rolle kann wiederhergestellt sein
   players = [newPlayer(
-    $("name1").value.trim() || (joined ? "Spieler 2" : "Spieler 1"),
-    joined ? "var(--p2)" : "var(--p1)"
+    $("name1").value.trim() || (guest ? "Spieler 2" : "Spieler 1"),
+    guest ? "var(--p2)" : "var(--p1)"
   )];
-  openLobby(joined);
+  if(onlineGame) saveLobbyState(); // Rolle + Token überleben einen Reload (App-Wechsel!)
+  openLobby(guest);
 };
 
 /* ====================== Lobby (zeitversetzter Start) ====================== */
@@ -769,6 +777,7 @@ $("lobbyCancel").onclick = () => {
   clearInterval(lobbyTimer);
   stopTips();
   onlineGame = null; marketSeed = null; // Online-Spiel verwaist einfach (24-h-TTL räumt auf)
+  clearLobbyState();
   $("lobby").classList.remove("show");
 };
 
@@ -787,12 +796,52 @@ async function api(path, opts, timeoutMs){
 }
 const apiJson = async (path, opts) => (await api(path, opts)).json();
 
+/* Lobby-Zustand übersteht Reloads: iOS lädt die PWA beim App-Wechsel (Teilen/Scannen!)
+   gern neu – und der Ersteller-Token existiert sonst nur im Speicher. Ohne ihn könnte
+   nach einem Reload niemand mehr starten (beide Geräte wären „Gäste"). */
+const LOBBY_KEY = "spcx-duell-lobby";
+function saveLobbyState(){
+  if(!onlineGame) return;
+  try{
+    localStorage.setItem(LOBBY_KEY, JSON.stringify({
+      code: onlineGame.code, token: onlineGame.token, p: onlineGame.p,
+      dur: durationMin, name: players && players[0] ? players[0].name : "", ts: Date.now()
+    }));
+  }catch(e){}
+}
+const clearLobbyState = () => { try{ localStorage.removeItem(LOBBY_KEY); }catch(e){} };
+function loadLobbyState(){
+  try{
+    const l = JSON.parse(localStorage.getItem(LOBBY_KEY));
+    if(!l || !l.code || !l.token || (l.p !== 1 && l.p !== 2)) return null;
+    if(Date.now() - l.ts > 20*60000) return null; // verwaiste Lobbys nicht ewig wiederbeleben
+    return l;
+  }catch(e){ return null; }
+}
+/* Unterbrochene Online-Lobby wiederherstellen (richtige Rolle inkl. Ersteller-Token).
+   Deckt auch den Reload im 10-s-Countdown ab: der Poll liefert startAt+Seed erneut. */
+function resumeLobby(l){
+  mode = "remote"; sandbox = false; tutorial = false; START_CASH = 25000;
+  onlineGame = {code: l.code, token: l.token, p: l.p, seed: null};
+  gameCode = +l.code; durationMin = l.dur; marketSeed = null; startAt = 0;
+  players = [newPlayer(l.name || (l.p === 2 ? "Spieler 2" : "Spieler 1"),
+                       l.p === 2 ? "var(--p2)" : "var(--p1)")];
+  openLobby(l.p === 2);
+}
+
 /* Lobby-Status pollen (~1,5 s): Ersteller sieht den Beitritt und bekommt den Start-Knopf;
    der Beigetretene wartet auf startAt + Seed. Netz-Aussetzer: einfach nächste Runde. */
 async function pollLobby(){
   if(!onlineGame || startAt) return;
   let st;
-  try{ st = await apiJson("/game/" + onlineGame.code); }catch(e){ return; }
+  try{ st = await apiJson("/game/" + onlineGame.code); }
+  catch(e){
+    if(String(e && e.message).includes("404")){ // Spiel abgelaufen/unbekannt: klar sagen
+      clearInterval(lobbyTimer); clearLobbyState();
+      $("lobbyOpp").textContent = "Spiel nicht mehr vorhanden – bitte neu anlegen.";
+    }
+    return;
+  }
   if(st.startAt){ armOnlineStart(st.startAt, st.seed); return; }
   if(onlineGame.p === 1 && st.joined){
     $("lobbyOpp").textContent = "Gegner beigetreten ✓";
@@ -903,6 +952,7 @@ $("rematchBtn").onclick = () => {
 };
 
 function startRound(r){
+  clearLobbyState(); // Runde läuft – ab jetzt deckt der Spiel-Snapshot Reloads ab
   round = r;
   tickCount = 0; paused = false; over = false; newsPaused = false; lastNewsTick = -999;
   clearInterval(preTimer); preTimer = null; $("preStart").classList.remove("show");
@@ -2377,13 +2427,19 @@ function routeSharedText(text){
 }
 function handleShareParams(){
   let p;
-  try{ p = new URLSearchParams(location.search); }catch(e){ return; }
-  if(p.get("join") === null && p.get("vs") === null) return;
+  try{ p = new URLSearchParams(location.search); }catch(e){ return false; }
+  if(p.get("join") === null && p.get("vs") === null) return false;
   const q = location.search;                                             // vor dem Aufräumen sichern
   try{ history.replaceState(null, "", location.pathname); }catch(e){}    // nicht erneut auslösen (Reload/PWA)
   routeSharedText(q);
+  return true;
 }
-handleShareParams();
+if(!handleShareParams() && !loadSnapshot()){
+  // Unterbrochene Online-Lobby (Reload beim App-Wechsel) automatisch wieder öffnen –
+  // laufende Runden deckt der Spiel-Snapshot ab, Teil-Links haben Vorrang.
+  const lby = loadLobbyState();
+  if(lby) resumeLobby(lby);
+}
 
 /* ====================== QR-Scanner (Einladung scannen) ====================== */
 let scanStream = null, scanTimer = null, jsQRLoad = null;

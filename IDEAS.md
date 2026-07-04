@@ -46,6 +46,56 @@ ist bewusst „opt-in". Denkbar als weitere Stufe in der Einzelspieler-/Modus-Au
 
 ---
 
+## 🌐 Online-Anbindung (Evaluation, Juni 2026 — noch nicht umgesetzt)
+
+Ziel: den manuellen Austausch (Ergebnis-Code kopieren, Minuten-Trick der Lobby) durch eine
+kleine Online-Schicht ersetzen. Wichtig: Der Server tauscht nur **kleine Zustandshäppchen**
+(bereit-Signal, P&L-Zahl, Ergebnis) — der Markt bleibt lokal & deterministisch (`genMarket`),
+deshalb reicht ein Mini-Backend im Gratis-Tarif. Alles muss ohne Netz sauber zum heutigen
+manuellen Austausch degradieren; Solo/Lokal/Sandbox/Tutorial bleiben voll offline.
+
+### Anbieter-Vergleich (alle ohne SDK, per fetch/EventSource — projektkonform)
+- **Firebase Realtime DB** (REST + SSE): bequemste Fertiglösung, Live-Streaming eingebaut.
+  Haken: Google; Security Rules (write-once für Ergebnisse!) in eigener Regel-Syntax.
+- **Cloudflare Worker + KV** (~100 Zeilen eigene Mini-API, im Dashboard einfügbar): volle
+  Kontrolle, kein Google, Regeln sind normaler JS-Code, Gratis-Tarif schläft nie. Live-Updates
+  = Polling oder Durable-Object-WebSocket (mehr Aufwand als Firebase-SSE).
+- **ntfy.sh** (POST + SSE): schnellster Prototyp, aber öffentliche 6-stellige Topics sind
+  mitlesbar, keine echte Persistenz → nicht für den Dauerbetrieb.
+- **Supabase**: ❌ Gratis-Projekt pausiert nach 1 Woche Inaktivität — K.-o. fürs Hobby-Spiel.
+- **QR-Ergebnis-Austausch (0 Server!)**: Ergebnis-Screen zeigt das Ergebnis als QR, Gegner
+  scannt → Vergleich öffnet sich. Encoder+Scanner existieren schon; Payload (~200–270 Zeichen)
+  braucht Encoder-Erweiterung um 2–3 Versionen (Test-Harness vorhanden). Nur „nebeneinander",
+  kein Live-P&L — Ergänzung, kein Ersatz.
+
+### Funktions-Fahrplan
+1. **Auto-Ergebnisvergleich** (hochladen unter Spiel-Code, Gegner-Ergebnis abholen → Vergleich
+   öffnet sich bei beiden) + **echte Lobby** („Gegner beigetreten ✓", Start wenn beide bereit).
+2. **Live-Gegner-P&L** während der Runde (nur die Zahl, NICHT Positionen — sonst Strategie-
+   Kopieren möglich); optional Zuschauer-Modus über den Code.
+3. **Tages-Challenge**: alle spielen denselben Tages-Seed, Bestenliste — beim Seed-Design fast
+   geschenkt. Global-Bestenliste braucht Missbrauchs-Schutz (Namen, Plausibilität).
+
+### Voll zufälliger, geheimer Seed (Fairness-Upgrade)
+Heute ist der 6-stellige Code zugleich der Seed → der Ersteller könnte den Code **vorspielen**
+(Mega-Timing kennen), und es gibt nur ~333k Märkte je Dauer. Mit Server: **Beitritts-Code und
+Seed entkoppeln** — der Code bleibt die teilbare Einladung, der Server erzeugt den Seed voll
+zufällig (voller 32-bit-Raum) und verrät ihn beiden Geräten **erst zum synchronen Start**.
+Niemand kann vorspielen; `genMarket(seed)` und die ganze Determinismus-Mechanik bleiben
+unverändert. Tages-Challenge: Seed wird zur festen Uhrzeit veröffentlicht. Snapshot/Resume
+speichert dann den vollen Seed statt nur des Codes. Optional: „Zufälliger Gegner"-Matchmaking
+(offener Lobby-Pool) auf derselben Basis.
+
+### Randbedingungen
+- CSP in `index.html`: `connect-src` um die eine Backend-Origin erweitern (eine Zeile).
+- Anti-Cheat bleibt Vertrauenssache (Ergebnisse entstehen im Client — wie heute beim manuellen
+  Code). Für öffentliche Bestenlisten: Plausibilitätsgrenzen; theoretisch Server-Replay möglich.
+- Datenschutz: erstmals Spielerdaten (Name, Ergebnis) auf Fremdserver → Satz in der README.
+- Empfehlung: Stufe 1 zuerst; Backend-Wahl = Cloudflare Worker (ohne Google, eigene Regeln)
+  oder Firebase RTDB (am wenigsten eigener Code). Beides kostenlos.
+
+---
+
 ## ✅ Umgesetzt (nicht mehr offen)
 
 - **QR-Code in der Lobby + Scan-Button** (v47/v48): Eigener abhängigkeitsfreier QR-Encoder

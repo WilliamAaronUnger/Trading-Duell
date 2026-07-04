@@ -32,6 +32,7 @@
     </div>
     <button class="start-btn" id="resumeBtn" style="display:none">▶️ Spiel fortsetzen</button>
     <button class="lobby-cancel" id="statsBtn" style="margin-top:0">📊 Meine Statistik</button>
+    <button class="lobby-cancel" id="scanBtn" style="margin-top:10px">📷 Einladung scannen</button>
     <div class="field">
       <label>Modus</label>
       <div class="dur-row">
@@ -223,7 +224,22 @@
     <div class="lobby-start">Start um <b id="lobbyTime"></b> Uhr · noch <b id="lobbyCount"></b></div>
     <div class="tip-line" id="lobbyTip"></div>
     <button class="start-btn" id="lobbyShare" style="margin-top:20px;height:46px;font-size:15px">📤 Einladung teilen</button>
+    <div class="qr-wrap" id="lobbyQRWrap" style="display:none">
+      <canvas id="lobbyQR" width="220" height="220"></canvas>
+      <div class="qr-hint">Oder mit der Kamera scannen</div>
+    </div>
     <button class="lobby-cancel" id="lobbyCancel" style="margin-top:10px">Abbrechen</button>
+  </div>
+</div>
+
+<!-- ================= QR-SCANNER (Einladung scannen) ================= -->
+<div class="overlay" id="scanOverlay">
+  <div class="modal">
+    <div class="eyebrow">Einladung scannen</div>
+    <h3>QR-Code vor die Kamera halten</h3>
+    <div class="scan-view"><video id="scanVideo" playsinline muted></video><div class="scan-frame"></div></div>
+    <div class="code-err" id="scanErr"></div>
+    <button class="lobby-cancel" id="scanCancel" style="margin-top:14px">Abbrechen</button>
   </div>
 </div>
 
@@ -317,6 +333,7 @@
   </div>
 </div>
 
+<script src="qr.js"></script>
 <script src="data.js"></script>
 <script src="game.js"></script>
 </body>

@@ -46,15 +46,10 @@ ist bewusst „opt-in". Denkbar als weitere Stufe in der Einzelspieler-/Modus-Au
 
 ---
 
-## 📱 QR-Code in der Lobby
+## ✅ Umgesetzt (nicht mehr offen)
 
-- *Was:* Die Lobby zeigt zusätzlich zum Einladungs-Link (`?join=<code>`, seit v46) einen
-  QR-Code desselben Links — sitzt man nebeneinander, scannt der Gegner einfach mit der Kamera,
-  statt einen Link geschickt zu bekommen.
-- *Warum zurückgestellt:* Das Projekt ist bewusst abhängigkeitsfrei; ein QR-Generator müsste
-  von Hand implementiert werden (Reed-Solomon-Fehlerkorrektur, Masken-Bewertung, ~250 Zeilen
-  Bit-Arithmetik). Das ist machbar, aber schwer nachprüfbarer Spezialcode — erst angehen, wenn
-  der Bedarf real ist, und dann mit gründlichen Encoder-Tests (bekannte Testvektoren).
-- *Umsetzung (Skizze):* Kleiner Byte-Mode-Encoder (Version 2–4, EC-Level L reicht für die kurze
-  URL), gerendert auf ein kleines `<canvas>` in der Lobby unter dem Code. Rein clientseitig,
-  offline-fähig, fairness-neutral (reine Anzeige).
+- **QR-Code in der Lobby + Scan-Button** (v47): Eigener abhängigkeitsfreier QR-Encoder
+  (`qr.js`, Byte-Modus, Versionen 1–10, EC-Level M, per Round-Trip gegen einen QR-Decoder
+  verifiziert) zeigt den `?join=<code>`-Link als QR unter „Einladung teilen". Start-Screen hat
+  einen „📷 Einladung scannen"-Button (`BarcodeDetector`, wo verfügbar; sonst Hinweis auf die
+  native Kamera-App, die den QR-Link ohnehin öffnet). Rein clientseitig, fairness-neutral.

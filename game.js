@@ -682,6 +682,10 @@ function openLobby(joined){
        beitreten, dann startet ihr zeitgleich.`;
   $("lobbyTime").textContent = hhmm(startAt);
   $("lobbyShare").textContent = "📤 Einladung teilen";
+  // QR-Code des Einladungs-Links zeigen (nur wenn es eine teilbare http(s)-URL gibt)
+  const joinUrl = shareUrl("join", String(gameCode).padStart(6, "0"));
+  const qrOk = joinUrl && typeof drawQR === "function" && drawQR($("lobbyQR"), joinUrl, {size:200});
+  $("lobbyQRWrap").style.display = qrOk ? "" : "none";
   updateLobby();
   $("lobby").classList.add("show");
   startTips(["lobbyTip", "preTip"]); // Tipps während der Wartezeit (auch im Vorlauf-Fenster)
@@ -2189,21 +2193,81 @@ function openSharedCompare(oppRaw){
     $("startScreen").classList.remove("show");
 }
 
+/* 6-stelligen Beitritts-Code in die Remote-Eingabe übernehmen (Zwei-Geräte-Modus). */
+function applyJoinCode(code){
+  if(!/^\d{6}$/.test(code || "")) return false;
+  $("startScreen").classList.add("show");
+  setTop("multi"); setMode("remote");
+  codeIn.value = code;
+  codeIn.dispatchEvent(new Event("input")); // Dauer übernehmen/sperren, Button-Text aktualisieren
+  $("name1").focus();
+  return true;
+}
+/* Beliebigen geteilten/gescannten Text (voller ?join=/?vs=-Link ODER blanker 6-stelliger
+   Code) an die richtige Stelle leiten. Rückgabe: true, wenn etwas erkannt wurde. */
+function routeSharedText(text){
+  text = (text || "").trim();
+  let params = null; const q = text.indexOf("?");
+  if(q >= 0){ try{ params = new URLSearchParams(text.slice(q)); }catch(e){} }
+  const vs = params && params.get("vs");
+  if(vs){ openSharedCompare(vs); return true; }
+  const join = (params && params.get("join")) || (/^\d{6}$/.test(text) ? text : null);
+  return applyJoinCode(join);
+}
 function handleShareParams(){
   let p;
   try{ p = new URLSearchParams(location.search); }catch(e){ return; }
-  const join = p.get("join"), vs = p.get("vs");
-  if(join === null && vs === null) return;
-  try{ history.replaceState(null, "", location.pathname); }catch(e){} // nicht erneut auslösen (Reload/PWA)
-  if(vs){ openSharedCompare(vs); return; }
-  if(/^\d{6}$/.test(join || "")){
-    setTop("multi"); setMode("remote");
-    codeIn.value = join;
-    codeIn.dispatchEvent(new Event("input")); // Dauer übernehmen/sperren, Button-Text aktualisieren
-    $("name1").focus();
-  }
+  if(p.get("join") === null && p.get("vs") === null) return;
+  const href = location.href;                                            // vor dem Aufräumen sichern
+  try{ history.replaceState(null, "", location.pathname); }catch(e){}    // nicht erneut auslösen (Reload/PWA)
+  routeSharedText(href);
 }
 handleShareParams();
+
+/* ====================== QR-Scanner (Einladung scannen) ====================== */
+let scanStream = null, scanTimer = null;
+function stopScan(){
+  clearTimeout(scanTimer); scanTimer = null;
+  if(scanStream){ scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+  $("scanVideo").srcObject = null;
+  $("scanOverlay").classList.remove("show");
+}
+async function startScan(){
+  // In-App-Scannen braucht die BarcodeDetector-API (Chrome/Android). Wo sie fehlt (z.B. iOS
+  // Safari), verweisen wir auf die native Kamera-App – der QR-Link öffnet das Spiel ohnehin.
+  if(typeof window.BarcodeDetector === "undefined"){
+    alert("Dein Browser kann QR-Codes nicht direkt scannen.\n\nÖffne die Kamera-App deines Handys und halte sie auf den QR-Code – das Spiel öffnet sich dann automatisch.");
+    return;
+  }
+  $("scanErr").textContent = "";
+  $("scanOverlay").classList.add("show");
+  try{
+    scanStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+  }catch(e){
+    $("scanErr").textContent = "Kein Kamerazugriff – bitte in den Einstellungen erlauben.";
+    return;
+  }
+  const video = $("scanVideo");
+  video.srcObject = scanStream;
+  await video.play().catch(()=>{});
+  const detector = new window.BarcodeDetector({formats:["qr_code"]});
+  const tick = async () => {
+    if(!scanStream) return; // abgebrochen
+    try{
+      const codes = await detector.detect(video);
+      if(codes && codes.length){
+        const raw = codes[0].rawValue || "";
+        if(routeSharedText(raw)){ stopScan(); return; }
+        $("scanErr").textContent = "Kein SPCX-Einladungscode erkannt.";
+      }
+    }catch(e){ /* einzelner Frame-Fehler: einfach weiter */ }
+    scanTimer = setTimeout(tick, 250);
+  };
+  scanTimer = setTimeout(tick, 300);
+}
+$("scanBtn").onclick = startScan;
+$("scanCancel").onclick = stopScan;
+$("scanOverlay").onclick = e => { if(e.target === $("scanOverlay")) stopScan(); };
 
 /* PWA: Service Worker registrieren (nur wenn über http(s) geladen) */
 if("serviceWorker" in navigator && location.protocol.startsWith("http")){

@@ -1,6 +1,8 @@
 # Plan: Online-Stufe 1 — Cloudflare Worker (Auto-Ergebnisvergleich + echte Lobby + Geheim-Seed)
 
-Status: **Stufe 1 komplett umgesetzt** — Worker deployed
+Status: **Stufe 1 komplett umgesetzt** (Speicher inzwischen **D1 statt KV**: KV cached
+Lesezugriffe je Standort bis zu 60 s → Geräte in verschiedenen Netzen sahen Beitritt/Start
+~30–60 s versetzt; D1 ist stark konsistent und macht Beitritt/Ergebnis atomar) — Worker deployed
 (`https://spcx-duell.william-aaron-unger.workers.dev`, als `ONLINE_API` in `data.js` und in
 der CSP eingetragen), Client integriert (echte Lobby, Geheim-Seed, Auto-Ergebnisvergleich,
 `SPCX5`-Payload mit Seed-Prüfung, stiller Offline-Fallback). Verifiziert per Node:

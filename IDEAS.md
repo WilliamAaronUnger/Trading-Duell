@@ -43,3 +43,18 @@ ist bewusst „opt-in". Denkbar als weitere Stufe in der Einzelspieler-/Modus-Au
 - Zählt ein Experten-Spiel zum lokalen Rekord, oder eigener Rekord (wie Sandbox ausgenommen)?
 - Im Remote-Duell: beide Geräte müssen denselben `expert`-Zustand haben → am besten in den
   Spielcode kodieren (wie schon die Dauer über `code % 3`), damit es nicht auseinanderläuft.
+
+---
+
+## 📱 QR-Code in der Lobby
+
+- *Was:* Die Lobby zeigt zusätzlich zum Einladungs-Link (`?join=<code>`, seit v46) einen
+  QR-Code desselben Links — sitzt man nebeneinander, scannt der Gegner einfach mit der Kamera,
+  statt einen Link geschickt zu bekommen.
+- *Warum zurückgestellt:* Das Projekt ist bewusst abhängigkeitsfrei; ein QR-Generator müsste
+  von Hand implementiert werden (Reed-Solomon-Fehlerkorrektur, Masken-Bewertung, ~250 Zeilen
+  Bit-Arithmetik). Das ist machbar, aber schwer nachprüfbarer Spezialcode — erst angehen, wenn
+  der Bedarf real ist, und dann mit gründlichen Encoder-Tests (bekannte Testvektoren).
+- *Umsetzung (Skizze):* Kleiner Byte-Mode-Encoder (Version 2–4, EC-Level L reicht für die kurze
+  URL), gerendert auf ein kleines `<canvas>` in der Lobby unter dem Code. Rein clientseitig,
+  offline-fähig, fairness-neutral (reine Anzeige).

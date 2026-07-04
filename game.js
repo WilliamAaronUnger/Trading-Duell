@@ -681,6 +681,7 @@ function openLobby(joined){
     : `Code fürs zweite Gerät – dort vor <b style="color:var(--text)">${hhmm(startAt - 60000)}</b> Uhr
        beitreten, dann startet ihr zeitgleich.`;
   $("lobbyTime").textContent = hhmm(startAt);
+  $("lobbyShare").textContent = "📤 Einladung teilen";
   updateLobby();
   $("lobby").classList.add("show");
   startTips(["lobbyTip", "preTip"]); // Tipps während der Wartezeit (auch im Vorlauf-Fenster)
@@ -711,6 +712,21 @@ $("lobbyCancel").onclick = () => {
   clearInterval(lobbyTimer);
   stopTips();
   $("lobby").classList.remove("show");
+};
+
+/* Einladung teilen: Link mit vorbefülltem Beitritts-Code (?join=…) – der Gegner
+   tippt ihn an und muss nur noch seinen Namen eingeben und beitreten. */
+$("lobbyShare").onclick = async function(){
+  const code = String(gameCode).padStart(6, "0");
+  const url = shareUrl("join", code);
+  const txt = `🚀 SPCX Trading-Duell – ich fordere dich heraus!\nSpiel-Code: ${code} · ${durationMin} Minuten` +
+              (url ? `\nZum Beitreten antippen: ${url}` : "");
+  try{
+    this.textContent = (await shareOut(txt)) === "geteilt" ? "✅ Geteilt!" : "✅ Kopiert – ab damit an den Gegner!";
+  }catch(e){
+    if(e && e.name === "AbortError") return; // Teilen-Menü abgebrochen – kein Fehler
+    window.prompt("Zum Kopieren markieren:", txt);
+  }
 };
 
 $("round2Btn").onclick = () => {
@@ -1722,6 +1738,16 @@ function unpackResult(str, expectCode){
   };
 }
 
+/* Ergebnis-Code aus beliebig eingefügtem Text fischen: ganze WhatsApp-Nachricht,
+   ?vs=-Link oder roher SPCX4-String – alles wird akzeptiert. */
+function extractResultCode(raw){
+  raw = (raw || "").trim();
+  const link = raw.match(/[?&]vs=([^&\s]+)/);          // kompletter Teil-Link eingefügt
+  if(link){ try{ return decodeURIComponent(link[1]); }catch(e){} }
+  const code = raw.match(/SPCX4\.[A-Za-z0-9+/=]+/);    // Code irgendwo im Text
+  return code ? code[0] : raw;
+}
+
 /* Gegner-Ergebnis eingefügt → volle Duell-Ansicht wie im Ein-Gerät-Modus */
 function renderCompare(me, opp){
   opp.color = me.color === "var(--p1)" ? "var(--p2)" : "var(--p1)";
@@ -1752,19 +1778,33 @@ function renderCompare(me, opp){
 
 let soloP = null;
 
+/* Teil-Link auf diese App bauen (nur über http(s) – bei file:// gibt es keine teilbare URL) */
+function shareUrl(param, value){
+  if(!/^https?:$/.test(location.protocol)) return null;
+  return location.origin + location.pathname + "?" + param + "=" + encodeURIComponent(value);
+}
+/* Text übers System-Teilen-Menü verschicken, sonst in die Zwischenablage */
+async function shareOut(text){
+  if(navigator.share){ await navigator.share({text}); return "geteilt"; }
+  await navigator.clipboard.writeText(text);
+  return "kopiert";
+}
+
 $("shareBtn").onclick = async function(){
-  const txt = packResult(soloP);
+  const code = packResult(soloP);
+  const url = shareUrl("vs", code);
+  const txt = `📈 SPCX Trading-Duell (Code ${String(gameCode).padStart(6,"0")}): ${sgn(soloP.result.pnl)} – „${playerTitle(soloP)}"\n` +
+              (url ? `Zum Duell-Vergleich antippen: ${url}` : `Ergebnis-Code:\n${code}`);
   try{
-    if(navigator.share) await navigator.share({text: txt});
-    else await navigator.clipboard.writeText(txt);
-    this.textContent = "✅ Kopiert – schick's dem Gegner!";
+    this.textContent = (await shareOut(txt)) === "geteilt" ? "✅ Geteilt!" : "✅ Kopiert – schick's dem Gegner!";
   }catch(e){
+    if(e && e.name === "AbortError") return; // Teilen-Menü abgebrochen – kein Fehler
     window.prompt("Zum Kopieren markieren:", txt);
   }
 };
 
 $("cmpBtn").onclick = () => {
-  const opp = unpackResult($("cmpIn").value.trim());
+  const opp = unpackResult(extractResultCode($("cmpIn").value));
   if(!opp){ $("cmpErr").textContent = "Code nicht lesbar – komplett kopiert?"; return; }
   if(opp.wrongGame){ $("cmpErr").textContent = "Das Ergebnis stammt aus einem anderen Spiel."; return; }
   $("cmpErr").textContent = "";
@@ -1817,12 +1857,17 @@ function renderStats(){
 }
 
 async function shareStatsGame(i, btn){
-  const txt = statsGames[i].code;
+  const g = statsGames[i];
+  const url = shareUrl("vs", g.code);
+  const txt = `📈 SPCX Trading-Duell (${g.durationMin} Min): ${sgn(g.pnl)}\n` +
+              (url ? `Zum Duell-Vergleich antippen: ${url}` : `Ergebnis-Code:\n${g.code}`);
   try{
-    if(navigator.share) await navigator.share({text: txt});
-    else await navigator.clipboard.writeText(txt);
+    await shareOut(txt);
     const o = btn.textContent; btn.textContent = "✅"; setTimeout(() => btn.textContent = o, 1500);
-  }catch(e){ window.prompt("Zum Kopieren markieren:", txt); }
+  }catch(e){
+    if(e && e.name === "AbortError") return;
+    window.prompt("Zum Kopieren markieren:", txt);
+  }
 }
 
 function openStatsCompare(i){
@@ -1833,16 +1878,16 @@ function openStatsCompare(i){
   $("statsCmpBox").scrollIntoView({behavior:"smooth", block:"center"});
 }
 
-$("statsCmpBtn").onclick = () => {
-  if(statsCmpIdx < 0) return;
-  const entry = statsGames[statsCmpIdx];
+/* Historien-Vergleich ausführen: eigener Eintrag + Gegner-String → Duell-Ansicht.
+   Genutzt vom Statistik-Button UND vom ?vs=-Teil-Link. */
+function runStatsCompare(entry, oppRaw, errEl){
   const gc = peekCode(entry.code);
   const me = unpackResult(entry.code, gc);
-  if(!me || me.wrongGame){ $("statsCmpErr").textContent = "Eigener Eintrag beschädigt."; return; }
-  const opp = unpackResult($("statsCmpIn").value.trim(), gc);
-  if(!opp){ $("statsCmpErr").textContent = "Code nicht lesbar – komplett kopiert?"; return; }
-  if(opp.wrongGame){ $("statsCmpErr").textContent = "Dieses Ergebnis stammt aus einem anderen Spiel."; return; }
-  $("statsCmpErr").textContent = "";
+  if(!me || me.wrongGame){ errEl.textContent = "Eigener Eintrag beschädigt."; return false; }
+  const opp = unpackResult(extractResultCode(oppRaw), gc);
+  if(!opp){ errEl.textContent = "Code nicht lesbar – komplett kopiert?"; return false; }
+  if(opp.wrongGame){ errEl.textContent = "Dieses Ergebnis stammt aus einem anderen Spiel."; return false; }
+  errEl.textContent = "";
   // Markt des Eintrags deterministisch rekonstruieren → Analyse/Benchmark stimmen
   sandbox = false; gameCode = gc; durationMin = entry.durationMin; buildMarket();
   me.color = "var(--p1)";
@@ -1853,8 +1898,14 @@ $("statsCmpBtn").onclick = () => {
   $("resCode").textContent = String(gc).padStart(6, "0");
   $("rematchBtn").textContent = "← Zurück zur Statistik";
   cmpFromStats = true;
-  $("statsScreen").classList.remove("show");
   $("overlay").classList.add("show");
+  return true;
+}
+
+$("statsCmpBtn").onclick = () => {
+  if(statsCmpIdx < 0) return;
+  if(runStatsCompare(statsGames[statsCmpIdx], $("statsCmpIn").value, $("statsCmpErr")))
+    $("statsScreen").classList.remove("show");
 };
 
 $("statsBtn").onclick = () => {
@@ -1888,7 +1939,7 @@ function showResultSolo(p){
   setRes("1", p);
   buildAnalysis([p]);
   $("cmpBox").style.display = solo ? "none" : "";
-  $("shareBtn").textContent = "📤 Mein Ergebnis kopieren";
+  $("shareBtn").textContent = "📤 Mein Ergebnis teilen";
   $("cmpIn").value = ""; $("cmpErr").textContent = "";
   $("resCode").textContent = String(gameCode).padStart(6,"0");
   $("rematchBtn").textContent = "Neues Spiel";
@@ -2116,6 +2167,43 @@ function setChartMode(cm){
 }
 document.querySelectorAll(".ctg").forEach(b => b.onclick = () => setChartMode(b.dataset.cm));
 window.addEventListener("resize", () => { if(market) drawChart(); });
+
+/* ====================== Teil-Links (?join= / ?vs=) ====================== */
+/* Geteiltes Ergebnis (?vs=…) öffnen: passendes eigenes Spiel in der Historie suchen
+   und direkt den Duell-Vergleich zeigen. Fehlt das eigene Ergebnis, wird der
+   Spiel-Code zum Nachspielen vorbefüllt – gleicher Code = exakt gleicher Markt. */
+function openSharedCompare(oppRaw){
+  const gc = peekCode(extractResultCode(oppRaw));
+  if(gc == null || !isFinite(gc)) return;               // unlesbarer Link – still ignorieren
+  const s = loadStore();
+  const games = Array.isArray(s.games) ? s.games : [];
+  const entry = games.find(g => peekCode(g.code) === gc);
+  if(!entry){
+    setTop("multi"); setMode("remote");
+    codeIn.value = String(gc).padStart(6, "0");
+    codeIn.dispatchEvent(new Event("input"));           // Dauer übernehmen/sperren, Button-Text
+    $("codeErr").textContent = "Zum Vergleichen spiel erst dieses Spiel – der Code ist schon eingetragen.";
+    return;
+  }
+  if(runStatsCompare(entry, oppRaw, $("codeErr")))
+    $("startScreen").classList.remove("show");
+}
+
+function handleShareParams(){
+  let p;
+  try{ p = new URLSearchParams(location.search); }catch(e){ return; }
+  const join = p.get("join"), vs = p.get("vs");
+  if(join === null && vs === null) return;
+  try{ history.replaceState(null, "", location.pathname); }catch(e){} // nicht erneut auslösen (Reload/PWA)
+  if(vs){ openSharedCompare(vs); return; }
+  if(/^\d{6}$/.test(join || "")){
+    setTop("multi"); setMode("remote");
+    codeIn.value = join;
+    codeIn.dispatchEvent(new Event("input")); // Dauer übernehmen/sperren, Button-Text aktualisieren
+    $("name1").focus();
+  }
+}
+handleShareParams();
 
 /* PWA: Service Worker registrieren (nur wenn über http(s) geladen) */
 if("serviceWorker" in navigator && location.protocol.startsWith("http")){

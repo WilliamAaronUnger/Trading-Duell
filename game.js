@@ -2225,7 +2225,44 @@ function handleShareParams(){
 handleShareParams();
 
 /* ====================== QR-Scanner (Einladung scannen) ====================== */
-let scanStream = null, scanTimer = null;
+let scanStream = null, scanTimer = null, jsQRLoad = null;
+
+/* Decoder-Fallback (z. B. iOS Safari ohne BarcodeDetector) erst bei Bedarf nachladen –
+   gleiche Herkunft (CSP 'self'), vom Service Worker gecacht, also auch offline. */
+function loadJsQR(){
+  if(window.jsQR) return Promise.resolve();
+  if(!jsQRLoad) jsQRLoad = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "jsqr.js";
+    s.onload = res;
+    s.onerror = () => { jsQRLoad = null; rej(new Error("jsqr")); };
+    document.body.appendChild(s);
+  });
+  return jsQRLoad;
+}
+/* Liefert eine Erkennungs-Funktion video -> Promise<Text|null>: nativer BarcodeDetector,
+   wo verfügbar – sonst jsQR auf einem (fürs Decodieren verkleinerten) Canvas-Frame. */
+async function makeDetector(){
+  if(typeof window.BarcodeDetector !== "undefined"){
+    try{
+      const d = new window.BarcodeDetector({formats:["qr_code"]});
+      return async v => { const c = await d.detect(v); return c.length ? (c[0].rawValue || "") : null; };
+    }catch(e){ /* Format nicht unterstützt → jsQR-Fallback */ }
+  }
+  await loadJsQR();
+  const cv = document.createElement("canvas");
+  const cx = cv.getContext("2d", {willReadFrequently:true});
+  return async v => {
+    const vw = v.videoWidth, vh = v.videoHeight;
+    if(!vw || !vh) return null;
+    const sc = Math.min(1, 640 / Math.max(vw, vh)); // ~640px reichen zum Decodieren, spart CPU
+    cv.width = Math.round(vw*sc); cv.height = Math.round(vh*sc);
+    cx.drawImage(v, 0, 0, cv.width, cv.height);
+    const id = cx.getImageData(0, 0, cv.width, cv.height);
+    const r = window.jsQR(id.data, cv.width, cv.height, {inversionAttempts:"dontInvert"});
+    return r ? r.data : null;
+  };
+}
 function stopScan(){
   clearTimeout(scanTimer); scanTimer = null;
   if(scanStream){ scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
@@ -2233,14 +2270,19 @@ function stopScan(){
   $("scanOverlay").classList.remove("show");
 }
 async function startScan(){
-  // In-App-Scannen braucht die BarcodeDetector-API (Chrome/Android). Wo sie fehlt (z.B. iOS
-  // Safari), verweisen wir auf die native Kamera-App – der QR-Link öffnet das Spiel ohnehin.
-  if(typeof window.BarcodeDetector === "undefined"){
-    alert("Dein Browser kann QR-Codes nicht direkt scannen.\n\nÖffne die Kamera-App deines Handys und halte sie auf den QR-Code – das Spiel öffnet sich dann automatisch.");
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    alert("Die Kamera ist hier nicht verfügbar – öffne das Spiel über https bzw. als installierte App.");
     return;
   }
   $("scanErr").textContent = "";
   $("scanOverlay").classList.add("show");
+  let detect;
+  try{
+    detect = await makeDetector();
+  }catch(e){
+    $("scanErr").textContent = "Scanner konnte nicht geladen werden – bitte erneut versuchen.";
+    return;
+  }
   try{
     scanStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
   }catch(e){
@@ -2250,13 +2292,11 @@ async function startScan(){
   const video = $("scanVideo");
   video.srcObject = scanStream;
   await video.play().catch(()=>{});
-  const detector = new window.BarcodeDetector({formats:["qr_code"]});
   const tick = async () => {
     if(!scanStream) return; // abgebrochen
     try{
-      const codes = await detector.detect(video);
-      if(codes && codes.length){
-        const raw = codes[0].rawValue || "";
+      const raw = await detect(video);
+      if(raw){
         if(routeSharedText(raw)){ stopScan(); return; }
         $("scanErr").textContent = "Kein SPCX-Einladungscode erkannt.";
       }

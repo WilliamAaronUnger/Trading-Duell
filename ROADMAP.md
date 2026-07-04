@@ -66,16 +66,16 @@ kaum ein Spiel kann das), README/Datenschutz-Absatz.
 
 ## Spur B — Infrastruktur, Deployment & Co.
 
-### B1. Tests ins Repo + CI (erste Maßnahme, kostenlos)
+### B1. Tests ins Repo + CI — ✅ umgesetzt (CI bewusst nur manuell)
 Heute: `worker.test.js` liegt im Repo, aber der große Client-E2E-Test (33 Checks, simuliert
 mehrere Geräte gegen den echten Worker-Handler) lebt nur in der Session. Plan:
-- E2E-Harness als `e2e.test.js` ins Repo (DOM-Stub + D1-Adapter, nur Node ≥ 22, null Deps).
-- GitHub-Actions-Workflow (`.github/workflows/test.yml`): bei jedem Push
-  `node worker.test.js && node e2e.test.js` (< 1 Minute, Gratis-Kontingent reicht locker).
-- Damit ist jede zukünftige Änderung automatisch gegen 75+ Checks abgesichert — der
-  wichtigste Schritt, um das Projekt ohne Angst weiterentwickeln zu können.
+- ✅ `e2e.test.js` liegt im Repo (43 Checks; DOM-Stub + D1-Adapter, nur Node ≥ 22, null Deps).
+- ✅ `.github/workflows/test.yml`: auf Betreiber-Wunsch NICHT pro Push, sondern **manuell**
+  (GitHub → Actions → „Tests" → „Run workflow") — schont das Actions-Kontingent.
+  Empfehlung: vor jedem größeren Merge einmal auslösen. Lokal weiterhin jederzeit:
+  `node worker.test.js && node e2e.test.js`.
 
-### B2. Worker-Deploy automatisieren (Copy-Paste abschaffen)
+### B2. Worker-Deploy automatisieren — 🔧 vorbereitet (`wrangler.jsonc` im Repo)
 Heute: `worker.js` wird nach jeder Server-Änderung von Hand ins Dashboard kopiert (bereits
 3× passiert, wird wieder passieren). Plan: **Workers Builds** (Git-Integration) —
 `wrangler.jsonc` ins Repo (Name, D1-Binding mit database_id, `main = worker.js`), Repo einmal

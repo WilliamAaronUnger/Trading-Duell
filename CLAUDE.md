@@ -8,10 +8,10 @@ SPCX Trading-Duell: a two-player, pass-and-play stock trading game around a fict
 
 ## Development
 
-There is no build system, package manager, linter, or test suite. The app is plain HTML/CSS/JS with zero dependencies.
+There is no build system, package manager, or linter. The app is plain HTML/CSS/JS with zero dependencies. Tests exist as standalone Node scripts (no deps, Node ≥ 22): `node worker.test.js` (online API) and `node e2e.test.js` (multi-device end-to-end incl. share links) — run both before pushing logic changes; UI changes are still verified by playing. CI (`.github/workflows/test.yml`) runs them, but only via manual dispatch.
 
 - Run locally: serve the directory with any static server (e.g. `python3 -m http.server`) and open `index.html`. Opening the file directly also works, except the service worker only registers over http(s).
-- There are no tests; verify changes by playing the game in a browser.
+- Verify UI/gameplay changes by playing in a browser; logic around the online layer/worker/share links is covered by the two test scripts above.
 
 ## Architecture
 

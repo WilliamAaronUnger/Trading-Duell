@@ -1,0 +1,19 @@
+# Test-Suite manuell ausführen (bewusst KEIN Lauf pro Push, um das Actions-Kontingent
+# zu schonen): GitHub → Actions → "Tests" → "Run workflow".
+# Läuft in < 1 Minute: 42 Worker-Tests + 43 Ende-zu-Ende-Checks, null Abhängigkeiten.
+name: Tests
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # node:sqlite (für den D1-Adapter) braucht Node ≥ 22
+      - name: Worker-Tests
+        run: node worker.test.js
+      - name: Ende-zu-Ende-Tests
+        run: node e2e.test.js

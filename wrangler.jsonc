@@ -1,0 +1,18 @@
+{
+  // Cloudflare-Worker-Konfiguration für den automatischen Deploy per Git-Integration
+  // (Workers Builds): einmal verbunden, deployt jeder Push von worker.js den Server neu –
+  // kein Copy-Paste ins Dashboard mehr. Die PWA lädt diese Datei nie.
+  //
+  // EINMALIG NÖTIG: database_id eintragen (Cloudflare-Dashboard → Storage & Databases
+  // → D1 → spcx-duell-db → „Database ID" kopieren). Ohne sie schlägt der Deploy fehl.
+  "name": "spcx-duell",
+  "main": "worker.js",
+  "compatibility_date": "2026-06-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "spcx-duell-db",
+      "database_id": "HIER-DATABASE-ID-EINTRAGEN"
+    }
+  ]
+}

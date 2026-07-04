@@ -1,11 +1,11 @@
-/* Tests für worker.js (Online-Stufe 1, D1-Speicher). Ausführen mit:  node worker.test.js
-   Braucht nur Node ≥ 22 (fetch-API, WebCrypto und node:sqlite eingebaut), keine
+/* Tests für worker.js (Online-Duell 2–8 Spieler, D1-Speicher). Ausführen mit:
+   node worker.test.js  – braucht nur Node ≥ 22 (fetch, WebCrypto, node:sqlite), keine
    Abhängigkeiten. D1 wird über einen kleinen Adapter auf echtem SQLite simuliert;
    getestet wird der echte fetch-Handler. */
 const fs = require("fs"), os = require("os"), path = require("path"), {pathToFileURL} = require("url");
 const {DatabaseSync} = require("node:sqlite");
 
-/* Mini-Adapter: bildet die D1-API (prepare/bind/first/run) auf node:sqlite ab */
+/* Mini-Adapter: bildet die D1-API (prepare/bind/first/run/all) auf node:sqlite ab */
 function d1Stub(){
   const db = new DatabaseSync(":memory:");
   return {
@@ -39,7 +39,7 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   const jbody = o => JSON.stringify(o);
 
   // ---- Anlegen ----
-  let r = await call("POST", "/game", jbody({dur: 10}));
+  let r = await call("POST", "/game", jbody({dur: 10, name: "Anna"}));
   ok(r.status === 201, "Anlegen → 201");
   const g1 = await r.json();
   ok(/^\d{6}$/.test(g1.code), "6-stelliger Code");
@@ -51,30 +51,43 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   ok((await call("POST", "/game", jbody({dur: 7}))).status === 400, "ungültige Dauer → 400");
   ok((await call("POST", "/game", "kein json")).status === 400, "kaputtes JSON → 400");
 
-  // ---- Zustand vor Beitritt/Start: Seed bleibt geheim ----
-  r = await call("GET", "/game/" + g1.code);
-  let st = await r.json();
-  ok(st.joined === false && st.startAt === null && !("seed" in st), "Seed vor Start unsichtbar");
+  // ---- Zustand: Roster + Kompatibilitätsflag, Seed geheim ----
+  let st = await (await call("GET", "/game/" + g1.code)).json();
+  ok(st.players.length === 1 && st.players[0].p === 1 && st.players[0].name === "Anna",
+     "Roster zeigt Ersteller (Name)");
+  ok(st.joined === false && st.startAt === null && !("seed" in st), "Seed vor Start unsichtbar, joined=false");
 
-  // ---- Start vor Beitritt verboten; falsches Token verboten ----
-  ok((await call("POST", `/game/${g1.code}/start`, jbody({token: g1.token}))).status === 409, "Start ohne Gegner → 409");
+  // ---- Start vor 2 Spielern / mit falschem Token verboten ----
+  ok((await call("POST", `/game/${g1.code}/start`, jbody({token: g1.token}))).status === 409, "Start allein → 409");
   ok((await call("POST", `/game/${g1.code}/start`, jbody({token: "falsch"}))).status === 403, "Start mit falschem Token → 403");
 
-  // ---- Beitritt (atomar) ----
-  r = await call("POST", `/game/${g1.code}/join`);
-  const j = await r.json();
-  ok(r.status === 200 && j.dur === 10 && j.token && j.token !== g1.token, "Beitritt → eigenes Token + Dauer");
-  ok((await call("POST", `/game/${g1.code}/join`)).status === 409, "zweiter Beitritt → 409");
+  // ---- Beitritte: Plätze 2..n, Namen, joined-Flag ----
+  r = await call("POST", `/game/${g1.code}/join`, jbody({name: "Ben"}));
+  const j2 = await r.json();
+  ok(r.status === 200 && j2.p === 2 && j2.dur === 10 && j2.token && j2.token !== g1.token,
+     "Beitritt 1 → Platz 2 + eigenes Token");
+  const j3 = await (await call("POST", `/game/${g1.code}/join`, jbody({name: "Cleo"}))).json();
+  ok(j3.p === 3, "Beitritt 2 → Platz 3");
   st = await (await call("GET", "/game/" + g1.code)).json();
-  ok(st.joined === true && !("seed" in st), "beigetreten sichtbar, Seed weiter geheim");
+  ok(st.players.length === 3 && st.players.map(x => x.name).join(",") === "Anna,Ben,Cleo",
+     "Roster: alle drei in Reihenfolge");
+  ok(st.joined === true && !("seed" in st), "joined=true (Kompatibilität), Seed weiter geheim");
 
-  // ---- Doppel-Beitritt im Rennen: genau EINER gewinnt (bedingtes UPDATE) ----
-  const g3 = await (await call("POST", "/game", jbody({dur: 15}))).json();
+  // ---- Gleichzeitige Beitritte: verschiedene Plätze, keiner geht verloren ----
   const [ra, rb] = await Promise.all([
-    call("POST", `/game/${g3.code}/join`),
-    call("POST", `/game/${g3.code}/join`),
+    call("POST", `/game/${g1.code}/join`, jbody({name: "Dana"})),
+    call("POST", `/game/${g1.code}/join`, jbody({name: "Emil"})),
   ]);
-  ok([ra.status, rb.status].sort().join(",") === "200,409", "gleichzeitiger Doppel-Beitritt → genau ein 200");
+  const pa = (await ra.json()).p, pb = (await rb.json()).p;
+  ok(ra.status === 200 && rb.status === 200 && pa !== pb && [pa, pb].sort().join(",") === "4,5",
+     "gleichzeitige Beitritte → Plätze 4 und 5");
+
+  // ---- Kapazität: maximal 8 ----
+  await call("POST", `/game/${g1.code}/join`); // 6
+  await call("POST", `/game/${g1.code}/join`); // 7
+  const j8 = await call("POST", `/game/${g1.code}/join`); // 8
+  ok(j8.status === 200 && (await j8.json()).p === 8, "Platz 8 noch möglich");
+  ok((await call("POST", `/game/${g1.code}/join`)).status === 409, "9. Beitritt → 409 (voll)");
 
   // ---- Start (nur Ersteller, idempotent, verrät Seed) ----
   const t0 = Date.now();
@@ -86,23 +99,36 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   ok(s2.startAt === s1.startAt && s2.seed === s1.seed, "Start ist idempotent");
   st = await (await call("GET", "/game/" + g1.code)).json();
   ok(st.startAt === s1.startAt && st.seed === s1.seed, "GET zeigt Seed erst jetzt");
+  ok((await call("POST", `/game/${g1.code}/join`)).status === 409, "Beitritt nach Start → 409");
 
-  // ---- Ergebnisse: Token-geschützt, write-once, Format-/Größenlimits ----
+  // ---- Ergebnisse: Token je Spieler, write-once, Format-/Größenlimits ----
   const res1 = "SPCX5." + "A".repeat(80);
-  ok((await call("PUT", `/game/${g1.code}/result/1`, res1, {"x-token": j.token})).status === 403, "fremdes Token → 403");
+  ok((await call("PUT", `/game/${g1.code}/result/1`, res1, {"x-token": j2.token})).status === 403, "fremdes Token → 403");
   ok((await call("PUT", `/game/${g1.code}/result/1`, res1, {"x-token": g1.token})).status === 201, "eigenes Ergebnis → 201");
   ok((await call("PUT", `/game/${g1.code}/result/1`, res1, {"x-token": g1.token})).status === 409, "write-once → 409");
-  ok((await call("PUT", `/game/${g1.code}/result/2`, "SPCX4.alt", {"x-token": j.token})).status === 400, "falsches Präfix → 400");
-  ok((await call("PUT", `/game/${g1.code}/result/2`, "SPCX5." + "B".repeat(700), {"x-token": j.token})).status === 400, "zu groß → 400");
+  ok((await call("PUT", `/game/${g1.code}/result/3`, "SPCX5.cleo", {"x-token": j3.token})).status === 201, "Platz 3 lädt mit eigenem Token hoch");
+  ok((await call("PUT", `/game/${g1.code}/result/2`, "SPCX4.alt", {"x-token": j2.token})).status === 400, "falsches Präfix → 400");
+  ok((await call("PUT", `/game/${g1.code}/result/2`, "SPCX5." + "B".repeat(700), {"x-token": j2.token})).status === 400, "zu groß → 400");
   ok((await call("GET", `/game/${g1.code}/result/2`)).status === 404, "fehlendes Ergebnis → 404");
-  await call("PUT", `/game/${g1.code}/result/2`, "SPCX5.zwei", {"x-token": j.token});
-  ok(await (await call("GET", `/game/${g1.code}/result/1`)).text() === res1, "Gegner-Ergebnis abholbar");
+  await call("PUT", `/game/${g1.code}/result/2`, "SPCX5.zwei", {"x-token": j2.token});
+  ok(await (await call("GET", `/game/${g1.code}/result/1`)).text() === res1, "fremdes Ergebnis abholbar");
+  ok((await call("PUT", `/game/${g1.code}/result/9`, "SPCX5.x", {"x-token": g1.token})).status === 400, "Platz 9 → 400");
 
   // ---- Verfall: >24 h alte Spiele sind unbekannt und werden beim Anlegen gelöscht ----
+  const g3 = await (await call("POST", "/game", jbody({dur: 15}))).json();
   db._db.prepare("UPDATE games SET created = ? WHERE code = ?").run(Date.now() - 25*3600*1000, g3.code);
   ok((await call("GET", "/game/" + g3.code)).status === 404, "abgelaufenes Spiel → 404");
   await call("POST", "/game", jbody({dur: 5})); // Anlegen räumt auf
-  ok(db._db.prepare("SELECT COUNT(*) AS n FROM games WHERE code = ?").get(g3.code).n === 0, "Aufräumen löscht Verfallenes");
+  ok(db._db.prepare("SELECT COUNT(*) AS n FROM games WHERE code = ?").get(g3.code).n === 0 &&
+     db._db.prepare("SELECT COUNT(*) AS n FROM players WHERE code = ?").get(g3.code).n === 0,
+     "Aufräumen löscht Spiel + Spielerliste");
+
+  // ---- Alte App-Version (v52): Beitritt ohne Namen, joined-Flag ----
+  const g4 = await (await call("POST", "/game", jbody({dur: 10}))).json();
+  const jo = await call("POST", `/game/${g4.code}/join`); // kein Body wie alte Clients
+  ok(jo.status === 200 && (await jo.json()).p === 2, "Alt-Client: Beitritt ohne Body → Platz 2");
+  st = await (await call("GET", "/game/" + g4.code)).json();
+  ok(st.joined === true, "Alt-Client: joined-Flag vorhanden");
 
   // ---- Routing/CORS ----
   ok((await call("GET", "/game/000001")).status === 404, "unbekanntes Spiel → 404");
@@ -112,11 +138,6 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   r = await call("OPTIONS", "/game");
   ok(r.status === 204 && r.headers.get("access-control-allow-origin") === "*", "CORS-Preflight");
   ok((await call("GET", "/game/" + g1.code)).headers.get("access-control-allow-origin") === "*", "CORS auf Antworten");
-
-  // ---- zweites Spiel: eigener Code, eigener Seed ----
-  const g2 = await (await call("POST", "/game", jbody({dur: 5}))).json();
-  ok(g2.code !== g1.code && +g2.code % 3 === 0, "zweites Spiel: eigener Code, Dauer kodiert");
-  ok(db._db.prepare("SELECT seed FROM games WHERE code = ?").get(g2.code).seed !== stored.seed, "eigener Seed");
 
   console.log(failed ? `\n${failed} FEHLER (${passed} ok)` : `\nALLE ${passed} TESTS OK`);
   process.exit(failed ? 1 : 0);

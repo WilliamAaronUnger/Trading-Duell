@@ -41,7 +41,7 @@
       </div>
       <div class="dur-row" id="modeSub" style="display:none">
         <button class="dur mode active" data-mode="local">📱 Gleiches Gerät</button>
-        <button class="dur mode" data-mode="remote">📱📱 Zwei Geräte</button>
+        <button class="dur mode" data-mode="remote">📱📱 Mehrere Geräte</button>
       </div>
       <div class="mode-hint" id="modeHint"></div>
       <div class="dur-row" id="soloSub">
@@ -94,8 +94,9 @@
       deinen eigenen Rekord zu knacken.<br><br>
       <b style="color:var(--text)">👥 Mehrspieler · 📱 Gleiches Gerät:</b> Beide spielen nacheinander auf
       diesem Handy (Spieler 2 schaut bei Runde 1 nicht zu 🙈), danach wird automatisch verglichen.<br><br>
-      <b style="color:var(--text)">👥 Mehrspieler · 📱📱 Zwei Geräte:</b> Du legst ein Spiel an und bekommst
-      einen 6-stelligen Code. Der andere tippt ihn auf seinem Gerät ein – beide spielen exakt dasselbe Spiel.
+      <b style="color:var(--text)">👥 Mehrspieler · 📱📱 Mehrere Geräte:</b> Du legst ein Spiel an und bekommst
+      einen 6-stelligen Code. <b style="color:var(--text)">2 bis 8 Spieler</b> treten damit auf ihren Geräten
+      bei – alle spielen exakt dasselbe Spiel; bei mehr als zwei gibt's am Ende die Rangliste.
       Mit Internet wartet die Lobby auf deinen Gegner, ihr startet per Knopf exakt gleichzeitig
       und der Vergleich öffnet sich am Ende von selbst. ⏱️ Ohne Internet gilt der Minuten-Start
       und ihr tauscht die Ergebnis-Codes selbst aus.
@@ -293,6 +294,8 @@
         <div class="badge-row" id="resBadges2"></div>
       </div>
     </div>
+    <div id="rankBox" style="display:none"></div>
+    <button class="lobby-cancel" id="rankBack" style="display:none;margin-top:10px">← Zur Rangliste</button>
     <div class="ana" id="analysis"></div>
     <div id="cmpBox" style="display:none">
       <div class="code-err" id="cmpWait" style="display:none;color:var(--accent)">⏳ Warte auf das Ergebnis des Gegners – der Vergleich öffnet sich automatisch …</div>

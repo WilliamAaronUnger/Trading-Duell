@@ -1,5 +1,5 @@
-/* SPCX Trading-Duell – Cloudflare Worker (Online-Stufe 1, Speicher: D1)
-   Mini-API für: echte Lobby (Beitritt + Start durch den Ersteller), geheimen
+/* SPCX Trading-Duell – Cloudflare Worker (Online-Duell für 2–8 Spieler, Speicher: D1)
+   Mini-API für: echte Lobby (Beitritte + Start durch den Ersteller), geheimen
    Markt-Seed (wird erst mit fixiertem Start verraten → niemand kann vorspielen)
    und den automatischen Ergebnis-Austausch (write-once, Token-geschützt).
 
@@ -8,18 +8,18 @@
    - Im Worker unter Settings → Bindings → „D1 database" mit Variablenname DB verbinden.
    - Diesen Code unter „Edit code" einfügen, Deploy. (Tabellen legt der Code selbst an.)
 
-   Warum D1 statt KV: KV cached Lesezugriffe je Standort bis zu 60 s – zwei Geräte in
-   verschiedenen Netzen (WLAN/Mobilfunk) sahen Beitritt/Start/Ergebnis darum bis zu einer
-   Minute versetzt. D1 ist stark konsistent (jede Änderung sofort überall sichtbar) und
-   macht Beitritt/Ergebnis per bedingtem UPDATE/INSERT zusätzlich atomar (keine Races).
+   Warum D1 statt KV: KV cached Lesezugriffe je Standort bis zu 60 s – Geräte in
+   verschiedenen Netzen sahen Beitritt/Start/Ergebnis darum bis zu einer Minute versetzt.
+   D1 ist stark konsistent und macht Beitritt/Platzvergabe/Ergebnis atomar.
 
    Endpunkte (alle JSON außer result-GET; CORS offen, da öffentliche Spiel-API):
-     POST /game {dur:5|10|15}        → {code, dur, token}   Spiel anlegen (token = Ersteller)
-     POST /game/{code}/join          → {dur, token}         Beitritt (einmalig, atomar)
-     POST /game/{code}/start {token} → {startAt, seed}      nur Ersteller, idempotent
-     GET  /game/{code}               → {joined, dur, startAt, seed?}  (seed erst ab startAt)
-     PUT  /game/{code}/result/{p}    → 201                  Header x-token, Body SPCX5.…, write-once
-     GET  /game/{code}/result/{p}    → Text | 404
+     POST /game {dur:5|10|15, name?}   → {code, dur, token}        Spiel anlegen (Ersteller = Spieler 1)
+     POST /game/{code}/join {name?}    → {dur, token, p}           Beitritt (Platz 2–8, atomar; nach Start: 409)
+     POST /game/{code}/start {token}   → {startAt, seed}           nur Ersteller, ab 2 Spielern, idempotent
+     GET  /game/{code}                 → {dur, startAt, players:[{p,name}], joined, seed?}
+                                          (seed erst ab startAt; joined = ≥2 – Kompatibilität für alte App-Versionen)
+     PUT  /game/{code}/result/{p}      → 201                       Header x-token, Body SPCX5.…, write-once
+     GET  /game/{code}/result/{p}      → Text | 404
 
    Einträge älter als 24 h gelten als abgelaufen und werden beim Anlegen neuer Spiele
    gelöscht – räumt sich selbst auf. */
@@ -32,6 +32,7 @@ const CORS = {
 const TTL_MS = 24 * 3600 * 1000; // 24 h
 const DURS = [5, 10, 15];        // erlaubte Spieldauern (Minuten)
 const START_DELAY_MS = 10000;    // Puffer zwischen Start-Klick und Rundenbeginn
+const MAX_PLAYERS = 8;
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {status, headers: {...CORS, "content-type": "application/json"}});
@@ -40,14 +41,16 @@ const err = (status, msg) => json({error: msg}, status);
 const rndInt = max => { const b = new Uint32Array(1); crypto.getRandomValues(b); return b[0] % max; };
 const rndToken = () => { const b = new Uint8Array(12); crypto.getRandomValues(b);
   return [...b].map(x => x.toString(16).padStart(2, "0")).join(""); };
+const cleanName = n => (typeof n === "string" ? n : "").trim().slice(0, 14);
 
 /* Tabellen einmal je Isolate sicherstellen (CREATE IF NOT EXISTS ist billig & idempotent) */
 let schemaReady = false;
 async function ensureSchema(db){
   if(schemaReady) return;
   await db.prepare(`CREATE TABLE IF NOT EXISTS games(
-    code TEXT PRIMARY KEY, seed INTEGER, dur INTEGER, created INTEGER,
-    t1 TEXT, t2 TEXT, joined INTEGER DEFAULT 0, startAt INTEGER)`).run();
+    code TEXT PRIMARY KEY, seed INTEGER, dur INTEGER, created INTEGER, startAt INTEGER)`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS players(
+    code TEXT, p INTEGER, token TEXT, name TEXT, PRIMARY KEY(code, p))`).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS results(
     code TEXT, p INTEGER, body TEXT, created INTEGER, PRIMARY KEY(code, p))`).run();
   schemaReady = true;
@@ -70,15 +73,17 @@ async function route(req, db){
   if(parts[0] !== "game") return err(404, "not found");
   const now = Date.now();
 
-  // POST /game → Spiel anlegen; der geheime Seed bleibt beim Server
+  // POST /game → Spiel anlegen; der geheime Seed bleibt beim Server, Ersteller = Spieler 1
   if(parts.length === 1){
     if(req.method !== "POST") return err(405, "method");
     const body = await readJson(req);
     const durIdx = DURS.indexOf(body && body.dur);
     if(durIdx < 0) return err(400, "dur");
     // abgelaufene Spiele bei der Gelegenheit aufräumen
-    await db.prepare("DELETE FROM results WHERE created < ?").bind(now - TTL_MS).run();
-    await db.prepare("DELETE FROM games WHERE created < ?").bind(now - TTL_MS).run();
+    const cut = now - TTL_MS;
+    await db.prepare("DELETE FROM results WHERE created < ?").bind(cut).run();
+    await db.prepare("DELETE FROM players WHERE code IN (SELECT code FROM games WHERE created < ?)").bind(cut).run();
+    await db.prepare("DELETE FROM games WHERE created < ?").bind(cut).run();
     const seedBuf = new Uint32Array(1); crypto.getRandomValues(seedBuf);
     const t1 = rndToken();
     for(let i = 0; i < 8; i++){
@@ -86,10 +91,14 @@ async function route(req, db){
       let c = 100000 + rndInt(900000);
       c -= c % 3; c += durIdx; if(c > 999999) c -= 3;
       const r = await db.prepare(
-        `INSERT INTO games(code, seed, dur, created, t1) VALUES(?,?,?,?,?)
+        `INSERT INTO games(code, seed, dur, created) VALUES(?,?,?,?)
          ON CONFLICT(code) DO NOTHING`)
-        .bind(String(c), seedBuf[0], DURS[durIdx], now, t1).run();
-      if(r.meta.changes === 1) return json({code: String(c), dur: DURS[durIdx], token: t1}, 201);
+        .bind(String(c), seedBuf[0], DURS[durIdx], now).run();
+      if(r.meta.changes === 1){
+        await db.prepare("INSERT INTO players(code, p, token, name) VALUES(?,1,?,?)")
+                .bind(String(c), t1, cleanName(body.name) || "Spieler 1").run();
+        return json({code: String(c), dur: DURS[durIdx], token: t1}, 201);
+      }
     }
     return err(500, "no free code");
   }
@@ -100,31 +109,43 @@ async function route(req, db){
                     .bind(code, now - TTL_MS).first();
   if(!g) return err(404, "unknown game");
   const rest = parts.slice(2);
+  const playerToken = async p =>
+    (await db.prepare("SELECT token FROM players WHERE code = ? AND p = ?").bind(code, p).first() || {}).token;
 
   // GET /game/{code} → öffentlicher Zustand; seed ERST wenn der Start fixiert ist
   if(rest.length === 0){
     if(req.method !== "GET") return err(405, "method");
-    const out = {joined: !!g.joined, dur: g.dur, startAt: g.startAt};
+    const pl = (await db.prepare("SELECT p, name FROM players WHERE code = ? ORDER BY p").bind(code).all()).results;
+    const out = {dur: g.dur, startAt: g.startAt, players: pl, joined: pl.length >= 2};
     if(g.startAt) out.seed = g.seed;
     return json(out);
   }
 
-  // Beitritt: bedingtes UPDATE = atomar, es gewinnt garantiert genau ein Beitritt
+  // Beitritt: nächsten freien Platz atomar belegen (PK-Konflikt → kurze Wiederholung)
   if(rest[0] === "join" && rest.length === 1){
     if(req.method !== "POST") return err(405, "method");
-    const t2 = rndToken();
-    const r = await db.prepare("UPDATE games SET joined = 1, t2 = ? WHERE code = ? AND joined = 0")
-                      .bind(t2, code).run();
-    if(r.meta.changes !== 1) return err(409, "already joined");
-    return json({dur: g.dur, token: t2});
+    if(g.startAt) return err(409, "started"); // nach dem Start kommt niemand mehr rein
+    const body = await readJson(req);
+    const tok = rndToken();
+    for(let i = 0; i < 3; i++){
+      const nxt = (await db.prepare("SELECT COALESCE(MAX(p),1)+1 AS p FROM players WHERE code = ?")
+                           .bind(code).first()).p;
+      if(nxt > MAX_PLAYERS) return err(409, "full");
+      const r = await db.prepare(
+        `INSERT INTO players(code, p, token, name) VALUES(?,?,?,?) ON CONFLICT(code, p) DO NOTHING`)
+        .bind(code, nxt, tok, cleanName(body && body.name) || ("Spieler " + nxt)).run();
+      if(r.meta.changes === 1) return json({dur: g.dur, token: tok, p: nxt});
+    }
+    return err(409, "busy");
   }
 
-  // Nur der Ersteller startet; bedingtes UPDATE hält es idempotent und race-frei
+  // Nur der Ersteller (Spieler 1) startet, ab 2 Spielern; idempotent und race-frei
   if(rest[0] === "start" && rest.length === 1){
     if(req.method !== "POST") return err(405, "method");
     const body = await readJson(req);
-    if(!body || body.token !== g.t1) return err(403, "token");
-    if(!g.joined) return err(409, "not joined");
+    if(!body || body.token !== await playerToken(1)) return err(403, "token");
+    const n = (await db.prepare("SELECT COUNT(*) AS n FROM players WHERE code = ?").bind(code).first()).n;
+    if(n < 2) return err(409, "not joined");
     await db.prepare("UPDATE games SET startAt = ? WHERE code = ? AND startAt IS NULL")
             .bind(now + START_DELAY_MS, code).run();
     const cur = await db.prepare("SELECT startAt, seed FROM games WHERE code = ?").bind(code).first();
@@ -132,23 +153,22 @@ async function route(req, db){
   }
 
   if(rest[0] === "result" && rest.length === 2){
-    const p = rest[1];
-    if(p !== "1" && p !== "2") return err(400, "player");
+    const p = +rest[1];
+    if(!Number.isInteger(p) || p < 1 || p > MAX_PLAYERS) return err(400, "player");
     if(req.method === "GET"){
-      const r = await db.prepare("SELECT body FROM results WHERE code = ? AND p = ?")
-                        .bind(code, +p).first();
+      const r = await db.prepare("SELECT body FROM results WHERE code = ? AND p = ?").bind(code, p).first();
       return r ? new Response(r.body, {status: 200, headers: {...CORS, "content-type": "text/plain"}})
                : err(404, "no result");
     }
     if(req.method === "PUT"){
-      if(req.headers.get("x-token") !== (p === "1" ? g.t1 : g.t2)) return err(403, "token");
+      const tok = await playerToken(p);
+      if(!tok || req.headers.get("x-token") !== tok) return err(403, "token");
       const body = (await req.text()).trim();
       if(body.length > 600 || !body.startsWith("SPCX5.")) return err(400, "payload");
       // INSERT mit Primärschlüssel(code,p) = write-once, atomar
       const r = await db.prepare(
-        `INSERT INTO results(code, p, body, created) VALUES(?,?,?,?)
-         ON CONFLICT(code, p) DO NOTHING`)
-        .bind(code, +p, body, now).run();
+        `INSERT INTO results(code, p, body, created) VALUES(?,?,?,?) ON CONFLICT(code, p) DO NOTHING`)
+        .bind(code, p, body, now).run();
       if(r.meta.changes !== 1) return err(409, "write-once");
       return json({ok: true}, 201);
     }

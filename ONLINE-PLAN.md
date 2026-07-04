@@ -1,4 +1,4 @@
-# Plan: Online-Stufe 1 — Cloudflare Worker (Auto-Ergebnisvergleich + echte Lobby + Geheim-Seed)
+# Plan: Online-Duell — Cloudflare Worker (echte Lobby + Geheim-Seed + Auto-Vergleich, 2–8 Spieler)
 
 Status: **Stufe 1 komplett umgesetzt** (Speicher inzwischen **D1 statt KV**: KV cached
 Lesezugriffe je Standort bis zu 60 s → Geräte in verschiedenen Netzen sahen Beitritt/Start
@@ -7,7 +7,10 @@ Lesezugriffe je Standort bis zu 60 s → Geräte in verschiedenen Netzen sahen B
 der CSP eingetragen), Client integriert (echte Lobby, Geheim-Seed, Auto-Ergebnisvergleich,
 `SPCX5`-Payload mit Seed-Prüfung, stiller Offline-Fallback). Verifiziert per Node:
 `worker.test.js` 33/33 und Zwei-Client-Ende-zu-Ende-Simulation gegen den echten Handler
-(19 Checks). Gerätetest mit zwei Geräten bestanden (Juli 2026). Offen: nur noch die späteren Stufen (Live-P&L …).
+(19 Checks). Gerätetest mit zwei Geräten bestanden (Juli 2026). Erweitert auf **2–8 Spieler** (Spielerliste
+statt fester Slots, atomare Platzvergabe, kein Beitritt nach Start; ab 3 Spielern Rangliste im
+Ergebnis, Detailvergleich je Mitspieler antippbar; 2er-Duell und Offline-Pfad unverändert).
+Offen: nur noch die späteren Stufen (Live-P&L …).
 Evaluation & Begründung der Backend-Wahl: siehe `IDEAS.md` (Abschnitt 🌐).
 
 ## Ziel

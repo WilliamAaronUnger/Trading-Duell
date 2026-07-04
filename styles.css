@@ -238,6 +238,16 @@
   .modal .sub{font-size:14px;color:var(--muted);margin-bottom:16px;line-height:1.5}
   .handover-pnl{font-family:var(--mono);font-size:26px;font-weight:800;margin:10px 0 4px}
   .res-row{display:flex;gap:10px}
+  /* Mehrspieler-Rangliste (3–8 Spieler) */
+  #rankBox{display:flex;flex-direction:column;gap:6px;margin:6px 0 4px}
+  .rank-row{display:flex;align-items:center;gap:10px;padding:10px 12px;text-align:left;
+            border:1px solid var(--line);border-radius:10px;background:var(--panel-2)}
+  .rank-row.me{border-color:var(--accent);background:#1C2440}
+  .rank-row.tap{cursor:pointer}
+  .rank-row.tap:hover{border-color:var(--accent)}
+  .rank-pos{flex:0 0 34px;font-size:16px}
+  .rank-name{flex:1;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rank-pnl{font-family:var(--mono);font-weight:700}
   .res-card{flex:1;border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel-2)}
   .res-card.win{border-color:var(--accent);background:#1C2440}
   .res-name{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;justify-content:center}

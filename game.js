@@ -656,19 +656,21 @@ $("startBtn").onclick = async () => {
         onlineGame = {code: own.code, token: own.token, p: own.p, seed: null};
         durationMin = own.dur;
       }else try{
-        const j = await apiJson("/game/" + raw + "/join", {method:"POST"});
-        onlineGame = {code: raw, token: j.token, p: 2, seed: null};
+        const j = await apiJson("/game/" + raw + "/join",
+                                {method:"POST", body: JSON.stringify({name: $("name1").value.trim()})});
+        onlineGame = {code: raw, token: j.token, p: j.p || 2, seed: null};
         durationMin = j.dur; // die verbindliche Dauer kennt der Server
       }catch(e){
         if(String(e && e.message).includes("409")){
-          $("codeErr").textContent = "Diesem Online-Spiel ist schon jemand beigetreten.";
+          $("codeErr").textContent = "Beitritt nicht möglich – Spiel ist voll oder schon gestartet.";
           return;
         }
         // 404/Netzfehler: Offline-Duell wie bisher (Code = Seed)
       }
     }else{
       try{
-        const c = await apiJson("/game", {method:"POST", body: JSON.stringify({dur: durationMin})});
+        const c = await apiJson("/game", {method:"POST",
+                                body: JSON.stringify({dur: durationMin, name: $("name1").value.trim()})});
         onlineGame = {code: c.code, token: c.token, p: 1, seed: null};
         gameCode = +c.code;
       }catch(e){
@@ -728,12 +730,12 @@ function openLobby(joined){
     startAt = 0;
     $("lobbySub").innerHTML = joined
       ? "Beigetreten ✓ – exakt dasselbe Spiel, gleiche Kurse, gleiche News."
-      : "Code oder QR ans andere Gerät – sobald dein Gegner beitritt, kannst du starten.";
+      : "Code oder QR an die Mitspieler – bis zu 8 können beitreten; du startest, sobald alle da sind.";
     $("lobbyStartRow").style.display = "none";
     $("lobbyOpp").style.display = "";
     $("lobbyOpp").textContent = joined
       ? "Warte auf den Start durch den Ersteller …"
-      : "Gegner: noch nicht beigetreten …";
+      : "Noch niemand beigetreten …";
     lobbyTimer = setInterval(pollLobby, 1500);
     pollLobby();
   }else{
@@ -842,10 +844,19 @@ async function pollLobby(){
     }
     return;
   }
+  if(st.players && st.players.length) onlineGame.players = st.players; // Roster fürs Ergebnis-Sammeln
   if(st.startAt){ armOnlineStart(st.startAt, st.seed); return; }
-  if(onlineGame.p === 1 && st.joined){
-    $("lobbyOpp").textContent = "Gegner beigetreten ✓";
-    $("lobbyStartBtn").style.display = "";
+  const names = (st.players || []).map(x => x.name);
+  if(onlineGame.p === 1){
+    if(names.length >= 2){
+      $("lobbyOpp").textContent = "Dabei (" + names.length + "): " + names.join(", ");
+      const b = $("lobbyStartBtn");
+      b.style.display = "";
+      b.textContent = "▶️ Jetzt starten (" + names.length + " Spieler)";
+    }
+  }else if(names.length){
+    $("lobbyOpp").textContent = "Dabei (" + names.length + "): " + names.join(", ") +
+                                " — der Ersteller startet gleich …";
   }
 }
 $("lobbyStartBtn").onclick = async function(){
@@ -876,8 +887,9 @@ function armOnlineStart(at, seed){
   updateLobby();
 }
 
-/* Nach Rundenende: eigenes Ergebnis hochladen (write-once; 409 nach Resume ist ok)
-   und auf das des Gegners pollen → der Vergleich öffnet sich von selbst. */
+/* Nach Rundenende: eigenes Ergebnis hochladen (write-once; 409 nach Resume ist ok).
+   Bei 2 Spielern öffnet sich der klassische Duell-Vergleich von selbst, ab 3 Spielern
+   die Rangliste, die sich füllt, sobald die anderen fertig sind. */
 async function onlineShareResult(p){
   if(!onlineGame || onlineGame.seed == null) return;
   $("cmpWait").style.display = "";
@@ -885,7 +897,91 @@ async function onlineShareResult(p){
     await api("/game/" + onlineGame.code + "/result/" + onlineGame.p,
               {method: "PUT", body: packResult(p), headers: {"x-token": onlineGame.token}});
   }catch(e){ /* 409 = schon hochgeladen, Netzfehler = manueller Austausch bleibt */ }
+  // Verbindliches Roster holen (falls kurz vor dem Start noch jemand dazukam)
+  try{
+    const st = await apiJson("/game/" + onlineGame.code);
+    if(st.players && st.players.length) onlineGame.players = st.players;
+  }catch(e){}
+  if((onlineGame.players || []).length > 2) return startRanking(p);
   return pollOppResult();
+}
+
+/* ===== Mehrspieler-Rangliste (3–8 Spieler) ===== */
+let rankResults = null, rankTimer = null, rankGame = null;
+function startRanking(p){
+  rankGame = onlineGame;
+  rankResults = {};
+  const own = unpackResult(packResult(p)); // eigenes Ergebnis in derselben Form wie die fremden
+  own.self = true;
+  rankResults[rankGame.p] = own;
+  $("cmpBox").style.display = "none"; // manueller 1:1-Austausch passt nicht zur Rangliste
+  showRankView();
+  renderRanking();
+  return pollRankResults();
+}
+function showRankView(){
+  $("resTitle").textContent = "Rangliste";
+  document.querySelector(".res-row").style.display = "none";
+  $("analysis").style.display = "none";
+  $("rankBack").style.display = "none";
+  $("rankBox").style.display = "";
+}
+function renderRanking(){
+  const roster = rankGame.players || [];
+  const rows = roster.map(pl => ({p: pl.p, name: pl.name, res: rankResults[pl.p] || null}))
+    .sort((a, b) => (b.res ? b.res.result.pnl : -Infinity) - (a.res ? a.res.result.pnl : -Infinity));
+  const done = rows.filter(r => r.res).length;
+  $("resSub").textContent = done >= roster.length
+    ? "Alle Ergebnisse da – identischer Markt für alle."
+    : done + " von " + roster.length + " Ergebnissen da – der Rest erscheint automatisch …";
+  let html = "";
+  rows.forEach((r, i) => {
+    const pos = r.res ? (i === 0 ? "👑" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + ".") : "⏳";
+    const pnl = r.res
+      ? `<span style="color:${r.res.result.pnl >= 0 ? "var(--up)" : "var(--down)"}">${sgn(r.res.result.pnl)}</span>`
+      : '<span style="color:var(--muted);font-weight:400">spielt noch …</span>';
+    html += `<div class="rank-row${r.res && !r.res.self ? " tap" : ""}${r.res && r.res.self ? " me" : ""}" data-rp="${r.p}">
+      <span class="rank-pos">${pos}</span>
+      <span class="rank-name">${esc(r.name)}${r.res && r.res.self ? " (du)" : ""}</span>
+      <span class="rank-pnl">${pnl}</span></div>`;
+  });
+  $("rankBox").innerHTML = html;
+  // Fertige Mitspieler antippen → gewohnter Zwei-Spalten-Vergleich
+  $("rankBox").querySelectorAll(".rank-row.tap").forEach(row => {
+    row.onclick = () => showRankDetail(+row.dataset.rp);
+  });
+}
+function showRankDetail(p){
+  const o = rankResults && rankResults[p];
+  if(!o) return;
+  $("rankBox").style.display = "none";
+  document.querySelector(".res-row").style.display = "";
+  $("analysis").style.display = "";
+  renderCompare(soloP, o);
+  $("resTitle").textContent = "Vergleich mit " + o.name;
+  $("rankBack").style.display = "";
+}
+$("rankBack").onclick = () => { showRankView(); renderRanking(); };
+/* Fehlende Ergebnisse einsammeln (~3 s Takt, 20-Min-Deckel) und die Liste füllen */
+function pollRankResults(){
+  clearTimeout(rankTimer);
+  const og = rankGame, deadline = Date.now() + 20*60000;
+  const tick = async () => {
+    if(onlineGame !== og || Date.now() > deadline) return;
+    const roster = og.players || [];
+    for(const pl of roster){
+      if(rankResults[pl.p]) continue;
+      try{
+        const txt = await (await api("/game/" + og.code + "/result/" + pl.p)).text();
+        const o = unpackResult(txt);
+        if(o && !o.wrongGame && (o.seed === undefined || (o.seed >>> 0) === og.seed)) rankResults[pl.p] = o;
+      }catch(e){ /* 404: spielt noch */ }
+    }
+    renderRanking();
+    if(roster.every(pl => rankResults[pl.p])) return; // vollständig
+    rankTimer = setTimeout(tick, 3000);
+  };
+  return tick();
 }
 let oppTimer = null;
 function pollOppResult(){
@@ -2098,6 +2194,11 @@ function runStatsCompare(entry, oppRaw, errEl){
     errEl.textContent = "Anderer Markt – dieses Ergebnis passt nicht zu deinem Spiel."; return false;
   }
   errEl.textContent = "";
+  // Ansicht sicher auf den klassischen Zwei-Spalten-Vergleich stellen
+  rankGame = null; clearTimeout(rankTimer);
+  $("rankBox").style.display = "none"; $("rankBack").style.display = "none";
+  document.querySelector(".res-row").style.display = "";
+  $("analysis").style.display = "";
   // Markt des Eintrags deterministisch rekonstruieren → Analyse/Benchmark stimmen
   sandbox = false; gameCode = gc; durationMin = entry.durationMin;
   marketSeed = (me.seed !== undefined && me.seed !== (gc >>> 0)) ? me.seed : null;
@@ -2154,15 +2255,24 @@ function showResultSolo(p){
   $("shareBtn").textContent = "📤 Mein Ergebnis teilen";
   $("cmpIn").value = ""; $("cmpErr").textContent = "";
   $("cmpWait").style.display = "none";
+  // Ansicht auf den klassischen Zustand zurücksetzen (falls zuvor eine Rangliste offen war)
+  rankGame = null; clearTimeout(rankTimer);
+  $("rankBox").style.display = "none"; $("rankBack").style.display = "none";
+  document.querySelector(".res-row").style.display = "";
+  $("analysis").style.display = "";
   $("resCode").textContent = String(gameCode).padStart(6,"0");
   $("rematchBtn").textContent = "Neues Spiel";
   $("overlay").classList.add("show");
-  // Online-Duell: Ergebnis hochladen und auf den Gegner warten → Vergleich öffnet sich selbst
+  // Online-Duell: Ergebnis hochladen; 2 Spieler → Auto-Vergleich, 3+ → Rangliste
   if(!solo && !sandbox && onlineGame) onlineShareResult(p);
 }
 
 function showResult(){
   clearSnapshot(); // Duell entschieden – Snapshot entfernen
+  rankGame = null; clearTimeout(rankTimer); // falls zuvor eine Online-Rangliste offen war
+  $("rankBox").style.display = "none"; $("rankBack").style.display = "none";
+  document.querySelector(".res-row").style.display = "";
+  $("analysis").style.display = "";
   $("resCard2").style.display = "";
   $("cmpBox").style.display = "none";
   $("rematchBtn").textContent = "Revanche";

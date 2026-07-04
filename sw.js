@@ -1,5 +1,5 @@
 /* SPCX Trading-Duell – Service Worker (offline-fähig) */
-const CACHE = "spcx-duell-v49";
+const CACHE = "spcx-duell-v50";
 const FILES = [
   "./",
   "./index.html",
@@ -27,10 +27,12 @@ self.addEventListener("activate", e => {
 });
 
 /* Netzwerk zuerst, Cache als Fallback – so kommen Updates an, offline läuft's trotzdem.
+   cache:"no-cache": beim Server revalidieren statt bis zu 10 Min alten HTTP-Cache zu
+   akzeptieren (GitHub Pages max-age) – 304-Antworten bleiben billig, Updates kommen sofort.
    ignoreSearch: Teil-Links (?join=…/?vs=…) treffen offline die gecachte Seite. */
 self.addEventListener("fetch", e => {
   e.respondWith(
-    fetch(e.request).then(res => {
+    fetch(e.request, {cache:"no-cache"}).then(res => {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(e.request, copy));
       return res;

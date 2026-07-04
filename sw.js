@@ -1,5 +1,5 @@
 /* SPCX Trading-Duell – Service Worker (offline-fähig) */
-const CACHE = "spcx-duell-v45";
+const CACHE = "spcx-duell-v46";
 const FILES = [
   "./",
   "./index.html",
@@ -24,13 +24,14 @@ self.addEventListener("activate", e => {
   );
 });
 
-/* Netzwerk zuerst, Cache als Fallback – so kommen Updates an, offline läuft's trotzdem */
+/* Netzwerk zuerst, Cache als Fallback – so kommen Updates an, offline läuft's trotzdem.
+   ignoreSearch: Teil-Links (?join=…/?vs=…) treffen offline die gecachte Seite. */
 self.addEventListener("fetch", e => {
   e.respondWith(
     fetch(e.request).then(res => {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(e.request, copy));
       return res;
-    }).catch(() => caches.match(e.request))
+    }).catch(() => caches.match(e.request, {ignoreSearch:true}))
   );
 });

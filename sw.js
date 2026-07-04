@@ -1,10 +1,11 @@
 /* SPCX Trading-Duell – Service Worker (offline-fähig) */
-const CACHE = "spcx-duell-v47";
+const CACHE = "spcx-duell-v48";
 const FILES = [
   "./",
   "./index.html",
   "./styles.css",
   "./qr.js",
+  "./jsqr.js",
   "./data.js",
   "./game.js",
   "./manifest.json",

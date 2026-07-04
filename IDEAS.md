@@ -48,8 +48,9 @@ ist bewusst „opt-in". Denkbar als weitere Stufe in der Einzelspieler-/Modus-Au
 
 ## ✅ Umgesetzt (nicht mehr offen)
 
-- **QR-Code in der Lobby + Scan-Button** (v47): Eigener abhängigkeitsfreier QR-Encoder
+- **QR-Code in der Lobby + Scan-Button** (v47/v48): Eigener abhängigkeitsfreier QR-Encoder
   (`qr.js`, Byte-Modus, Versionen 1–10, EC-Level M, per Round-Trip gegen einen QR-Decoder
   verifiziert) zeigt den `?join=<code>`-Link als QR unter „Einladung teilen". Start-Screen hat
-  einen „📷 Einladung scannen"-Button (`BarcodeDetector`, wo verfügbar; sonst Hinweis auf die
-  native Kamera-App, die den QR-Link ohnehin öffnet). Rein clientseitig, fairness-neutral.
+  einen „📷 Einladung scannen"-Button: nativer `BarcodeDetector`, wo verfügbar; sonst
+  jsQR-Fallback (`jsqr.js`, vendored, lazy nachgeladen) — funktioniert damit auch in
+  iOS Safari. Rein clientseitig, fairness-neutral.

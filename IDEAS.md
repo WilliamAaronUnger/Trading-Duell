@@ -104,3 +104,48 @@ speichert dann den vollen Seed statt nur des Codes. Optional: „Zufälliger Geg
   einen „📷 Einladung scannen"-Button: nativer `BarcodeDetector`, wo verfügbar; sonst
   jsQR-Fallback (`jsqr.js`, vendored, lazy nachgeladen) — funktioniert damit auch in
   iOS Safari. Rein clientseitig, fairness-neutral.
+
+---
+
+## 🖥️ Leinwand-/Moderator-Ansicht („Admin Mode") — A9
+
+- *Was:* Eine Spielleiter-Seite, von der aus man ein Online-Spiel **anlegt, ohne selbst
+  mitzuspielen**, und die dann als Großbild-Ansicht (Beamer, TV, Monitor) dient. Ideen für
+  die Ausbaustufen:
+  - **Vor dem Spiel:** riesiger QR + Code, Live-Liste der Beitretenden, Start-Knopf,
+    großer gemeinsamer Countdown.
+  - **Während der Runde:** Chart-Wand (alle 12 Werte im Raster), großes Ticker-/News-Band,
+    Breaking-News als Vollbild-Einblendung, **Live-Rangliste** der Spieler (setzt A1 voraus),
+    Restzeit groß.
+  - **Nach der Runde:** Siegerehrung (Podium, Krone, Konfetti), Detailvergleiche durchblättern.
+  - Später: Moderations-Spielereien (z. B. „nächste News anteasern"), Turnier-Steuerung.
+- *Technik:* Fast alles existiert schon — Markt rendert lokal aus dem Seed (die Seite ist
+  praktisch ein Zuschauer mit Ersteller-Token), Roster/Start liefert der Worker. Es fehlt:
+  eine **Host-Rolle ohne Spieler-Slot** im Worker (Ersteller-Token, aber Platz 1 bleibt
+  spielbar bzw. Host zählt nicht in die 8), plus eine eigene schlanke Seite
+  (z. B. `wall.html`, eigenes CSS-Grid, nutzt `qr.js`/`data.js`/Teile von `game.js`).
+  Wichtig: neue Datei → `sw.js`-FILES + CACHE-Bump; Fairness unberührt (reine Anzeige).
+- *Einstieg:* Stufe 1 = Anlegen + QR + Roster + Countdown + Chart-Wand; Rangliste kommt
+  mit A1 dazu.
+
+## ⚠️ Dynamischer Online-Markt (Kurse reagieren auf Spielerverhalten) — A10
+
+- *Idee:* Kaufen viele Spieler dieselbe Aktie, steigt ihr Kurs (und umgekehrt) — der Markt
+  „lebt". Das kollidiert bewusst mit dem Kern-Design (vorab generierter, unbeeinflussbarer
+  Markt) und geht daher **nur als Online-Sondermodus**, klar getrennt vom Standard.
+- *Architektur-Skizze (fairness-erhaltend):*
+  - Basis bleibt der geheime Seed-Markt. Obendrauf liegt eine **gemeinsame Überlagerung**:
+    Clients melden Trades an den Worker; der aggregiert je Symbol den **Netto-Orderdruck in
+    festen Zeitfenstern** (z. B. 5 s, verankert am wall-clock-Start) und publiziert das
+    Fenster-Journal. Jeder Client wendet daraus dieselbe deterministische Impact-Funktion
+    auf die Kurse an (gedeckelt, abklingend).
+  - **Fairness durch Symmetrie:** alle sehen zu jedem anchored Tick denselben (Basis ×
+    Overlay)-Kurs; das Journal ist append-only und für alle gleich. Determinismus wird zu
+    „event-sourced": Resume/Nachzügler spielen das Journal nach.
+- *Ehrliche Risiken (deshalb „groß"):* Latenz (Overlay kommt Sekunden verzögert → Kurs
+  „ruckelt nach"), Manipulation (Trade-Spam bewegt den Markt → Impact-Deckel, Rate-Limit,
+  Volumen normalisieren), Ergebnis-Verifikation (P&L hängt jetzt am Journal → Payload muss
+  Journal-Hash tragen), deutlich mehr Worker-Last, und der Markt ist nicht mehr vorab
+  „komplett", was Snapshot/Replay/Analyse-Benchmark berührt.
+- *Empfehlung:* Nach A1 evaluieren — A1 baut genau die Trade-/Poll-Pfade, auf denen das
+  aufsetzt. Erst als Prototyp im Privatkreis, Impact anfangs sehr klein tunen.

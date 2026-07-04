@@ -8,6 +8,19 @@ Evaluationen), `ONLINE-PLAN.md` (Architektur der Online-Schicht), `CLAUDE.md` (C
 
 ---
 
+## 📍 Wo wir stehen (Lesezeichen, zuletzt Juli 2026)
+
+- **B1 erledigt** (Tests im Repo, CI nur manuell über Actions → „Tests" → Run workflow).
+- **B2 wartet auf einen Handgriff des Betreibers:** Database-ID der D1-Datenbank in
+  `wrangler.jsonc` eintragen (Platzhalter markiert), danach im Cloudflare-Dashboard den
+  Worker per „Settings → Build" mit dem GitHub-Repo verbinden (Build command leer,
+  Deploy `npx wrangler deploy`, Branch-Previews AUS).
+- **Danach als Nächstes: A1 (Live-Rennen).**
+- Neu aufgenommen: A9 (Leinwand-/Moderator-Ansicht) und A10 (dynamischer Online-Markt)
+  — Details und Bewertung in `IDEAS.md`.
+
+---
+
 ## Spur A — Features
 
 ### A1. Live-Rennen (nächster großer Spielspaß-Gewinn)
@@ -55,6 +68,23 @@ Duell zu dritt am Tisch. *Aufwand: klein, setzt A1 voraus.*
 - **Achievements**: dauerhafte Erfolge über Spiele hinweg („10 Duelle gewonnen", „+20 % in
   einer Runde"), lokal gespeichert — verlängert die Motivation ohne Server.
 - Später: Elo/Rangpunkte & Saisons, Turnier-Modus (mehrere Seeds nacheinander, Gesamtwertung).
+
+### A9. Leinwand-/Moderator-Ansicht („Admin Mode") 🖥️
+Eine eigene Seite für Spielleiter: Spiel anlegen (ohne selbst mitzuspielen), riesiger QR +
+Code für den Beitritt, Live-Roster, gemeinsamer Countdown — und während der Runde eine
+Großbild-Ansicht für Beamer/Monitor: alle Märkte als Chart-Wand, großes News-Band,
+Live-Rangliste (setzt A1 voraus), am Ende Siegerehrung. Perfekt für Schulklassen, Familien-
+abende, Events. Details/Bausteine: `IDEAS.md`. *Aufwand: mittel (2–3 Sessions), technisch
+gut vorbereitet durch Mehrspieler + Geheim-Seed; braucht eine „Host ohne Spieler-Slot"-Rolle
+im Worker.*
+
+### A10. Dynamischer Online-Markt (Kurse reagieren auf die Spieler) ⚠️
+Reizvollste und zugleich heikelste Idee — sie berührt den Fairness-Kern (vorab generierter
+Markt). Machbar als **Online-Sondermodus** über eine server-vermittelte, für ALLE identische
+Überlagerung (Netto-Orderdruck → gemeinsamer Preis-Impact). Fairness bliebe durch Symmetrie
+erhalten, aber Determinismus/Resume/Ergebnis-Verifikation werden deutlich komplexer.
+Ausführliche Evaluation mit Architektur-Skizze und Risiken: `IDEAS.md`. *Aufwand: groß;
+erst nach A1 sinnvoll (teilt sich die Trade-/Poll-Infrastruktur).*
 
 ### A8. Reichweite (wenn das Spiel „fertig" wirkt)
 Englische Übersetzung (alle Texte liegen zentral in `data.js`/wenigen UI-Stellen — i18n-Map

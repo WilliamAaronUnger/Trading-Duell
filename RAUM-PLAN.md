@@ -1,6 +1,9 @@
 # Plan: Online-Raum (3. Modus) + Leinwand-Rolle
 
-Status: **geplant, Entscheidungen fixiert (Juli 2026)** — Umbau in 3 Phasen, noch nicht begonnen.
+Status: **Phase 1 (Server v3) fertig** — worker.test.js 49/49 grün; liegt auf dem Feature-
+Branch und wird BEWUSST erst zusammen mit Phase 2 (Client) auf main gemerged, weil der
+Worker sich beim Merge automatisch deployt und App+Server zusammen wechseln müssen.
+e2e.test.js ist bis Phase 2 vorübergehend veraltet (testet noch die alte /game-Welt).
 Ersetzt konzeptionell die Revanche-Kette (A2) und den stillen Online-Fallback des
 „Mehrere Geräte"-Modus. Hintergrund/Evaluation: `IDEAS.md` (A9), `ROADMAP.md`.
 
@@ -29,7 +32,7 @@ Ersetzt konzeptionell die Revanche-Kette (A2) und den stillen Online-Fallback de
 8. **Rückbau:** A2-Revanche-UI + `/rematch`-Endpunkt entfallen („Nächste Runde" im Raum
    ersetzt sie); der Online-Zweig verschwindet aus dem „Mehrere Geräte"-Startpfad.
 
-## Phase 1 — Server (worker.js v3 + worker.test.js)
+## Phase 1 — Server (worker.js v3 + worker.test.js) — ✅ umgesetzt
 
 Tabellen: `rooms(code PK, created, lastActive, dur, curRound)`,
 `members(code, p, token, name, role, lastSeen, PK(code,p))`,

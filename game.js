@@ -388,11 +388,18 @@ document.querySelectorAll(".cap").forEach(b => b.onclick = () => {
   document.querySelectorAll(".cap").forEach(x => x.classList.toggle("active", x === b));
 });
 
+$("sbExpertToggle").onclick = function(){
+  sandboxExpert = !sandboxExpert;
+  this.classList.toggle("on", sandboxExpert);
+  this.querySelector(".opt-check").textContent = sandboxExpert ? "☑" : "☐";
+};
+
 function applySoloUI(){
   const solo = mode === "solo";
   $("soloSub").style.display  = solo ? "" : "none";
   $("soloHint").style.display = solo ? "" : "none";
   $("capField").style.display = (solo && sandbox) ? "" : "none";
+  $("expField").style.display = (solo && sandbox) ? "" : "none";
   $("durField").style.display = (solo && sandbox) ? "none" : "";
   $("soloHint").textContent   = sandbox
     ? "Freies Üben ohne Zeitdruck – kein Rekord-Eintrag."
@@ -491,7 +498,7 @@ function buildMarket(){
 }
 
 function newPlayer(name, color){
-  return {name, cash:START_CASH, pos:{}, color, result:null, pendingDiv:0,
+  return {name, cash:START_CASH, pos:{}, color, result:null, pendingDiv:0, orders:[],
           stats:{trades:0, buys:0, sells:0, shorts:0, volume:0, realized:0, best:null, worst:null,
                  allIns:0, newsTrades:0, tipTrades:0, bestPct:0, investedTicks:0, perSym:{},
                  peak:START_CASH, trough:START_CASH, maxDD:0, feesPaid:0, dividends:0, slip:0}};
@@ -1510,6 +1517,7 @@ function startRound(r){
     : "";
 
   buildWatch();
+  renderOrders(); // Experten-Order-Bereich ein-/ausblenden (je nach expert-Flag)
   $("startScreen").classList.remove("show");
   $("matchScreen").classList.add("show");
   window.scrollTo(0,0);
@@ -1668,6 +1676,81 @@ function skewNow(sym){
   return trs.length ? skewAt(trs, tickCount) : 0;
 }
 
+/* ====================== Experten-Modus: lokale Härten ======================
+   Rein deterministisch aus Marktdaten + eigenen Aktionen – laufen deshalb in
+   JEDEM Expert-Spiel identisch (Raum wie Sandbox), ohne Server-Beteiligung. */
+
+/* Geld-/Brief-Spanne: kleine Werte haben ein dünneres Buch (÷liq); direkt nach
+   einer News, die den Wert (oder den Gesamtmarkt) trifft, ist es ~30 s dreimal
+   so dünn – wer in die Panik hineinhandelt, zahlt extra. */
+function spreadOf(sym){
+  if(!expert) return 0;
+  let s = EXPERT_SPREAD_BASE / liqOf(sym);
+  for(const e of market.events){
+    if(e.ev.t !== sym && e.ev.t !== "ALL") continue;
+    const hit = e.tick + (e.mega ? MEGA_REACT_TICKS : REACT_TICKS);
+    if(tickCount >= hit && tickCount < hit + SPREAD_WIDE_TICKS){ s *= 3; break; }
+  }
+  return Math.min(s, 0.02);
+}
+
+/* Volatilitätsunterbrechung: nach einer Mega-Panik ist der betroffene Wert
+   (bei Marktpanik: alles) ~15 s vom Handel ausgesetzt – wie echte Circuit
+   Breaker. Wer den Crash nicht kommen sah, kommt nicht mehr raus. */
+function haltInfo(sym){
+  if(!expert) return null;
+  for(const e of market.events){
+    if(!e.mega || (e.ev.jump || 0) >= 0) continue;
+    if(e.ev.t !== sym && e.ev.t !== "ALL") continue;
+    const hit = e.tick + MEGA_REACT_TICKS;
+    if(tickCount >= hit && tickCount < hit + EXPERT_HALT_TICKS)
+      return {left: Math.ceil((hit + EXPERT_HALT_TICKS - tickCount) * TICK_MS / 1000)};
+  }
+  return null;
+}
+
+/* Vorgemerkte Limit-/Stop-Order ausführen (Auslöse-Prüfung macht processTick).
+   Bewusst schlicht: Kauf deckt Shorts zuerst ein, Verkauf nur für Longs. */
+function execPending(p, o){
+  if(haltInfo(o.sym)) return false;                    // Handelsstopp gilt auch für Orders
+  const spr = spreadOf(o.sym);
+  let px = price(o.sym);
+  const s = p.stats;
+  if(o.side === "buy"){
+    px *= 1 + spr / 2;
+    const pos = p.pos[o.sym];
+    const afford = Math.floor(p.cash / (px * (1 + feeRate(o.sym))));
+    const q = Math.min(o.qty, pos && pos.qty < 0 ? Math.min(-pos.qty, afford) : afford);
+    if(q < 1) return false;
+    const cost = q * px, fee = feeOf(cost, o.sym);
+    p.cash -= cost + fee; s.feesPaid += fee; s.trades++; s.buys++; s.volume += cost;
+    if(pos && pos.qty < 0){
+      noteClose(p, (pos.avg - px) * q, pos.avg * q);
+      pos.qty += q;
+      if(pos.qty === 0) delete p.pos[o.sym];
+      pushNews(o.sym, `📌 Order ausgeführt: ${q} × ${o.sym} eingedeckt @ ${fmt(px)}`, "up");
+    }else{
+      const lp = pos || {qty:0, avg:0};
+      lp.avg = (lp.avg * lp.qty + cost) / (lp.qty + q);
+      lp.qty += q;
+      p.pos[o.sym] = lp;
+      pushNews(o.sym, `📌 Order ausgeführt: ${q} × ${o.sym} gekauft @ ${fmt(px)}`, "up");
+    }
+    return true;
+  }
+  const pos = p.pos[o.sym];
+  if(!pos || pos.qty <= 0) return false;
+  px *= 1 - spr / 2;
+  const q = Math.min(o.qty, pos.qty);
+  const fee = feeOf(q * px, o.sym);
+  p.cash += q * px - fee; s.feesPaid += fee; s.trades++; s.sells++; s.volume += q * px;
+  noteClose(p, (px - pos.avg) * q, pos.avg * q);
+  pos.qty -= q;
+  if(pos.qty === 0) delete p.pos[o.sym];
+  pushNews(o.sym, `📌 Order ausgeführt: ${q} × ${o.sym} verkauft @ ${fmt(px)}`, "down");
+  return true;
+}
+
 /* Frische Blockorder in den News-Feed (anonym – wer war's?!) */
 function announceBlock(tr){
   const t = Math.min(tradeTick(tr.at), tickCount);
@@ -1698,8 +1781,9 @@ function insiderText(t){
    und (außerhalb des Catch-ups) als kurzer Toast sichtbar machen. */
 function payDividend(p, announce){
   const paid = p.pendingDiv || 0;
-  if(paid <= 0){ p.pendingDiv = 0; return; }
   p.pendingDiv = 0;
+  if(Math.abs(paid) < 0.005) return;
+  // Negativ = Experten-Modus: Short-Leihgebühr / ACT-Haltekosten fließen ab
   p.cash += paid;
   p.stats.dividends = (p.stats.dividends || 0) + paid;
   if(announce) showDivToast(paid);
@@ -1708,7 +1792,9 @@ let divToastTimer = null;
 function showDivToast(amt){
   const el = $("divToast");
   if(!el) return;
-  el.textContent = "💰 +" + fmt(amt) + " $ Dividende";
+  el.textContent = amt >= 0
+    ? "💰 +" + fmt(amt) + " $ Dividende"
+    : "💸 −" + fmt(-amt) + " $ Leih-/Haltekosten";
   el.classList.remove("show"); void el.offsetWidth; // Reflow → Animation neu starten
   el.classList.add("show");
   clearTimeout(divToastTimer);
@@ -1745,12 +1831,38 @@ function processTick(showPopup){
   }
   const p = players[round], s = p.stats;
 
+  // Experten-Modus: Handelsstopp ankündigen, sobald die Mega-Panik zuschlägt
+  if(expert) for(const e of market.events){
+    if(e.mega && (e.ev.jump || 0) < 0 && e.tick + MEGA_REACT_TICKS === tickCount){
+      pushNews(e.ev.t, "⛔ Volatilitätsunterbrechung: Handel für 15 Sekunden ausgesetzt!", "down");
+      lastNewsTick = tickCount;
+    }
+  }
+
+  // Experten-Modus: vorgemerkte Limit-/Stop-Orders prüfen und ausführen
+  if(expert && p.orders && p.orders.length){
+    let hit = false;
+    for(let i = p.orders.length - 1; i >= 0; i--){
+      const o = p.orders[i];
+      const cur = price(o.sym);
+      if(o.trig === "le" ? cur > o.px : cur < o.px) continue;
+      if(execPending(p, o)){ p.orders.splice(i, 1); hit = true; }
+      else if((o.dead = (o.dead || 0) + 1) > 30) p.orders.splice(i, 1); // dauerhaft unausführbar
+    }
+    if(hit){ renderOrders(); saveSnapshot("play"); }
+  }
+
   // Dividenden: Dividenden-Aktien (und der ETF) sammeln pro Tick einen kleinen Betrag
   // an; ausgezahlt wird sichtbar gebündelt alle ~20 s. Deterministisch (kein rnd()).
-  for(const [sym, pos] of Object.entries(p.pos))
-    if(pos.qty > 0 && isDividendSym(sym))
+  // Experten-Modus: Shorts ZAHLEN die Dividende (Leihgebühr, pos.qty < 0 → negativ),
+  // und der gehebelte ACT kostet Haltegebühr – „ACT ist zum Traden, nicht zum Parken".
+  for(const [sym, pos] of Object.entries(p.pos)){
+    if(isDividendSym(sym) && (pos.qty > 0 || expert))
       p.pendingDiv = (p.pendingDiv || 0) + pos.qty * price(sym) * divRate(sym) * TICK_SCALE;
-  if(p.pendingDiv > 0 && tickCount % DIV_PAYOUT === 0) payDividend(p, showPopup);
+    if(expert && sym === ETF2_SYM && pos.qty > 0)
+      p.pendingDiv = (p.pendingDiv || 0) - pos.qty * price(sym) * EXPERT_ACT_HOLD * TICK_SCALE;
+  }
+  if(p.pendingDiv && tickCount % DIV_PAYOUT === 0) payDividend(p, showPopup);
 
   // Statistik: investierte Zeit, Depot-Spitze/-Tief, max. Rücksetzer
   if(Object.keys(p.pos).length) s.investedTicks++;
@@ -1883,10 +1995,19 @@ function noteClose(p, profit, cost){
 function trade(side){
   if(over) return;
   const p = players[round];
+  const flash = $("flash");
+
+  // Experten-Modus: Volatilitätsunterbrechung – der Wert ist gerade nicht handelbar
+  const halt = haltInfo(selected);
+  if(halt){
+    flash.textContent = `⛔ Handel ausgesetzt (Volatilitätsunterbrechung) – noch ${halt.left} s.`;
+    flash.className = "flash err";
+    return;
+  }
+
   let px = price(selected);
   const px0 = px;
   const qty = curQty();
-  const flash = $("flash");
   const pos = p.pos[selected];
   let execQ = 0; // tatsächlich ausgeführte Stückzahl (für Slippage-Statistik/Meldung)
 
@@ -1901,6 +2022,10 @@ function trade(side){
       px = side === "buy" ? px * (1 + slip) : px * (1 - slip);
     }
   }
+
+  // Experten-Modus: Geld-/Briefkurs – kaufen leicht über, verkaufen leicht unter Kurs
+  const spr = spreadOf(selected);
+  if(spr) px = side === "buy" ? px * (1 + spr / 2) : px * (1 - spr / 2);
 
   if(side === "buy"){
     if(pos && pos.qty < 0){
@@ -1973,13 +2098,13 @@ function trade(side){
     flash.className = "flash ok";
   }
   // Fehler-Pfade kehren oben mit return zurück – hier war die Order erfolgreich
+  if(expert && execQ > 0 && px !== px0)
+    p.stats.slip = (p.stats.slip || 0) + Math.abs(px - px0) * execQ; // Spread + Market Impact
   if(blockVol && execQ > 0){
-    // Blockorder: Slippage verbuchen und (anonym) an den Raum melden – fire-and-forget,
-    // ein Fehlschlag (z. B. Rate-Limit) kostet nur die Markt-Spur, nie die Order selbst.
-    const p2 = players[round];
-    p2.stats.slip = (p2.stats.slip || 0) + Math.abs(px - px0) * execQ;
+    // Blockorder (anonym) an den Raum melden – fire-and-forget: ein Fehlschlag
+    // (z. B. Rate-Limit) kostet nur die Markt-Spur, nie die Order selbst.
     flash.textContent += " · 🐘 Blockorder (Market Impact)";
-    if(room && room.played)
+    if(mode === "room" && room && room.played)
       api("/room/" + room.code + "/round/" + room.played + "/trade",
           {method: "POST", body: JSON.stringify({sym: selected, side: side === "buy" ? "buy" : "sell",
             vol: Math.min(2, Math.max(0.1, Math.round(execQ * px / START_CASH * 10) / 10))}),
@@ -1988,6 +2113,64 @@ function trade(side){
   if(tutorial) tutOnTrade(side);
   saveSnapshot("play");
   renderAll();
+}
+
+/* ===== Experten-Modus: Limit-/Stop-Orders (vormerken, processTick führt aus) =====
+   Die Auslöserichtung ergibt sich aus Kurs vs. Zielkurs: Kauf unter dem Kurs =
+   Limit (den Rücksetzer abfischen), Kauf darüber = Stop (Ausbruch/Short-Deckel);
+   Verkauf über dem Kurs = Take-Profit, darunter = Stop-Loss. */
+function placeOrder(side){
+  if(!expert || over) return;
+  const p = players[round];
+  const flash = $("flash");
+  const pxIn = parseFloat(($("ordPx").value || "").replace(",", "."));
+  if(!isFinite(pxIn) || pxIn <= 0){
+    flash.textContent = "Bitte einen Zielkurs für die Order eingeben.";
+    flash.className = "flash err"; return;
+  }
+  p.orders = p.orders || [];
+  if(p.orders.length >= EXPERT_MAX_ORDERS){
+    flash.textContent = `Maximal ${EXPERT_MAX_ORDERS} offene Orders.`;
+    flash.className = "flash err"; return;
+  }
+  const cur = price(selected);
+  const q = qtyMode === "max"
+    ? (side === "buy"
+        ? Math.floor(p.cash / (pxIn * (1 + feeRate(selected))))
+        : Math.max(0, p.pos[selected] ? p.pos[selected].qty : 0))
+    : +qtyMode;
+  if(q < 1){
+    flash.textContent = side === "buy" ? "Dafür reicht das Bargeld nicht." : "Keine Stücke im Depot.";
+    flash.className = "flash err"; return;
+  }
+  const trig = side === "buy" ? (pxIn < cur ? "le" : "ge") : (pxIn > cur ? "ge" : "le");
+  p.orders.push({sym: selected, side, px: Math.round(pxIn * 100) / 100, qty: q, trig});
+  $("ordPx").value = "";
+  const kind = side === "buy" ? (trig === "le" ? "Limit-Kauf" : "Stop-Kauf")
+                              : (trig === "ge" ? "Take-Profit" : "Stop-Loss");
+  flash.textContent = `📌 ${kind}: ${q} × ${selected} ${trig === "le" ? "≤" : "≥"} ${fmt(pxIn)}`;
+  flash.className = "flash ok";
+  renderOrders();
+  saveSnapshot("play");
+}
+
+function renderOrders(){
+  const box = $("expertOrders");
+  if(!box) return;
+  const p = players && players[round];
+  box.style.display = expert && p ? "" : "none";
+  if(!expert || !p) return;
+  const list = p.orders || [];
+  $("ordList").innerHTML = list.length
+    ? list.map((o, i) =>
+        `<div class="ord-row"><span>${o.side === "buy" ? "🟢" : "🔴"} ${o.qty} × ${o.sym} ` +
+        `${o.trig === "le" ? "≤" : "≥"} ${fmt(o.px)}</span><button class="ord-x" data-i="${i}">✕</button></div>`).join("")
+    : "";
+  $("ordList").querySelectorAll(".ord-x").forEach(b => b.onclick = () => {
+    players[round].orders.splice(+b.dataset.i, 1);
+    renderOrders();
+    saveSnapshot("play");
+  });
 }
 
 /* Schlussauktion (Expert-Raum): Endbewertung zum fairen BASIS-Kurs, damit sich
@@ -2185,9 +2368,14 @@ function renderAll(){
   }else{
     $("orderInfo").textContent = `${qty} Stück ≈ ${fmt(qty*px)} · Short möglich: ${cap} Stk`;
   }
-  $("buyBtn").disabled = over || (isShort ? p.cash < px : qty*px > p.cash + 0.001);
-  $("sellBtn").disabled = over || held <= 0;
-  $("shortBtn").disabled = over || held > 0 || cap < 1;
+  // Experten-Modus: Volatilitätsunterbrechung sperrt den Handel im betroffenen Wert
+  const halted = haltInfo(selected);
+  $("orderInfo").innerHTML = halted
+    ? `<span style="color:var(--down);font-weight:700">⛔ Handel ausgesetzt – noch ${halted.left} s (Volatilitätsunterbrechung)</span>`
+    : $("orderInfo").textContent;
+  $("buyBtn").disabled = over || !!halted || (isShort ? p.cash < px : qty*px > p.cash + 0.001);
+  $("sellBtn").disabled = over || !!halted || held <= 0;
+  $("shortBtn").disabled = over || !!halted || held > 0 || cap < 1;
 
   // Depot
   $("cash").textContent = fmt(p.cash);
@@ -2204,6 +2392,10 @@ function renderAll(){
   if(divTot >= 0.005){
     divEl.innerHTML = `💰 Dividende kassiert: <b>+${fmt(p.stats.dividends || 0)}</b>` +
       `<span class="div-pending">(+${fmt(p.pendingDiv || 0)} läuft auf)</span>`;
+    divEl.style.display = "";
+  }else if(divTot <= -0.005){
+    // Experten-Modus: Short-Leihgebühr/ACT-Haltekosten überwiegen – Abfluss zeigen
+    divEl.innerHTML = `💸 Leih-/Haltekosten gezahlt: <b style="color:var(--down)">−${fmt(-divTot)}</b>`;
     divEl.style.display = "";
   }else{
     divEl.style.display = "none";
@@ -2605,7 +2797,10 @@ function buildAnalysis(list){
     ["Short-Orders",       p => p.stats.shorts],
     ["Handelsvolumen",     p => fmt(p.stats.volume)],
     ["Gebühren gezahlt",   p => (p.stats.feesPaid||0) < 0.005 ? "–" : `<span style="color:var(--down)">−${fmt(p.stats.feesPaid)}</span>`],
-    ["Dividenden",         p => (p.stats.dividends||0) < 0.005 ? "–" : `<span style="color:var(--up)">+${fmt(p.stats.dividends)}</span>`],
+    ["Dividenden",         p => Math.abs(p.stats.dividends||0) < 0.005 ? "–"
+                             : (p.stats.dividends > 0 ? `<span style="color:var(--up)">+${fmt(p.stats.dividends)}</span>`
+                                                      : `<span style="color:var(--down)">−${fmt(-p.stats.dividends)}</span>`)],
+    ["Spread & Impact",    p => (p.stats.slip||0) < 0.005 ? "–" : `<span style="color:var(--down)">−${fmt(p.stats.slip)}</span>`],
     ["Realisierte Gewinne",p => `<span style="color:${col(p.stats.realized)}">${sgn(p.stats.realized)}</span>`],
     ["Bester Deal",        p => p.stats.best  === null ? "–" : `<span style="color:${col(p.stats.best)}">${sgn(p.stats.best)}</span>`],
     ["Schwächster Deal",   p => p.stats.worst === null ? "–" : `<span style="color:${col(p.stats.worst)}">${sgn(p.stats.worst)}</span>`],
@@ -3119,6 +3314,8 @@ $("coachExit").onclick = exitTutorial;
 
 $("tutBtn").onclick = () => {
   tutorial = true;
+  expert = false; // der Coach unterrichtet die Grundregeln – keine Experten-Härten
+  START_CASH = 25000;
   gameCode = 0;
   mode = "local";
   matchTicks = TUT_TICKS;
@@ -3140,6 +3337,8 @@ $("npSkip").onclick = closeNewsPop;
 $("buyBtn").onclick = () => trade("buy");
 $("sellBtn").onclick = () => trade("sell");
 $("shortBtn").onclick = () => trade("short");
+$("ordBuyBtn").onclick = () => placeOrder("buy");
+$("ordSellBtn").onclick = () => placeOrder("sell");
 document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
   qtyMode = c.dataset.q;
   document.querySelectorAll(".chip").forEach(x => x.classList.toggle("active", x === c));

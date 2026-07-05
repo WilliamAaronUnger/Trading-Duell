@@ -61,6 +61,12 @@ const SKEW_MIN   = 0.3;   // ab dieser Schieflage zünden Squeeze/Blasen-Crash
 const DAMP_MAX   = 0.3;   // max. Dämpfung der Basisbewegung in Herden-Gewinnrichtung
 const DAMP_CAP   = 0.04;  // Deckel der kumulierten Dämpfungs-Abweichung (±4 %)
 const SQUEEZE_K  = 0.5;   // Squeeze-Extra relativ zum News-Sprung (× Schieflage)
+/* Lokale Experten-Härten (auch Sandbox): Spread, Handelsstopp, ACT-Haltekosten */
+const EXPERT_SPREAD_BASE = 0.001;  // Geld-/Brief-Spanne bei liq=1 (0,1 %); ÷liq je Wert
+const SPREAD_WIDE_TICKS  = Math.round(30000 / TICK_MS); // nach News: ~30 s dünnes Buch (×3)
+const EXPERT_HALT_TICKS  = Math.round(15000 / TICK_MS); // Volatilitätsunterbrechung bei Mega-Panik
+const EXPERT_ACT_HOLD    = 0.00008; // ACT-Haltekosten je Tick (~3 % über ein 10-Min-Spiel)
+const EXPERT_MAX_ORDERS  = 4;       // offene Limit-/Stop-Orders je Spieler
 const liqOf = sym => defOf(sym).liq || 1;
 const DIV_PCT = 0.00006;                                 // ~2,5 % Brutto-Dividende übers 10-Min-Spiel (Einzelwerte; je Wert via divMult gespreizt)
 const DIV_PCT_ETF = 0.00010;                             // ~4,2 % – Sparplan-Bonus, macht den Index-Stil gegen aktives Traden konkurrenzfähig

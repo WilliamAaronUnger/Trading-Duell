@@ -1,6 +1,6 @@
 # Sicherheit
 
-SPCX Trading-Duell ist eine reine Client-PWA ohne Server, ohne Backend und
+Trading Duell ist eine reine Client-PWA ohne Server, ohne Backend und
 ohne Abhängigkeiten. Es gibt keine Accounts, keine Datenbank und keine
 personenbezogenen Daten, die übertragen werden – das Spiel läuft vollständig
 im Browser.

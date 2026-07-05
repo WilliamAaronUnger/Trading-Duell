@@ -1,6 +1,6 @@
 {
-  "name": "SPCX Trading-Duell",
-  "short_name": "SPCX Duell",
+  "name": "Trading Duell",
+  "short_name": "Trading Duell",
   "description": "Börsensimulator zum SpaceX-IPO: Wer macht in 15 Minuten das größere Plus?",
   "lang": "de",
   "start_url": "./index.html",

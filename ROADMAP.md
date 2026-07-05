@@ -1,4 +1,4 @@
-# Roadmap: SPCX Trading-Duell
+# Roadmap: Trading Duell
 
 Stand Juli 2026, nach Abschluss von Online-Stufe 1 (2–8 Spieler, Geheim-Seed, Rangliste).
 Zwei Spuren: **Features** (was das Spiel können soll) und **Infrastruktur** (wie es gebaut,
@@ -122,7 +122,7 @@ Beobachteter Schmerz: GitHub Pages drosselt bei vielen Deploys („Deployment fa
 again later" — 3× in dieser Session, jeweils per Retry gelöst). Optionen:
 - **Kurzfristig (empfohlen): bleiben.** Der Schmerz trifft nur die Auslieferung neuer
   Versionen, nie die Spieler; an normalen Tagen (1–2 Deploys) irrelevant.
-- **Mittelfristig: eigene Domain zuerst.** `spcx-duell.de` o. ä. auf GitHub Pages legen.
+- **Mittelfristig: eigene Domain zuerst.** `trading-duell.de` o. ä. auf GitHub Pages legen.
   Wichtig: Die Domain ist die *Identität* der PWA (localStorage, Installationen hängen an
   der Origin). Einmalig wechseln = Spielstände/Rekorde der Geräte beginnen bei Null —
   also lieber früh wechseln als spät, und danach nie wieder.

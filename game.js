@@ -497,7 +497,18 @@ function newPlayer(name, color){
    Gerät erzielte P&L – ein einziger JSON-Schlüssel, wenige hundert Byte.
    Über "Daten löschen" komplett entfernbar. localStorage kann fehlen oder
    gesperrt sein (Privatmodus), darum alles defensiv in try/catch. */
-const STORE_KEY = "spcx-duell";
+const STORE_KEY = "trading-duell";
+const GAME_KEY  = "trading-duell-game";   // laufendes Spiel (Snapshot)
+const ROOM_KEY  = "trading-duell-room";   // Raum-Mitgliedschaft
+/* Einmalige Migration der früheren Schlüsselnamen (spcx-duell*) auf die neuen,
+   damit Rekord, laufendes Spiel und Raum-Mitgliedschaft nach der Umbenennung
+   erhalten bleiben. Läuft nur, solange der alte Schlüssel noch existiert. */
+try{
+  [["spcx-duell", STORE_KEY], ["spcx-duell-game", GAME_KEY], ["spcx-duell-room", ROOM_KEY]].forEach(([o,n]) => {
+    const v = localStorage.getItem(o);
+    if(v != null){ if(localStorage.getItem(n) == null) localStorage.setItem(n, v); localStorage.removeItem(o); }
+  });
+}catch(e){}
 const loadStore = () => { try{ return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }catch(e){ return {}; } };
 const saveStore = s => { try{ localStorage.setItem(STORE_KEY, JSON.stringify(s)); }catch(e){} };
 
@@ -505,7 +516,6 @@ const saveStore = s => { try{ localStorage.setItem(STORE_KEY, JSON.stringify(s))
    Der Markt selbst wird NICHT gespeichert – er entsteht deterministisch neu aus
    dem Code; nur Spielzustand (Bargeld, Positionen, Stats, Tick) wandert rein.
    Eigener Schlüssel, getrennt von Namen/Rekord. Tutorial wird nie gesichert. */
-const GAME_KEY = "spcx-duell-game";
 function saveSnapshot(phase){
   if(tutorial || sandbox || (over && phase !== "handover")) return;
   try{
@@ -784,7 +794,6 @@ function applyRoomInvite(){
   $("roomInviteBtn").textContent = roomInviteOpen ? "▲ Einladung ausblenden" : "📤 Einladung";
 }
 $("roomInviteBtn").onclick = () => { roomInviteTouched = true; roomInviteOpen = !roomInviteOpen; applyRoomInvite(); };
-const ROOM_KEY = "spcx-duell-room";
 function saveRoomState(){
   if(!room) return;
   try{ localStorage.setItem(ROOM_KEY, JSON.stringify(Object.assign({}, room, {ts: Date.now()}))); }catch(e){}
@@ -852,7 +861,7 @@ $("roomLeaveBtn").onclick = () => leaveRoom("");
 $("roomShareBtn").onclick = async function(){
   if(!room) return;
   const url = shareUrl("room", room.code);
-  const txt = `🚀 SPCX Trading-Duell – komm in unseren Raum!\nRaum-Code: ${room.code}` +
+  const txt = `🚀 Trading Duell – komm in unseren Raum!\nRaum-Code: ${room.code}` +
               (url ? `\nZum Beitreten antippen: ${url}` : "");
   try{
     this.textContent = (await shareOut(txt)) === "geteilt" ? "✅ Geteilt!" : "✅ Kopiert!";
@@ -1317,7 +1326,7 @@ function renderRace(st){
 $("lobbyShare").onclick = async function(){
   const code = String(gameCode).padStart(6, "0");
   const url = shareUrl("join", code);
-  const txt = `🚀 SPCX Trading-Duell – ich fordere dich heraus!\nSpiel-Code: ${code} · ${durationMin} Minuten` +
+  const txt = `🚀 Trading Duell – ich fordere dich heraus!\nSpiel-Code: ${code} · ${durationMin} Minuten` +
               (url ? `\nZum Beitreten antippen: ${url}` : "");
   try{
     this.textContent = (await shareOut(txt)) === "geteilt" ? "✅ Geteilt!" : "✅ Kopiert – ab damit an den Gegner!";
@@ -2424,7 +2433,7 @@ async function shareOut(text){
 $("shareBtn").onclick = async function(){
   const code = packResult(soloP);
   const url = shareUrl("vs", code);
-  const txt = `📈 SPCX Trading-Duell (Code ${String(gameCode).padStart(6,"0")}): ${sgn(soloP.result.pnl)} – „${playerTitle(soloP)}"\n` +
+  const txt = `📈 Trading Duell (Code ${String(gameCode).padStart(6,"0")}): ${sgn(soloP.result.pnl)} – „${playerTitle(soloP)}"\n` +
               (url ? `Zum Duell-Vergleich antippen: ${url}` : `Ergebnis-Code:\n${code}`);
   try{
     this.textContent = (await shareOut(txt)) === "geteilt" ? "✅ Geteilt!" : "✅ Kopiert – schick's dem Gegner!";
@@ -2496,7 +2505,7 @@ function renderStats(){
 async function shareStatsGame(i, btn){
   const g = statsGames[i];
   const url = shareUrl("vs", g.code);
-  const txt = `📈 SPCX Trading-Duell (${g.durationMin} Min): ${sgn(g.pnl)}\n` +
+  const txt = `📈 Trading Duell (${g.durationMin} Min): ${sgn(g.pnl)}\n` +
               (url ? `Zum Duell-Vergleich antippen: ${url}` : `Ergebnis-Code:\n${g.code}`);
   try{
     await shareOut(txt);

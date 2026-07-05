@@ -78,16 +78,16 @@ const noop = () => {};
     const stash = () => ({mode, room: room && Object.assign({}, room), roomState, roomPhase, roomTickN, roomDurPick,
                           marketSeed, gameCode, durationMin, market, startAt, players, soloP,
                           rankResults, rankRoom, over, round, matchTicks,
-                          _rk: localStorage.getItem("spcx-duell-room")});
+                          _rk: localStorage.getItem("trading-duell-room")});
     const restore = c => { ({mode, roomState, roomPhase, roomTickN, roomDurPick,
                              marketSeed, gameCode, durationMin, market, startAt, players, soloP,
                              rankResults, rankRoom, over, round, matchTicks} = c);
       room = c.room && Object.assign({}, c.room);
-      if(c._rk == null) localStorage.removeItem("spcx-duell-room");
-      else localStorage.setItem("spcx-duell-room", c._rk); };
+      if(c._rk == null) localStorage.removeItem("trading-duell-room");
+      else localStorage.setItem("trading-duell-room", c._rk); };
 
     // --- Anna eröffnet den Raum ---
-    localStorage.removeItem("spcx-duell-room");
+    localStorage.removeItem("trading-duell-room");
     mode = "room"; $id("name1").value = "Anna"; codeIn.value = ""; market = null; roomPhase = "idle";
     await $id("startBtn").onclick();
     out["Raum: eröffnet (p1)"] = !!room && room.p === 1 && /^\d{6}$/.test(room.code);
@@ -100,7 +100,7 @@ const noop = () => {};
     const A = stash();
 
     // --- Ben tritt bei (eigenes Gerät) ---
-    localStorage.removeItem("spcx-duell-room");
+    localStorage.removeItem("trading-duell-room");
     room = null; roomState = null; roomPhase = "idle"; market = null;
     $id("name1").value = "Ben"; codeIn.value = RC;
     await $id("startBtn").onclick();
@@ -109,7 +109,7 @@ const noop = () => {};
     const B = stash();
 
     // --- Cleo tritt bei und wird Leinwand ---
-    localStorage.removeItem("spcx-duell-room");
+    localStorage.removeItem("trading-duell-room");
     room = null; roomState = null; roomPhase = "idle";
     $id("name1").value = "Cleo"; codeIn.value = RC;
     await $id("startBtn").onclick();
@@ -211,7 +211,7 @@ const noop = () => {};
 
     // --- Zuspätkommer: Dana kommt mitten in einer laufenden Runde ---
     globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 60000, RC);
-    localStorage.removeItem("spcx-duell-room");
+    localStorage.removeItem("trading-duell-room");
     room = null; roomState = null; roomPhase = "idle"; market = null; marketSeed = null;
     $id("name1").value = "Dana"; codeIn.value = RC; mode = "room";
     await $id("startBtn").onclick();
@@ -226,7 +226,7 @@ const noop = () => {};
     out["Reload: Raum-Mitgliedschaft ladbar"] = !!rec && rec.code === RC && rec.p === 4;
 
     // --- ?room=-Link: Emil kommt per Einladung, tritt automatisch bei ---
-    localStorage.removeItem("spcx-duell-room");
+    localStorage.removeItem("trading-duell-room");
     room = null; roomState = null; roomPhase = "idle";
     $id("name1").value = "Emil"; codeIn.value = "";
     location.search = "?room=" + RC;
@@ -252,12 +252,12 @@ const noop = () => {};
     out["unpack ok + fremdes Spiel abgelehnt"] =
       (unpackResult(oppCode, 333333) || {}).name === "Gegner" && !!(unpackResult(oppCode, 111111) || {}).wrongGame;
     let captured = null; renderCompare = (me, opp) => { captured = {me, opp}; };
-    localStorage.setItem("spcx-duell", JSON.stringify({games: [{code: myCode, durationMin, name: "Ich",
+    localStorage.setItem("trading-duell", JSON.stringify({games: [{code: myCode, durationMin, name: "Ich",
       pnl: 111.5, date: 1750000000000, fav: "SPCX", mode: "remote"}]}));
     cmpFromStats = false;
     openSharedCompare(oppCode);
     out["?vs mit Historie -> Vergleich oeffnet"] = cmpFromStats === true && !!captured;
-    localStorage.removeItem("spcx-duell");
+    localStorage.removeItem("trading-duell");
     codeIn.value = ""; openSharedCompare(oppCode);
     out["?vs ohne Historie -> Code vorbefuellt"] = codeIn.value === "333333";
     location.search = "?join=222333"; codeIn.value = "";

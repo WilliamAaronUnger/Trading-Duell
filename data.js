@@ -1,4 +1,4 @@
-/* SPCX Trading-Duell – Daten: Aktien, News, Events, Tipps, Awards, Tutorial,
+/* Trading Duell – Daten: Aktien, News, Events, Tipps, Awards, Tutorial,
    sowie Tuning-Konstanten. Wird VOR game.js geladen (gemeinsamer globaler Scope). */
 const TICK_MS = 1000;
 const TICK_SCALE = 700 / TICK_MS;
@@ -278,7 +278,7 @@ const AWARDS = [
 const TUT_TICKS = 170;
 const TUT_STEPS = {
   1:{lbl:"Schritt 1/10 · Das Ziel", pause:true, btn:"Los geht's!", next:2,
-     text:"🎓 <b>Willkommen beim Trading-Duell!</b> Beide Spieler erleben exakt denselben Markt – " +
+     text:"🎓 <b>Willkommen beim Trading Duell!</b> Beide Spieler erleben exakt denselben Markt – " +
           "wer am Ende das größere Plus hat, gewinnt. Du startest mit 25.000 $. " +
           "Hier lernst du ohne Zeitdruck alles Wichtige."},
   2:{lbl:"Schritt 2/10 · Kaufen", pause:true, glow:"buyBtn",

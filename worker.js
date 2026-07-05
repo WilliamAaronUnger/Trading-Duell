@@ -1,4 +1,4 @@
-/* SPCX Trading-Duell – Cloudflare Worker v3: der Online-RAUM (Speicher: D1)
+/* Trading Duell – Cloudflare Worker v3: der Online-RAUM (Speicher: D1)
    Ein Raum ist der Treffpunkt für den Abend: Mitglieder treten EINMAL bei (QR/Code),
    sind mit Anwesenheit sichtbar und wählen ihre Rolle (🎮 Spieler / 🖥️ Leinwand).
    Der Ersteller startet Runde um Runde – jede mit frischem, geheimem Markt-Seed und

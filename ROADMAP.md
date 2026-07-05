@@ -16,9 +16,10 @@ Evaluationen), `ONLINE-PLAN.md` (Architektur der Online-Schicht), `CLAUDE.md` (C
   leer, Deploy `npx wrangler deploy`, Branch-Previews AUS). Der erste Build deployt dann
   automatisch die pnl-Endpunkte für A1.
 - **A1 (Live-Rennen) und A2 (Online-Revanche) umgesetzt.**
-- **Online-RAUM: Phase 1+2 umgesetzt** (3. Modus, Runden-Serie, Abend-Wertung, Rollen,
-  Limit 20, „Mehrere Geräte" strikt offline mit Null-Request-Beweis). A2-Revanche darin
-  aufgegangen. **Offen: Phase 3 (Leinwand-Großbild)** — `RAUM-PLAN.md`.
+- **Online-RAUM: KOMPLETT (Phase 1–3)** — 3. Modus, Runden-Serie, Abend-Wertung, Rollen,
+  Limit 20, Offline-Modus mit Null-Request-Beweis, **Leinwand-Großbild** (Auto-Fokus-Chart,
+  Mini-Wand, Live-Rangliste, News-Vollbild). A2/A6/A9 damit erledigt. Nächste Kandidaten:
+  A3 Tages-Challenge, Stimmungsband (Vorstufe A10), A4 Experten-Modus, B3 Domain.
 - Neu aufgenommen: A9 (Leinwand-/Moderator-Ansicht) und A10 (dynamischer Online-Markt)
   — Details und Bewertung in `IDEAS.md`.
 

@@ -1,8 +1,9 @@
 # Plan: Online-Raum (3. Modus) + Leinwand-Rolle
 
-Status: **Phase 1 + 2 fertig (Server v3 + Client)** — 49 Worker- + 34 E2E-Checks grün,
-inkl. Null-Request-Beweis für den Offline-Modus. Gemeinsamer Merge auf main deployt App
-und Worker zusammen. Offen: Phase 3 (Leinwand-Großbild).
+Status: **ALLE 3 PHASEN FERTIG** — Server v3, Client (3 Modi, Raum, Runden-Serie) und
+Leinwand-Großbild. 49 Worker- + 39 E2E-Checks grün (inkl. Null-Request-Beweis offline
+und Großbild-Checks). Offen aus A9 nur noch Polish: Sound/Konfetti (zuschaltbar),
+Siegerehrungs-Theater.
 
 Alt-Status: Phase 1 (Server v3) fertig — worker.test.js 49/49 grün; liegt auf dem Feature-
 Branch und wird BEWUSST erst zusammen mit Phase 2 (Client) auf main gemerged, weil der
@@ -75,7 +76,7 @@ deployen im selben Push).
 - Deep-Link `?room=CODE` (QR im Raum nutzt ihn); `?join=` bleibt für den Offline-Modus.
 - Live-Rennen/Rangliste laufen unverändert, nur gespeist aus dem Aggregat (weniger Requests).
 
-## Phase 3 — Leinwand-Großbild
+## Phase 3 — Leinwand-Großbild — ✅ umgesetzt (Sound/Konfetti als späterer Polish)
 
 Anzeigen-Rolle rendert während der Runde: EIN großes Auto-Fokus-Chart (heißester Wert),
 Mini-Chart-Wand, News-Band groß + Vollbild-Einblendung bei Breaking News, Live-Rangliste,

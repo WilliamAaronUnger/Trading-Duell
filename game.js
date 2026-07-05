@@ -840,6 +840,7 @@ function startRoomTimer(){
 }
 function leaveRoom(msg){
   clearInterval(roomTimer); roomTimer = null;
+  stopWall();
   room = null; roomState = null; roomPhase = "idle"; roomDurPick = null;
   clearRoomState();
   $("roomBackBtn").style.display = "none"; // Mitgliedschaft weg → kein Rückkehr-Knopf
@@ -922,6 +923,14 @@ async function roomTick(){
     }
     renderRace(st);
   }
+  // Leinwand-Rolle: Großbild an, solange eine Runde läuft (inkl. Countdown-Fenster)
+  if(room.role === "wall" && rd){
+    const nw = Date.now();
+    const runningW = nw >= rd.startAt - 8000 && nw < rd.startAt + rd.dur * 60000;
+    if(runningW) ensureWall(rd);
+    else if(wallOn) stopWall();
+    if(wallOn) renderWallBoard(st);
+  }else if(wallOn) stopWall();
   // Runden-Rangliste offen: eingetroffene Ergebnisse der Mitspieler nachladen
   if(rankRoom && st.results){
     let added = false;
@@ -993,6 +1002,146 @@ function renderRoomScreen(st){
   const total = st.members.length;
   $("roomCount").textContent = total + (total === 1 ? " Person" : " Personen");
   if(!roomInviteTouched){ roomInviteOpen = playersN < 2; applyRoomInvite(); }
+}
+
+/* ====================== Leinwand: Großbild während der Runde ======================
+   Ein Leinwand-Gerät baut den Markt selbst aus dem Runden-Seed (kein Extra-Datenstrom)
+   und rendert: Auto-Fokus-Chart (heißester Wert), Mini-Chart-Wand, Live-Rangliste,
+   Restzeit und News – Breaking News als Vollbild-Einblendung. Rein lesend. */
+let wallOn = false, wallRoundN = 0, wallMarket = null, wallInfo = null,
+    wallTimer = null, wallNewsSeen = 0, wallDismissed = 0, wallFlashUntil = 0;
+
+function wallTicksTotal(){ return Math.round(wallInfo.dur * 60000 / TICK_MS); }
+function wallTickNow(){
+  return Math.max(0, Math.min(wallTicksTotal(), Math.floor((Date.now() - wallInfo.startAt) / TICK_MS)));
+}
+function ensureWall(rd){
+  if(wallDismissed === rd.n) return;                 // für diese Runde bewusst geschlossen
+  if(wallOn && wallRoundN === rd.n) return;
+  wallRoundN = rd.n;
+  wallInfo = {n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed >>> 0};
+  wallMarket = genMarket(wallInfo.seed, wallTicksTotal());
+  // beim Einstieg mitten in der Runde: vergangene News nicht als Feuerwerk nachholen
+  wallNewsSeen = wallMarket.events.filter(e => e.tick <= wallTickNow()).length;
+  buildWallMinis();
+  $("wallRoom").textContent = room ? room.code : "";
+  $("wallRound").textContent = rd.n;
+  $("wallFlash").style.display = "none"; wallFlashUntil = 0;
+  wallOn = true;
+  $("roomScreen").classList.remove("show");
+  $("wallScreen").classList.add("show");
+  clearInterval(wallTimer);
+  wallTimer = setInterval(wallPaint, 500);
+  wallPaint();
+}
+function stopWall(){
+  if(!wallOn) return;
+  wallOn = false;
+  clearInterval(wallTimer);
+  $("wallScreen").classList.remove("show");
+  if(room) $("roomScreen").classList.add("show");
+}
+$("wallExit").onclick = () => { wallDismissed = wallRoundN; stopWall(); };
+
+/* Fokus: frisch von News getroffener Wert, sonst die größte Bewegung der letzten ~90 Ticks */
+function wallFocusSym(t){
+  const recent = wallMarket.events.filter(e => e.ev.t !== "ALL" && e.tick <= t && t - e.tick < 25);
+  if(recent.length) return recent[recent.length - 1].ev.t;
+  let best = "SPCX", bm = -1;
+  const back = Math.min(t, 90);
+  if(back < 2) return best;
+  for(const s of DISPLAY_SYMS){
+    const p = wallMarket.paths[s];
+    const m = Math.abs(p[t] / p[t - back] - 1);
+    if(m > bm){ bm = m; best = s; }
+  }
+  return best;
+}
+/* Kompakter Linien-Painter (Leinwand hat eigene Canvases, unabhängig vom Spiel-Chart) */
+function drawWallLine(cv, path, t, back){
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth || 300, H = cv.clientHeight || 120;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const b = Math.min(t, back);
+  const data = wallMarketSlice(path, t, b);
+  if(data.length < 2) return;
+  let mn = Math.min(...data), mx = Math.max(...data);
+  if(mx - mn < 1e-9) mx = mn + 1;
+  const X = i => i / (data.length - 1) * (W - 6) + 3;
+  const Y = v => H - 5 - (v - mn) / (mx - mn) * (H - 10);
+  const up = data[data.length - 1] >= data[0];
+  ctx.strokeStyle = up ? "#3DDC97" : "#FF5C72";
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  data.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)));
+  ctx.stroke();
+  ctx.lineTo(X(data.length - 1), H); ctx.lineTo(X(0), H); ctx.closePath();
+  ctx.fillStyle = up ? "rgba(61,220,151,.12)" : "rgba(255,92,114,.12)";
+  ctx.fill();
+}
+const wallMarketSlice = (path, t, back) => path.slice(Math.max(0, t - back), t + 1);
+
+function buildWallMinis(){
+  $("wallMinis").innerHTML = DISPLAY_SYMS.map(s =>
+    `<div class="wall-mini"><canvas id="wm-${s}"></canvas>
+     <div class="wm-l"><b>${s}</b><span id="wmc-${s}"></span></div></div>`).join("");
+}
+function wallPaint(){
+  if(!wallOn || !wallMarket) return;
+  const now = Date.now(), t = wallTickNow();
+  // Restzeit (bzw. Countdown vor dem Start)
+  const leftMs = wallInfo.startAt > now
+    ? wallInfo.startAt - now
+    : Math.max(0, wallInfo.startAt + wallInfo.dur * 60000 - now);
+  $("wallTime").textContent = (wallInfo.startAt > now ? "Start in " : "") +
+    Math.floor(leftMs / 60000) + ":" + String(Math.floor(leftMs % 60000 / 1000)).padStart(2, "0");
+  // Fokus-Chart
+  const sym = wallFocusSym(t);
+  drawWallLine($("wallChart"), wallMarket.paths[sym], t, 240);
+  const p = wallMarket.paths[sym], px = p[t], ch = (px / p[0] - 1) * 100;
+  $("wallSym").textContent = sym;
+  $("wallPx").textContent = fmt(px);
+  const che = $("wallChg");
+  che.textContent = (ch >= 0 ? "+" : "") + ch.toFixed(2) + "%";
+  che.style.color = ch >= 0 ? "var(--up)" : "var(--down)";
+  // Mini-Wand
+  for(const s of DISPLAY_SYMS){
+    const cv = $("wm-" + s);
+    if(!cv) continue;
+    drawWallLine(cv, wallMarket.paths[s], t, 150);
+    const q = wallMarket.paths[s], c2 = (q[t] / q[0] - 1) * 100;
+    const el = $("wmc-" + s);
+    el.textContent = (c2 >= 0 ? "+" : "") + c2.toFixed(1) + "%";
+    el.style.color = c2 >= 0 ? "var(--up)" : "var(--down)";
+  }
+  // News-Band + Vollbild-Einblendung für frische Meldungen
+  const evs = wallMarket.events.filter(e => e.tick <= t);
+  if(evs.length) $("wallNews").textContent = "📰 " + evs[evs.length - 1].ev.txt;
+  if(evs.length > wallNewsSeen){
+    const e = evs[evs.length - 1];
+    wallNewsSeen = evs.length;
+    $("wallFlashText").textContent = (e.mega ? "🚨 " : "📰 ") + e.ev.txt;
+    $("wallFlash").style.display = "";
+    wallFlashUntil = now + (e.mega ? 8000 : 4500);
+  }
+  if(wallFlashUntil && now > wallFlashUntil){
+    $("wallFlash").style.display = "none";
+    wallFlashUntil = 0;
+  }
+}
+/* Rangliste der Leinwand aus dem Raum-Puls speisen */
+function renderWallBoard(st){
+  const names = {};
+  (st.members || []).forEach(m => names[m.p] = m.name);
+  const rows = Object.keys(st.pnls || {}).map(p => ({p: +p, v: st.pnls[p]})).sort((a, b) => b.v - a.v);
+  $("wallBoard").innerHTML = rows.length
+    ? rows.map((r, i) =>
+        `<div class="wall-row"><span class="wall-pos">${i === 0 ? "👑" : (i + 1) + "."}</span>
+         <span class="wall-nm">${esc(names[r.p] || "?")}</span>
+         <span class="wall-v" style="color:${r.v >= 0 ? "var(--up)" : "var(--down)"}">${sgn(r.v)}</span></div>`).join("")
+    : '<div class="mode-hint">Gleich geht\'s los …</div>';
 }
 
 /* Runde angenommen: Markt aus dem Runden-Seed bauen und auf das gemeinsame

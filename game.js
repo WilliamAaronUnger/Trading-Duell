@@ -1009,11 +1009,22 @@ function renderRoomScreen(st){
    und rendert: Auto-Fokus-Chart (heißester Wert), Mini-Chart-Wand, Live-Rangliste,
    Restzeit und News – Breaking News als Vollbild-Einblendung. Rein lesend. */
 let wallOn = false, wallRoundN = 0, wallMarket = null, wallInfo = null,
-    wallTimer = null, wallNewsSeen = 0, wallDismissed = 0, wallFlashUntil = 0;
+    wallRaf = 0, wallNewsSeen = 0, wallDismissed = 0, wallFlashUntil = 0,
+    wallFocus = null, wallFocusUntil = 0, wallChartMode = "line", wallSlowAt = 0;
 
 function wallTicksTotal(){ return Math.round(wallInfo.dur * 60000 / TICK_MS); }
 function wallTickNow(){
   return Math.max(0, Math.min(wallTicksTotal(), Math.floor((Date.now() - wallInfo.startAt) / TICK_MS)));
+}
+/* Weltzeit-genaue Tick-Position samt Sub-Tick-Fortschritt (0..1) für die glatte
+   Interpolation des Fokus-Charts – analog zum Spieler-Chart, nur wall-clock statt lastTickAt. */
+function wallClockTick(){
+  const total = wallTicksTotal();
+  const el = (Date.now() - wallInfo.startAt) / TICK_MS;
+  if(el <= 0) return {t: 0, prog: 0};
+  if(el >= total) return {t: total, prog: 1};
+  const t = Math.floor(el);
+  return {t, prog: el - t};
 }
 function ensureWall(rd){
   if(wallDismissed === rd.n) return;                 // für diese Runde bewusst geschlossen
@@ -1028,25 +1039,33 @@ function ensureWall(rd){
   $("wallRound").textContent = rd.n;
   $("wallFlash").style.display = "none"; wallFlashUntil = 0;
   wallOn = true;
+  wallFocus = null; wallFocusUntil = 0; wallSlowAt = 0;
   $("roomScreen").classList.remove("show");
   $("wallScreen").classList.add("show");
-  clearInterval(wallTimer);
-  wallTimer = setInterval(wallPaint, 500);
-  wallPaint();
+  if(!wallRaf) wallFrame();   // sofort einmal zeichnen und die rAF-Schleife anstoßen (keine Doppel-Schleife)
 }
 function stopWall(){
   if(!wallOn) return;
   wallOn = false;
-  clearInterval(wallTimer);
+  if(wallRaf){ cancelAnimationFrame(wallRaf); wallRaf = 0; }
   $("wallScreen").classList.remove("show");
   if(room) $("roomScreen").classList.add("show");
 }
 $("wallExit").onclick = () => { wallDismissed = wallRoundN; stopWall(); };
+document.querySelectorAll("#wallToggle .ctg").forEach(b => b.onclick = () => {
+  wallChartMode = b.dataset.w;
+  document.querySelectorAll("#wallToggle .ctg").forEach(x => x.classList.toggle("active", x === b));
+});
 
-/* Fokus: frisch von News getroffener Wert, sonst die größte Bewegung der letzten ~90 Ticks */
+/* Frisch von einer News getroffener (nicht marktweiter) Wert der letzten ~25 Ticks */
+function wallNewsHit(t){
+  let hit = null;
+  for(const e of wallMarket.events)
+    if(e.ev.t !== "ALL" && e.tick <= t && t - e.tick < 25) hit = e.ev.t;
+  return hit;
+}
+/* Größte Bewegung der letzten ~90 Ticks (Fallback ohne aktuelle News) */
 function wallFocusSym(t){
-  const recent = wallMarket.events.filter(e => e.ev.t !== "ALL" && e.tick <= t && t - e.tick < 25);
-  if(recent.length) return recent[recent.length - 1].ev.t;
   let best = "SPCX", bm = -1;
   const back = Math.min(t, 90);
   if(back < 2) return best;
@@ -1056,6 +1075,22 @@ function wallFocusSym(t){
     if(m > bm){ bm = m; best = s; }
   }
   return best;
+}
+/* Fokuswahl mit „Verweildauer": News ziehen den Blick sofort auf sich, sonst wird
+   der größte Bewegen gehalten – aber mindestens ein paar Sekunden, damit die
+   Leinwand nicht zwischen Werten flackert. */
+function wallPickFocus(t, now){
+  const hit = wallNewsHit(t);
+  if(hit){
+    if(hit !== wallFocus){ wallFocus = hit; wallFocusUntil = now + 7000; }
+    else wallFocusUntil = Math.max(wallFocusUntil, now + 4000);
+    return wallFocus;
+  }
+  if(wallFocus && now < wallFocusUntil) return wallFocus;
+  const best = wallFocusSym(t);
+  if(best !== wallFocus){ wallFocus = best; wallFocusUntil = now + 6000; }
+  else wallFocusUntil = now + 3000;
+  return wallFocus;
 }
 /* Kompakter Linien-Painter (Leinwand hat eigene Canvases, unabhängig vom Spiel-Chart) */
 function drawWallLine(cv, path, t, back){
@@ -1088,28 +1123,40 @@ function buildWallMinis(){
     `<div class="wall-mini"><canvas id="wm-${s}"></canvas>
      <div class="wm-l"><b>${s}</b><span id="wmc-${s}"></span></div></div>`).join("");
 }
-function wallPaint(){
-  if(!wallOn || !wallMarket) return;
-  const now = Date.now(), t = wallTickNow();
+/* rAF-Schleife: das Fokus-Chart wird jeden Frame glatt interpoliert (wie der Spieler-
+   Chart), die schwereren Teile (Mini-Wand, Rangliste-Text, News, Restzeit) laufen
+   gedrosselt ~3×/s über wallSlow(). */
+function wallFrame(){
+  if(!wallOn || !wallMarket){ wallRaf = 0; return; }
+  wallRaf = requestAnimationFrame(wallFrame);
+  const now = Date.now();
+  const {t, prog} = wallClockTick();
+  const sym = wallPickFocus(t, now);
+  // Fokus-Chart über den echten Spieler-Renderer (Kerzen/Linie, Live-Marker, Fläche)
+  drawChart({canvas: $("wallChart"), sym, market: wallMarket, tick: t, prog,
+             pos: null, chartMode: wallChartMode, big: true});
+  const p = wallMarket.paths[sym];
+  const live = t >= 1 ? p[t-1] + (p[t] - p[t-1]) * prog : (p[0] || 0);
+  const ch = (live / p[0] - 1) * 100;
+  $("wallSym").textContent = sym;
+  $("wallPx").textContent = fmt(live);
+  const che = $("wallChg");
+  che.textContent = (ch >= 0 ? "+" : "") + ch.toFixed(2) + "%";
+  che.style.color = ch >= 0 ? "var(--up)" : "var(--down)";
+  if(now - wallSlowAt >= 320){ wallSlowAt = now; wallSlow(now, t, sym); }
+}
+function wallSlow(now, t, focus){
   // Restzeit (bzw. Countdown vor dem Start)
   const leftMs = wallInfo.startAt > now
     ? wallInfo.startAt - now
     : Math.max(0, wallInfo.startAt + wallInfo.dur * 60000 - now);
   $("wallTime").textContent = (wallInfo.startAt > now ? "Start in " : "") +
     Math.floor(leftMs / 60000) + ":" + String(Math.floor(leftMs % 60000 / 1000)).padStart(2, "0");
-  // Fokus-Chart
-  const sym = wallFocusSym(t);
-  drawWallLine($("wallChart"), wallMarket.paths[sym], t, 240);
-  const p = wallMarket.paths[sym], px = p[t], ch = (px / p[0] - 1) * 100;
-  $("wallSym").textContent = sym;
-  $("wallPx").textContent = fmt(px);
-  const che = $("wallChg");
-  che.textContent = (ch >= 0 ? "+" : "") + ch.toFixed(2) + "%";
-  che.style.color = ch >= 0 ? "var(--up)" : "var(--down)";
-  // Mini-Wand
+  // Mini-Wand (kompakte Sparklines); der Fokus-Wert wird hervorgehoben
   for(const s of DISPLAY_SYMS){
     const cv = $("wm-" + s);
     if(!cv) continue;
+    if(cv.parentElement) cv.parentElement.classList.toggle("hot", s === focus);
     drawWallLine(cv, wallMarket.paths[s], t, 150);
     const q = wallMarket.paths[s], c2 = (q[t] / q[0] - 1) * 100;
     const el = $("wmc-" + s);
@@ -1901,9 +1948,23 @@ function niceStep(range, targetLines){
   return 10 * mag;
 }
 
-function drawChart(){
-  const cv = $("chart");
+/* Zeichnet den Kurschart. Ohne Argumente = der Spieler-Chart (globale Zustände).
+   Mit opts wiederverwendbar für die Leinwand: eigenes Canvas/Markt/Tick/Symbol/
+   Maske/Animationsfortschritt und (o.big) größere Schrift fürs Großbild.
+   Rein zeichnend – konsumiert kein rnd(), fairness-neutral. */
+function drawChart(o){
+  o = o || {};
+  const cv = o.canvas || $("chart");
   if(!cv.clientWidth) return;
+  const sym  = o.sym || selected;
+  const mkt  = o.market || market;
+  const tc   = o.tick != null ? o.tick : tickCount;
+  const pos  = ("pos" in o) ? o.pos : (players[round] ? players[round].pos[sym] : null);
+  const cmode = o.chartMode || chartMode;
+  const S    = o.big ? 1.55 : 1;            // Skalierung für die Leinwand (Beamer/TV)
+  const FS   = Math.max(9, Math.round(10*S));
+  const FSB  = "bold " + FS + "px ui-monospace,monospace";
+  const FSN  = FS + "px ui-monospace,monospace";
   const dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth, h = cv.clientHeight || 190; // Höhe folgt dem CSS (Breitbild höher)
   cv.width = w*dpr; cv.height = h*dpr;
@@ -1911,42 +1972,42 @@ function drawChart(){
   ctx.scale(dpr,dpr);
   ctx.clearRect(0,0,w,h);
 
-  const op = open_(selected);
-  const p = players[round];
-  const pos = p.pos[selected];
-  const path = market.paths[selected];
+  const op = open_(sym);
+  const path = mkt.paths[sym];
 
-  const L = 8, R = 46, T = 8, B = 22;       // Innenabstände (rechts Platz für Preis-Labels)
+  const L = Math.round(8*S), R = Math.round(46*S), T = Math.round(8*S), B = Math.round(22*S); // Innenabstände
 
   /* Glatte Animation: der aktuell entstehende Punkt/die offene Kerze wächst
-     innerhalb des Tick-Intervalls herein (0..1). */
+     innerhalb des Tick-Intervalls herein (0..1). o.prog erlaubt der Leinwand
+     eine eigene, weltzeit-basierte Interpolation. */
   let prog = 1;
-  if(lastTickAt && tickCount >= 1 && !paused && !newsPaused && !over)
+  if(o.prog != null) prog = Math.max(0, Math.min(1, o.prog));
+  else if(lastTickAt && tc >= 1 && !paused && !newsPaused && !over)
     prog = Math.min(1, (performance.now() - lastTickAt) / TICK_MS);
 
   /* Rollierendes Fenster: nur die letzten ~3 Minuten zeigen, Anfang abschneiden */
   const WINDOW = Math.round(180000 / TICK_MS);
-  const startIdx = Math.max(0, tickCount + 1 - WINDOW);
-  const data = path.slice(startIdx, tickCount + 1);
+  const startIdx = Math.max(0, tc + 1 - WINDOW);
+  const data = path.slice(startIdx, tc + 1);
   const nPts = data.length;
   const livePrice = nPts >= 2 ? data[nPts-2] + (data[nPts-1] - data[nPts-2]) * prog : (data[0] || op);
 
   /* Animierter Kopf: deckt sich mit der livePrice-Interpolation und sitzt im
      Linien-Modus immer am rechten Rand. */
-  const headTick = (tickCount - 1) + prog;
+  const headTick = (tc - 1) + prog;
   const CT = Math.max(2, Math.round(10000 / TICK_MS)); // Ticks pro Kerze
-  const lastC = Math.floor(tickCount / CT);
+  const lastC = Math.floor(tc / CT);
 
   /* --- Kerzen aggregieren (~10 s pro Kerze), wenn der Kerzen-Modus aktiv ist.
          Die letzte (offene) Kerze nutzt den animierten Live-Kurs als Schluss. --- */
   let candles = null, visStartTick = startIdx, firstC = 0;
-  if(chartMode === "candle"){
+  if(cmode === "candle"){
     candles = [];
     const firstVisC = Math.max(0, lastC - Math.ceil(WINDOW / CT) + 1);
     firstC = Math.max(0, firstVisC - 1);   // eine Kerze mehr links → scrollt geclippt sauber raus
     visStartTick = firstVisC * CT;
     for(let c = firstC; c <= lastC; c++){
-      const a = c*CT, b = Math.min(c*CT + CT - 1, tickCount);
+      const a = c*CT, b = Math.min(c*CT + CT - 1, tc);
       let hi = path[a], lo = path[a];
       for(let i=a;i<=b;i++){ if(path[i]>hi)hi=path[i]; if(path[i]<lo)lo=path[i]; }
       const live = c === lastC;
@@ -1981,7 +2042,7 @@ function drawChart(){
   const X = i => xt(startIdx + i);
   const Y = v => h - B - (h-T-B) * ((v-min)/(max-min));
 
-  ctx.font = "10px ui-monospace,monospace";
+  ctx.font = FSN;
 
   /* --- Horizontale Gitterlinien (Preis) --- */
   const step = niceStep(max-min, 4);
@@ -1995,15 +2056,15 @@ function drawChart(){
 
   /* --- Vertikale Gitterlinien (Zeit, mm:ss) – an Tick-Positionen gebunden,
          damit sie mit der Kurve mitscrollen statt zu springen. --- */
-  if(tickCount - visStartTick > 10){
+  if(tc - visStartTick > 10){
     const tSteps = 4;
     for(let k = 1; k < tSteps; k++){
-      const tk = visStartTick + (tickCount - visStartTick) * k/tSteps;
+      const tk = visStartTick + (tc - visStartTick) * k/tSteps;
       const x = xt(tk);
       ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, h-B); ctx.stroke();
       const sec = Math.round(tk * TICK_MS / 1000);
       const lbl = String(Math.floor(sec/60)).padStart(2,"0") + ":" + String(sec%60).padStart(2,"0");
-      ctx.fillText(lbl, x - 13, h-7);
+      ctx.fillText(lbl, x - 13*S, h-7*S);
     }
   }
 
@@ -2035,7 +2096,7 @@ function drawChart(){
     /* --- Kerzen --- */
     const NC = candles.length;
     const slot = pxPerTick * CT;                 // feste Kerzenbreite (kein „Atmen")
-    const cw = Math.max(2, Math.min(slot*0.62, 13));
+    const cw = Math.max(2, Math.min(slot*0.62, 13*S));
     for(let i=0;i<NC;i++){
       const k = candles[i];
       const cx = xt((firstC + i) * CT + (CT-1)/2); // Kerzen-Mitte über die Tick-Achse
@@ -2060,7 +2121,7 @@ function drawChart(){
       const py = i < nPts-1 ? Y(i < 0 ? path[startIdx-1] : data[i]) : liveY;
       i===startI ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
     }
-    ctx.strokeStyle = col; ctx.lineWidth = 1.8;
+    ctx.strokeStyle = col; ctx.lineWidth = 1.8*S;
     ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke();
 
     /* Fläche unter der Kurve */
@@ -2079,22 +2140,23 @@ function drawChart(){
     ctx.beginPath(); ctx.moveTo(L, Y(pos.avg)); ctx.lineTo(w-R, Y(pos.avg)); ctx.stroke();
     ctx.setLineDash([]);
     const label = "Einstand " + pos.avg.toFixed(2);
-    ctx.font = "bold 10px ui-monospace,monospace";
+    ctx.font = FSB;
     const tw = ctx.measureText(label).width;
     ctx.fillStyle = "rgba(11,16,32,.88)";
-    ctx.fillRect(w-R-tw-12, Y(pos.avg)-15, tw+8, 13);
+    ctx.fillRect(w-R-tw-12, Y(pos.avg)-15*S, tw+8, 13*S);
     ctx.fillStyle = pCol;
-    ctx.fillText(label, w-R-tw-8, Y(pos.avg)-5);
-    ctx.font = "10px ui-monospace,monospace";
+    ctx.fillText(label, w-R-tw-8, Y(pos.avg)-5*S);
+    ctx.font = FSN;
   }
 
   /* --- Letzter Kurs: Punkt (nur Linie) folgt der Animation, Preis-Tag am rechten Rand --- */
-  if(!candles){ ctx.beginPath(); ctx.arc(liveX,liveY,3.2,0,7); ctx.fillStyle = col; ctx.fill(); }
+  if(!candles){ ctx.beginPath(); ctx.arc(liveX,liveY,3.2*S,0,7); ctx.fillStyle = col; ctx.fill(); }
   ctx.fillStyle = col;
-  ctx.fillRect(w-R+2, liveY-7, R-4, 14);
+  ctx.fillRect(w-R+2, liveY-7*S, R-4, 14*S);
   ctx.fillStyle = "#0B1020";
-  ctx.font = "bold 10px ui-monospace,monospace";
-  ctx.fillText(livePrice.toFixed(2), w-R+6, liveY+3);
+  ctx.font = FSB;
+  ctx.fillText(livePrice.toFixed(2), w-R+6, liveY+3*S);
+  ctx.font = FSN;
 }
 
 /* ====================== News-Feed ====================== */

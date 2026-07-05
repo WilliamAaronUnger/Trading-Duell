@@ -1,8 +1,13 @@
 # Plan: Dynamischer Markt im Experten-Modus (nur Online-Raum) — A10 + A4
 
-Status: **GEPLANT** (entschieden Juli 2026, noch nicht begonnen). Setzt den Raum (RAUM-PLAN,
-fertig) voraus. Hintergrund/Evaluation: `IDEAS.md` (A10 „Dynamischer Online-Markt",
-A4 „Experten-Modus"), `ROADMAP.md`.
+Status: **UMGESETZT** (Juli 2026) — Worker v4 (expert/cash, trades-Journal, Rate-Limit),
+Effektivkurs-Schicht (Blockorders → Ramp/Fade-Overlay, Slippage, Schlussauktion),
+Herden-Schicht (Dämpfung, Squeeze, Stimmungsband, Leinwand) und die lokalen Härten
+(Spread, Handelsstopp, Limit-/Stop-Orders, Short-Leihgebühr, ACT-Haltekosten) inkl.
+🎓-Toggle in der Sandbox. 63 Worker- + 54 E2E-Checks. Offen: Hebel/Margin-Call
+(bewusst „später"), Tuning-Werte nach dem ersten echten Test-Abend justieren,
+Awards („🐘 Elefant"/„🥷 Leisetreter") als Polish. Ursprünglicher Plan unten.
+Hintergrund/Evaluation: `IDEAS.md` (A10/A4), `ROADMAP.md`.
 
 ## Entschieden (mit Betreiber durchdacht)
 

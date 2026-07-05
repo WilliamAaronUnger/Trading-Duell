@@ -35,13 +35,14 @@ const noop = () => {};
       if(p === "style") return t.__style || (t.__style = {});
       if(p === "getContext") return () => ctx2d;
       if(p === "querySelectorAll") return () => []; if(p === "querySelector") return () => mkEl();
-      if(["appendChild","addEventListener","setAttribute","focus","prepend","removeChild","scrollIntoView","dispatchEvent","play"].includes(p)) return noop;
+      if(p === "prepend") return child => { (t.__kids = t.__kids || []).unshift(child); }; // Feed-Checks
+      if(["appendChild","addEventListener","setAttribute","focus","removeChild","scrollIntoView","dispatchEvent","play"].includes(p)) return noop;
       if(p === "dataset") return {}; if(p === "children") return []; if(p === "clientWidth") return 200;
       return t[p] !== undefined ? t[p] : ""; },
     set: (t, p, v) => { t[p] = v; return true; }, apply: () => mkEl()});
   global.document = {getElementById: id => els[id] || (els[id] = mkEl()), querySelectorAll: () => [],
                      querySelector: () => mkEl(), addEventListener: noop, createElement: () => mkEl(), body: mkEl()};
-  global.window = {addEventListener: noop, devicePixelRatio: 1,
+  global.window = {addEventListener: noop, devicePixelRatio: 1, scrollTo: noop,
                    matchMedia: () => ({matches: false, addEventListener: noop}),
                    location: {protocol: "https:", origin: "https://spcx.test", pathname: "/", search: "", href: "https://spcx.test/"}};
   global.location = global.window.location; global.history = {replaceState: noop};
@@ -78,11 +79,14 @@ const noop = () => {};
     const stash = () => ({mode, room: room && Object.assign({}, room), roomState, roomPhase, roomTickN, roomDurPick,
                           marketSeed, gameCode, durationMin, market, startAt, players, soloP,
                           rankResults, rankRoom, over, round, matchTicks,
+                          expert, journal, effPaths, cash: START_CASH,
                           _rk: localStorage.getItem("trading-duell-room")});
     const restore = c => { ({mode, roomState, roomPhase, roomTickN, roomDurPick,
                              marketSeed, gameCode, durationMin, market, startAt, players, soloP,
                              rankResults, rankRoom, over, round, matchTicks} = c);
       room = c.room && Object.assign({}, c.room);
+      expert = !!c.expert; journal = c.journal || []; effPaths = c.effPaths || null;
+      START_CASH = c.cash === undefined ? 25000 : c.cash;
       if(c._rk == null) localStorage.removeItem("trading-duell-room");
       else localStorage.setItem("trading-duell-room", c._rk); };
 
@@ -209,8 +213,52 @@ const noop = () => {};
     out["Abend-Wertung nach Runde 2: 1:1 Siege, Summen stimmen"] =
       sb[1].wins === 1 && sb[2].wins === 1 && sb[1].total === 110 && sb[2].total === 160;
 
+    // ================= EXPERT-RUNDE: dynamischer Markt (Runde 3) =================
+    // Runde 2 auslaufen lassen; Anna startet Runde 3 als 🎓-Runde mit 50k Startkapital
+    globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 16*60000, RC);
+    roomPhase = "idle"; roomDurPick = 5; roomExpertPick = true; roomCashPick = 50000;
+    await $id("roomStartBtn").onclick();
+    out["Expert: Runde 3 mit 🎓-Flag + 50k Startkapital"] =
+      room.played === 3 && expert === true && START_CASH === 50000 && players[0].cash === 50000;
+    // Runde „läuft": Server-Startzeit zurückdrehen, Client-Anker daran ausrichten
+    globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 3").run(Date.now() - 20000, RC);
+    const rd3 = globalThis.__sq.prepare("SELECT startAt FROM rounds WHERE code = ? AND n = 3").get(RC);
+    startAt = rd3.startAt; roundAnchor = startAt;
+    roomPhase = "playing"; round = 0; over = false; roomTickN = 1;
+    tickCount = 20; matchTicks = Math.round(5 * 60000 / TICK_MS);
+    // Anna feuert eine Blockorder (Max-Kauf = volles Kapital ≥ 20 %-Schwelle)
+    selected = "SPCX"; qtyMode = "max";
+    trade("buy");
+    out["Expert: Blockorder zahlt Slippage"] = (players[0].stats.slip || 0) > 0;
+    await settle(() => globalThis.__sq.prepare("SELECT COUNT(*) AS n FROM trades WHERE code = ?").get(RC).n >= 1);
+    out["Expert: Blockorder anonym auf dem Server"] =
+      globalThis.__sq.prepare("SELECT sym, side FROM trades WHERE code = ?").get(RC).sym === "SPCX";
+    $id("news").__kids = [];
+    await roomTick(); // Puls holt das Journal → 🐘-Meldung + Effektivkurse
+    const hitT = Math.floor((journal[0].at - roundAnchor) / TICK_MS) + REACT_TICKS + IMPACT_RAMP_TICKS;
+    out["Expert: Journal da, 🐘-Meldung im Feed"] = journal.length === 1 &&
+      ($id("news").__kids || []).some(k => (k.innerHTML || "").indexOf("🐘") >= 0);
+    out["Expert: Meldung VOR Wirkung, dann Kurs über Basis"] =
+      !!effPaths && effPaths.SPCX[Math.max(0, hitT - REACT_TICKS - 1)] === market.paths.SPCX[Math.max(0, hitT - REACT_TICKS - 1)] &&
+      effPaths.SPCX[hitT] > market.paths.SPCX[hitT];
+    const effA = JSON.stringify(effPaths.SPCX.slice(0, 120));
+    // Schlussauktion: Live-Bewertung läuft effektiv, das Endergebnis zum Basiskurs
+    tickCount = Math.max(40, hitT + 2);
+    out["Expert: Schlussauktion neutralisiert Eigen-Impact"] =
+      totalOf(players[0]) > settleTotal(players[0]);
+    const AE = stash();
+    // Ben steigt über den Puls in die Expert-Runde ein → identische Effektivkurse
+    restore(B3); roomPhase = "idle"; room.played = 2; market = null; effPaths = null; journal = [];
+    await roomTick();          // erkennt Runde 3 (startRoomRound)
+    roomPhase = "playing"; round = 0; over = false; roomTickN = 1; tickCount = 20;
+    await roomTick();          // holt das Journal
+    out["Expert: Ben in Runde 3 – gleiche Regeln, gleicher Effektivkurs"] =
+      expert === true && START_CASH === 50000 && marketSeed === AE.marketSeed &&
+      !!effPaths && JSON.stringify(effPaths.SPCX.slice(0, 120)) === effA;
+    restore(AE); roomPhase = "idle"; over = true;
+
     // --- Zuspätkommer: Dana kommt mitten in einer laufenden Runde ---
-    globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 60000, RC);
+    globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 3").run(Date.now() - 60000, RC);
     localStorage.removeItem("trading-duell-room");
     room = null; roomState = null; roomPhase = "idle"; market = null; marketSeed = null;
     $id("name1").value = "Dana"; codeIn.value = RC; mode = "room";
@@ -234,6 +282,43 @@ const noop = () => {};
     await settle(() => room && room.p === 5);
     out["?room-Link: automatisch beigetreten (p5)"] = !!room && room.p === 5;
     location.search = "";
+
+    // ================= Sandbox: 🎓 Experten-Modus lokal (NULL Requests) =================
+    const fcS = globalThis.__fetchCount();
+    room = null; roomState = null; roomPhase = "idle";
+    mode = "solo"; sandbox = true; sandboxExpert = true; sandboxCash = 10000; codeIn.value = "";
+    await $id("startBtn").onclick();
+    out["Sandbox-Expert: aktiv, gewähltes Kapital"] = expert === true && START_CASH === 10000 &&
+      players[0].cash === 10000;
+    over = false; round = 0; tickCount = 5; selected = "SPCX"; qtyMode = "5";
+    const sbBase = price("SPCX");
+    trade("buy");
+    const sbPos = players[0].pos.SPCX;
+    out["Sandbox-Expert: Spread – Kauf über Basiskurs"] = !!sbPos && sbPos.avg > sbBase;
+    // Stop-Loss vormerken, dann den Kurs im Test „abstürzen" lassen → Ausführung im Tick
+    $id("ordPx").value = (sbBase * 0.5).toFixed(2);
+    placeOrder("sell");
+    out["Sandbox-Expert: Stop-Loss vorgemerkt"] = players[0].orders.length === 1 &&
+      players[0].orders[0].trig === "le";
+    market.paths.SPCX[6] = sbBase * 0.45;
+    tickCount = 6;
+    processTick(false);
+    out["Sandbox-Expert: Stop-Loss ausgeführt"] = !players[0].pos.SPCX && players[0].orders.length === 0;
+    // Handelsstopp: Mega-Panik sperrt den Wert ~15 s
+    market.events.push({tick: 60, mega: true, tag: "down", ev: {t: "SPCX", txt: "Test-Panik", jump: -0.12}});
+    tickCount = 60 + MEGA_REACT_TICKS;
+    const sbCash = players[0].cash;
+    trade("buy");
+    out["Sandbox-Expert: Handelsstopp blockt Order"] = players[0].cash === sbCash && !!haltInfo("SPCX");
+    tickCount = 60 + MEGA_REACT_TICKS + EXPERT_HALT_TICKS;
+    out["Sandbox-Expert: nach der Unterbrechung wieder handelbar"] = haltInfo("SPCX") === null;
+    // Short-Leihgebühr: Leerverkäufer ZAHLT die Dividende
+    players[0].pos.NVDA = {qty: -10, avg: 100};
+    players[0].pendingDiv = 0;
+    processTick(false);
+    out["Sandbox-Expert: Short zahlt Leihgebühr"] = players[0].pendingDiv < 0;
+    out["Sandbox-Expert: weiterhin NULL Requests"] = globalThis.__fetchCount() === fcS;
+    over = true; sandbox = false; sandboxExpert = false; expert = false; effPaths = null; journal = [];
 
     // ================= Teil-Links & Einfüge-Toleranz (Offline-Welt) =================
     room = null; mode = "remote";

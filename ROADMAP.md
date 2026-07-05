@@ -18,8 +18,12 @@ Evaluationen), `ONLINE-PLAN.md` (Architektur der Online-Schicht), `CLAUDE.md` (C
 - **A1 (Live-Rennen) und A2 (Online-Revanche) umgesetzt.**
 - **Online-RAUM: KOMPLETT (Phase 1–3)** — 3. Modus, Runden-Serie, Abend-Wertung, Rollen,
   Limit 20, Offline-Modus mit Null-Request-Beweis, **Leinwand-Großbild** (Auto-Fokus-Chart,
-  Mini-Wand, Live-Rangliste, News-Vollbild). A2/A6/A9 damit erledigt. Nächste Kandidaten:
-  A3 Tages-Challenge, Stimmungsband (Vorstufe A10), A4 Experten-Modus, B3 Domain.
+  Mini-Wand, Live-Rangliste, News-Vollbild). A2/A6/A9 damit erledigt.
+- **🎓 EXPERTEN-MODUS: KOMPLETT (A4 + A10 + Stimmungsband, `IMPACT-PLAN.md`)** — dynamischer
+  Markt im Raum (anonyme Blockorders, Squeeze, Schlussauktion), Startkapital-Wahl, lokale
+  Härten (Spread, Handelsstopp, Limit-/Stop-Orders, Short-Leihgebühr, ACT-Haltekosten),
+  auch in der Sandbox. Offen: Tuning nach Test-Abend, Hebel/Margin (später), Awards-Polish.
+  Nächste Kandidaten: A3 Tages-Challenge, B3 Domain, Umzug zu Cloudflare Pages.
 - Neu aufgenommen: A9 (Leinwand-/Moderator-Ansicht) und A10 (dynamischer Online-Markt)
   — Details und Bewertung in `IDEAS.md`.
 
@@ -49,7 +53,7 @@ ein Startknopf „🌍 Tages-Challenge". Braucht: Namens-Moderation (Wortfilter)
 grenzen (P&L-Deckel je Dauer), Ergebnis erst nach Rundenende einreichbar (Zeitfenster-Check).
 *Aufwand: 1–2 Sessions. Vorstufe für alles Kompetitive.*
 
-### A4. Experten-Modus (liegt fertig evaluiert in IDEAS.md) — geplant
+### A4. Experten-Modus — ✅ umgesetzt (Juli 2026)
 Zuschaltbare realistische Härten: Short-Dividende (Leerverkäufer zahlt), ACT-Haltekosten.
 Für Remote-Duelle muss der Modus in die Spiel-Ressource (alle spielen dieselben Regeln).
 *Aufwand: klein–mittel. Bewusst opt-in, Standard bleibt einsteigerfreundlich.*
@@ -85,7 +89,7 @@ abende, Events. Details/Bausteine: `IDEAS.md`. *Aufwand: mittel (2–3 Sessions)
 gut vorbereitet durch Mehrspieler + Geheim-Seed; braucht eine „Host ohne Spieler-Slot"-Rolle
 im Worker.*
 
-### A10. Dynamischer Online-Markt (Kurse reagieren auf die Spieler) ⚠️
+### A10. Dynamischer Online-Markt (Kurse reagieren auf die Spieler) — ✅ umgesetzt (Juli 2026, als Teil von A4)
 Reizvollste und zugleich heikelste Idee — sie berührt den Fairness-Kern (vorab generierter
 Markt). Machbar als **Online-Sondermodus** über eine server-vermittelte, für ALLE identische
 Überlagerung (Netto-Orderdruck → gemeinsamer Preis-Impact). Fairness bliebe durch Symmetrie

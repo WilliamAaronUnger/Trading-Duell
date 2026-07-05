@@ -561,9 +561,58 @@ function oracleMaxPnl(mkt, ticks, cash0){
   return Math.round((best - cash0) * 100) / 100;
 }
 
+/* ===== Anti-Cheat: Bot-Verdacht (Timing-Analyse eines replizierten Logs) =====
+   Bewertet ein bereits per replayRound BESTAETIGTES (also regelkonformes) Log
+   darauf, ob sein Timing nur mit Vorwissen oder Maschinen-Reaktion erklaerbar
+   ist. Zwei Signale:
+   1) Hellseherei: Einstiege in Richtung einer kommenden News, platziert kurz
+      VOR deren Anzeige-Tick – gezaehlt nur bei "blinden" Events (kein Insider-
+      Tipp, keine fruehere News mit ueberlappendem Ziel im Ketten-Fenster davor,
+      nicht im Eroeffnungs-Trubel). Megas zaehlen doppelt: sie sind per Design
+      unangekuendigt, vor ihrer Anzeige gibt es NULL ehrliche Signale.
+   2) Maschinen-Reaktion: passende Orders binnen ~1 s nach dem Anzeige-Tick,
+      ueber viele Events hinweg – Menschen lesen erst die Schlagzeile.
+   Ergebnis ist ein VERDACHT (🤖-Flag in der Wertung), kein Beweis und keine
+   Ablehnung. Die Schwellen sind bewusst konservativ (Momentum-News folgen
+   steigenden Kursen, ehrliche Trend-Reiter sitzen dort schon richtig drin):
+   Maschinen-Reaktion allein flaggt nie, Hellseherei erst ab drei Treffern. */
+function botSuspicion(mkt, log, ticks){
+  const fastMax  = Math.max(1, Math.round(1200 / TICK_MS));   // "sofort" = ca. 1 s nach Anzeige
+  const reactWin = REACT_TICKS + Math.round(4000 / TICK_MS);  // was ueberhaupt als Reaktion zaehlt
+  const preWin   = Math.round(12000 / TICK_MS);               // Hellseher-Fenster vor der Anzeige
+  const clusterW = Math.round(160000 / TICK_MS);              // Geruecht→Aufloesung / News-Cluster
+  const earliest = Math.round(45000 / TICK_MS);               // Eroeffnungs-Kaeufe ignorieren
+
+  const shown = (mkt.events || []).filter(e => Math.abs(e.ev.jump || 0) >= 0.008);
+  const blind = new Set(shown.filter(e => e.tick >= earliest &&
+    !(mkt.events || []).some(o => o !== e && o.tick < e.tick && o.tick >= e.tick - clusterW &&
+      (o.ev.t === e.ev.t || o.ev.t === "ALL" || e.ev.t === "ALL"))));
+  const tipped = (t, sym, dir) => (mkt.tips || []).some(tp =>
+    tp.sym === sym && tp.dir === dir && tp.tick <= t && t < tp.eventTick);
+
+  let prescient = 0, reacts = 0, fast = 0;
+  for(const ev of shown){
+    const dir = ev.ev.jump > 0 ? 1 : -1;
+    let pre = false, delta = Infinity;
+    for(const o of log){
+      const t = +o[0], sym = String(o[1]);
+      if((String(o[2]) === "buy" ? 1 : -1) !== dir) continue; // sell & short = Abwaerts-Wette/-Flucht
+      if(ev.ev.t !== sym && ev.ev.t !== "ALL") continue;
+      if(t < ev.tick){
+        if(blind.has(ev) && ev.tick - t <= preWin && !tipped(t, sym, dir)) pre = true;
+      }else delta = Math.min(delta, t - ev.tick);
+    }
+    if(pre) prescient += ev.mega ? 2 : 1;
+    if(delta <= reactWin){ reacts++; if(delta <= fastMax) fast++; }
+  }
+  const machine = reacts >= 5 && fast / reacts >= 0.8;
+  const score = (prescient >= 3 ? 2 : prescient >= 2 ? 1 : 0) + (machine ? 1 : 0);
+  return {prescient, reacts, fast, bot: score >= 2};
+}
+
 /* ===== Publish fuer den Worker-Pfad (im Browser harmlos-redundant) ===== */
 if(typeof globalThis === "object") Object.assign(globalThis, {
   mulberry32, genMarket, addEtfPath, addActivePath,
   tradeTick, impactFactorAt, overlayAt, skewAt, findSqueezes, buildEffPaths,
-  spreadAtTick, haltLeftAt, replayRound, oracleMaxPnl,
+  spreadAtTick, haltLeftAt, replayRound, oracleMaxPnl, botSuspicion,
 });

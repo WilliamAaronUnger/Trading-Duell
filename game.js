@@ -534,7 +534,7 @@ let journal = [], effPaths = null;
 /* Anti-Cheat: jede ausgeführte Order der Raum-Runde wird mitgeschrieben
    ([tick, sym, side, qty, block10]) und am Ende MIT dem Ergebnis eingereicht –
    der Server spielt das Log nach und errechnet das P&L selbst (worker.js v5). */
-let tradeLog = [], roomSus = {}, submitFail = false;
+let tradeLog = [], roomSus = {}, roomBot = {}, submitFail = false;
 /* Einladung (QR + Link) ist einklappbar: automatisch offen, solange man allein ist,
    danach zu – bis jemand den Knopf antippt (dann bleibt die Wahl bestehen). */
 let roomInviteOpen = true, roomInviteTouched = false;
@@ -672,6 +672,7 @@ async function roomTick(){
   if(!room) return;
   roomState = st;
   roomSus = st.sus || {};   // 🤨-Verdachts-Flags der laufenden Runde (Server-Orakel-Check)
+  roomBot = st.bot || {};   // 🤖-Verdachts-Flags (Server-Timing-Heuristik)
   const rd = st.round;
   /* Expert-Runde: Blockorder-Journal übernehmen. Neue Einträge landen als Meldung im
      Feed; die Effektiv-Pfade werden neu aufgebaut (Wirkung erst REACT_TICKS nach dem
@@ -750,7 +751,8 @@ function renderRoomScreen(st){
       `<div class="rank-row${s.p === room.p ? " me" : ""}">
         <span class="rank-pos">${i === 0 ? "👑" : (i + 1) + "."}</span>
         <span class="rank-name">${esc(names[s.p] || ("Spieler " + s.p))} · ${s.wins} ${s.wins === 1 ? "Sieg" : "Siege"}${
-          s.sus ? ` <span title="${s.sus} Runde(n) verdächtig nah am theoretischen Maximum">🤨${s.sus > 1 ? "×" + s.sus : ""}</span>` : ""}</span>
+          s.sus ? ` <span title="${s.sus} Runde(n) verdächtig nah am theoretischen Maximum">🤨${s.sus > 1 ? "×" + s.sus : ""}</span>` : ""}${
+          s.bot ? ` <span title="${s.bot} Runde(n) mit Roboter-Timing (Einstiege vor unangekündigten News / Sofort-Reaktionen)">🤖${s.bot > 1 ? "×" + s.bot : ""}</span>` : ""}</span>
         <span class="rank-pnl" style="color:${s.total >= 0 ? "var(--up)" : "var(--down)"}">${sgn(s.total)}</span></div>`).join("");
     $("roomScoreField").style.display = "";
   }else $("roomScoreField").style.display = "none";
@@ -1111,6 +1113,9 @@ function renderRanking(){
     // 🤨: Server-Orakel-Check – Ergebnis verdächtig nah am theoretischen Maximum
     if(roomSus && roomSus[r.p])
       warn += ' <span title="Verdächtig nah am theoretisch möglichen Maximum">🤨</span>';
+    // 🤖: Server-Timing-Heuristik – Orders passen verdächtig exakt zu kommenden News
+    if(roomBot && roomBot[r.p])
+      warn += ' <span title="Roboter-Timing: Einstiege vor unangekündigten News bzw. Sofort-Reaktionen">🤖</span>';
     const pnl = r.res
       ? `<span style="color:${r.res.result.pnl >= 0 ? "var(--up)" : "var(--down)"}">${sgn(r.res.result.pnl)}</span>`
       : '<span style="color:var(--muted);font-weight:400">spielt noch …</span>';

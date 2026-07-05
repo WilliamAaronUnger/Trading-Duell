@@ -6,7 +6,9 @@
    pnlFinal in Wertung/Rangliste ist die Server-Zahl. Abweichende Angaben,
    unmögliche Orders, zu frühe Einreichungen und Alt-Clients ohne Log werden
    hart abgelehnt. Ergebnisse nahe der Orakel-Obergrenze (perfektes Timing)
-   bekommen ein 🤨-Verdachts-Flag (sus).
+   bekommen ein 🤨-Verdachts-Flag (sus); Logs, deren Timing nur mit Vorwissen
+   oder Maschinen-Reaktion erklaerbar ist (botSuspicion in engine.js: Einstiege
+   vor unangekuendigten News, Sofort-Reaktionen), ein 🤖-Flag (bot).
 
    Ein Raum ist der Treffpunkt für den Abend: Mitglieder treten EINMAL bei (QR/Code),
    sind mit Anwesenheit sichtbar und wählen ihre Rolle (🎮 Spieler / 🖥️ Leinwand).
@@ -43,7 +45,7 @@
                                                    dur wird neuer Standard; cash nur mit expert)
      GET  /room/{code}?me={token}               → Aggregat {dur, curRound, members, round, pnls,
                                                    results, scoreboard, trades?}; me = Herzschlag
-     PUT  /room/{code}/round/{n}/result/{p}?pnl=X → 201 {pnl, sus}
+     PUT  /room/{code}/round/{n}/result/{p}?pnl=X → 201 {pnl, sus, bot}
                                                   (x-token, write-once, Body = JSON {res, log};
                                                    nur nach Rundenende; Server-Replay entscheidet)
      PUT  /room/{code}/round/{n}/pnl/{p} {pnl}  → 200   (x-token, überschreibbar)
@@ -103,8 +105,10 @@ async function ensureSchema(db){
     PRIMARY KEY(code, n, id))`).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS roundResults(
     code TEXT, n INTEGER, p INTEGER, body TEXT, pnlFinal REAL, sus INTEGER DEFAULT 0,
-    created INTEGER, PRIMARY KEY(code, n, p))`).run();
-  try{ await db.prepare("ALTER TABLE roundResults ADD COLUMN sus INTEGER DEFAULT 0").run(); }catch(e){}
+    bot INTEGER DEFAULT 0, created INTEGER, PRIMARY KEY(code, n, p))`).run();
+  for(const alter of ["ALTER TABLE roundResults ADD COLUMN sus INTEGER DEFAULT 0",
+                      "ALTER TABLE roundResults ADD COLUMN bot INTEGER DEFAULT 0"])
+    try{ await db.prepare(alter).run(); }catch(e){}
   await db.prepare(`CREATE TABLE IF NOT EXISTS roundPnl(
     code TEXT, n INTEGER, p INTEGER, v REAL, t INTEGER, PRIMARY KEY(code, n, p))`).run();
   schemaReady = true;
@@ -124,17 +128,18 @@ export default {
 
 /* Abend-Wertung aus allen Runden-Ergebnissen: Sieg = höchster P&L der Runde */
 async function scoreboard(db, code){
-  const rows = (await db.prepare("SELECT n, p, pnlFinal, sus FROM roundResults WHERE code = ?")
+  const rows = (await db.prepare("SELECT n, p, pnlFinal, sus, bot FROM roundResults WHERE code = ?")
                         .bind(code).all()).results;
   const byRound = {}, sb = {};
   for(const r of rows) (byRound[r.n] = byRound[r.n] || []).push(r);
   for(const n in byRound){
     let best = null;
     for(const r of byRound[n]){
-      const s = sb[r.p] = sb[r.p] || {p: r.p, wins: 0, total: 0, rounds: 0, sus: 0};
+      const s = sb[r.p] = sb[r.p] || {p: r.p, wins: 0, total: 0, rounds: 0, sus: 0, bot: 0};
       s.total = Math.round((s.total + r.pnlFinal) * 100) / 100;
       s.rounds++;
       s.sus += r.sus ? 1 : 0;
+      s.bot += r.bot ? 1 : 0;
       if(best === null || r.pnlFinal > best.pnlFinal) best = r;
     }
     if(best) sb[best.p].wins++;
@@ -206,11 +211,12 @@ async function route(req, db){
         out.round = {n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed, expert: rd.expert, cash: rd.cash};
         for(const r of (await db.prepare("SELECT p, v FROM roundPnl WHERE code = ? AND n = ?")
                                 .bind(code, rd.n).all()).results) out.pnls[r.p] = r.v;
-        out.sus = {};
-        for(const r of (await db.prepare("SELECT p, body, sus FROM roundResults WHERE code = ? AND n = ?")
+        out.sus = {}; out.bot = {};
+        for(const r of (await db.prepare("SELECT p, body, sus, bot FROM roundResults WHERE code = ? AND n = ?")
                                 .bind(code, rd.n).all()).results){
           out.results[r.p] = r.body;
           if(r.sus) out.sus[r.p] = 1;
+          if(r.bot) out.bot[r.p] = 1;
         }
         // Blockorder-Journal der Expert-Runde – ANONYM (ohne p): das Rätselraten am
         // Tisch ist Teil des Spiels, und niemand kann Strategien nachhandeln.
@@ -364,13 +370,15 @@ async function route(req, db){
         return err(422, "mismatch");
       // 🤨-Verdacht: verdächtig nah an der Orakel-Obergrenze (nur bei nennenswertem Plus)
       const sus = rep.pnl > cash0 * 0.05 && rep.pnl >= oracleMaxPnl(mkt, ticks, cash0) * SUS_FRAC ? 1 : 0;
+      // 🤖-Verdacht: Timing-Heuristik (Vorwissens-Einstiege / Maschinen-Reaktion)
+      const bot = botSuspicion(mkt, body.log, ticks).bot ? 1 : 0;
       const r = await db.prepare(
-        `INSERT INTO roundResults(code, n, p, body, pnlFinal, sus, created) VALUES(?,?,?,?,?,?,?)
+        `INSERT INTO roundResults(code, n, p, body, pnlFinal, sus, bot, created) VALUES(?,?,?,?,?,?,?,?)
          ON CONFLICT(code, n, p) DO NOTHING`)
-        .bind(code, n, p, res, rep.pnl, sus, now).run();
+        .bind(code, n, p, res, rep.pnl, sus, bot, now).run();
       if(r.meta.changes !== 1) return err(409, "write-once");
       await touch();
-      return json({ok: true, pnl: rep.pnl, sus}, 201);
+      return json({ok: true, pnl: rep.pnl, sus, bot}, 201);
     }
     if(kind === "pnl"){
       const body = await readJson(req);

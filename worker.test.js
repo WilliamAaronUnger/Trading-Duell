@@ -113,13 +113,15 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
      "unmögliche Order (Verkauf ohne Stücke) → 422");
   r = await call("PUT", `/room/${R.code}/round/1/result/1?pnl=${pnlA}`, rbody("anna1", logA), {"x-token": R.token});
   const conf = await r.json();
-  ok(r.status === 201 && conf.pnl === pnlA && conf.sus === 0, "Ergebnis p1: Replay bestätigt Server-Zahl (kein 🤨)");
+  ok(r.status === 201 && conf.pnl === pnlA && conf.sus === 0 && conf.bot === 0,
+     "Ergebnis p1: Replay bestätigt Server-Zahl (kein 🤨, kein 🤖)");
   ok((await call("PUT", `/room/${R.code}/round/1/result/1?pnl=${pnlA}`, rbody("anna1", logA), {"x-token": R.token})).status === 409, "write-once → 409");
   ok((await call("PUT", `/room/${R.code}/round/1/result/2?pnl=${pnlB}`, rbody("ben1", logB), {"x-token": ben.token})).status === 201, "Ergebnis p2 (Short-Log repliziert)");
   ok((await call("PUT", `/room/${R.code}/round/1/result/2`, rbody("x", logB), {"x-token": ben.token})).status !== 201, "Ergebnis ohne pnl-Angabe abgelehnt");
   st = await agg(R.code);
   ok(st.results["1"] === res6("anna1") && st.results["2"] === res6("ben1"), "Ergebnisse im Aggregat");
-  ok(st.sus && !st.sus["1"] && !st.sus["2"], "keine Verdachts-Flags für ehrliche Logs");
+  ok(st.sus && !st.sus["1"] && !st.sus["2"] && st.bot && !st.bot["1"] && !st.bot["2"],
+     "keine Verdachts-Flags (🤨/🤖) für ehrliche Logs");
   let sb = Object.fromEntries(st.scoreboard.map(s => [s.p, s]));
   const w1 = pnlA >= pnlB ? 1 : 2;
   ok(sb[w1].wins === 1 && sb[w1 === 1 ? 2 : 1].wins === 0 &&
@@ -212,6 +214,68 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 6*60000, R.code);
   r = await call("POST", `/room/${R.code}/start`, jbody({token: R.token, cash: 100000}));
   ok(r.status === 201 && (await r.json()).cash === 25000, "ohne Expert bleibt das Startkapital 25k");
+
+  // ---- 🤖 Bot-Verdacht: Timing-Heuristik (Hellseher-Einstiege / Maschinen-Reaktion) ----
+  // Deterministische Seed-Suche: ein 15-Min-Markt mit genug "blinden" Aufwärts-News
+  // (ohne Tipp, Kette oder Cluster davor) für ein Hellseher-Log und genug angezeigten
+  // Aufwärts-News für ein Nur-Schnell-Log. Beide Logs sind regelkonform replizierbar –
+  // nur ihr TIMING unterscheidet Bot von Mensch.
+  const TB = Math.round(15 * 60000 / TICK_MS);
+  const clusterW = Math.round(160000 / TICK_MS), earliest = Math.round(45000 / TICK_MS);
+  const upEvents = mkt => mkt.events.filter(e => (e.ev.jump || 0) >= 0.008 && e.ev.t !== "ALL" && !e.mega);
+  const blindUp = mkt => upEvents(mkt).filter(e => e.tick >= earliest &&
+    !mkt.tips.some(tp => tp.sym === e.ev.t) &&
+    !mkt.events.some(o => o !== e && o.tick < e.tick && o.tick >= e.tick - clusterW &&
+      (o.ev.t === e.ev.t || o.ev.t === "ALL")));
+  const pickDisjoint = (evs, entryOff, exitOff, want) => {  // überschneidungsfreie Round-Trips
+    const out = []; let free = -1;
+    for(const e of evs.slice().sort((a, b) => a.tick - b.tick)){
+      const t0 = e.tick + entryOff, t1 = e.tick + exitOff;
+      if(t0 <= free || t0 < 0 || t1 >= TB) continue;
+      out.push(e); free = t1 + 2;
+      if(out.length === want) return out;
+    }
+    return null;
+  };
+  const roundTrips = (mkt, evs, entryOff, exitOff) => evs.flatMap(e => {
+    const sym = e.ev.t, t0 = e.tick + entryOff;
+    const q = Math.max(1, Math.floor(1500 / mkt.paths[sym][t0]));
+    return [[t0, sym, "buy", q, 0], [e.tick + exitOff, sym, "sell", q, 0]];
+  });
+  let botSeed = 0, mktB = null, seher = null, flink = null;
+  for(let s = 1; s < 800 && !botSeed; s++){
+    const mkt = genMarket(s, TB);
+    const b = pickDisjoint(blindUp(mkt), -3, REACT_TICKS + 10, 3);   // Einstieg VOR der Anzeige
+    const u = pickDisjoint(upEvents(mkt), 1, REACT_TICKS + 6, 5);    // Einstieg ~1 s NACH der Anzeige
+    if(b && u){
+      botSeed = s; mktB = mkt;
+      seher = roundTrips(mkt, b, -3, REACT_TICKS + 10);
+      flink = roundTrips(mkt, u, 1, REACT_TICKS + 6);
+    }
+  }
+  ok(botSeed > 0, "Seed mit genug News-Material für die Bot-Logs gefunden");
+  const repB = {ticks: TB, cash: 25000, expert: false, room: true, journal: [], anchor: 0};
+  const repSeher = replayRound(mktB, seher, repB), repFlink = replayRound(mktB, flink, repB);
+  ok(repSeher.ok && repFlink.ok, "beide Bot-Test-Logs sind regelkonform replizierbar");
+  ok(botSuspicion(mktB, seher, TB).bot === true, "Hellseher-Log (3× Einstieg vor blinder News) → 🤖");
+  ok(botSuspicion(mktB, flink, TB).bot === false, "Maschinen-Timing allein → kein 🤖 (konservative Schwelle)");
+  ok(botSuspicion(mktB, logA, TB).bot === false, "ehrliches Mini-Log → kein 🤖");
+  // … und über die echte API: Runde mit präpariertem Seed, der Server flaggt beim PUT
+  const M = await (await call("POST", "/room", jbody({name: "Mia"}))).json();
+  const nils = await (await call("POST", `/room/${M.code}/join`, jbody({name: "Nils"}))).json();
+  r = await call("POST", `/room/${M.code}/start`, jbody({token: M.token, dur: 15}));
+  ok(r.status === 201, "Bot-Testraum: Runde startet");
+  db._db.prepare("UPDATE rounds SET seed = ?, startAt = ? WHERE code = ? AND n = 1")
+        .run(botSeed, Date.now() - 16 * 60000, M.code);
+  r = await call("PUT", `/room/${M.code}/round/1/result/1?pnl=${repSeher.pnl}`, rbody("mia", seher), {"x-token": M.token});
+  const confBot = await r.json();
+  ok(r.status === 201 && confBot.pnl === repSeher.pnl && confBot.bot === 1, "Hellseher-Log über die API → 201 mit 🤖");
+  ok((await call("PUT", `/room/${M.code}/round/1/result/2?pnl=${repFlink.pnl}`, rbody("nils", flink), {"x-token": nils.token})).status === 201,
+     "Nur-Schnell-Log über die API → angenommen, ohne Flag");
+  st = await agg(M.code);
+  ok(st.bot && st.bot["1"] === 1 && !st.bot["2"], "Aggregat: 🤖 nur für das Hellseher-Log");
+  sb = Object.fromEntries(st.scoreboard.map(s => [s.p, s]));
+  ok(sb[1].bot === 1 && sb[2].bot === 0, "Wertung zählt 🤖-Runden je Spieler");
 
   // ---- Verfall ----
   db._db.prepare("UPDATE rooms SET lastActive = ? WHERE code = ?").run(Date.now() - 25*3600*1000, solo.code);

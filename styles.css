@@ -23,26 +23,41 @@
   /* ============ Start-Screen ============ */
   .screen{display:none}
   .screen.show{display:block}
-  .start-hero{text-align:center;padding:46px 0 26px}
+  .start-hero{text-align:center;padding:44px 0 18px}
   .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent)}
-  .start-hero h1{font-size:30px;font-weight:800;letter-spacing:-.02em;margin-top:8px}
-  .start-hero p{color:var(--muted);font-size:14px;margin-top:8px;line-height:1.5}
-  .rec{margin-top:14px;text-align:center;font-family:var(--mono);font-size:13px;color:var(--muted)}
+  .start-hero h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin-top:10px}
+  .start-hero p{color:var(--muted);font-size:14px;margin-top:10px;line-height:1.55}
+  .rec{margin-top:16px;text-align:center;font-family:var(--mono);font-size:13px;color:var(--muted)}
   .rec b{color:var(--accent);font-weight:700}
-  .field{margin-top:14px}
+  .field{margin-top:20px}
   .field label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.16em;
-               text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+               text-transform:uppercase;color:var(--muted);margin-bottom:8px}
   .field input{width:100%;height:48px;border-radius:10px;border:1px solid var(--line);
                background:var(--panel);color:var(--text);font-size:16px;padding:0 14px}
   .field input:focus{outline:none}
   .field input.pl1:focus{border-color:var(--p1)}
   .field input.pl2:focus{border-color:var(--p2)}
   .dur-row{display:flex;gap:8px;margin-top:6px}
-  .dur{flex:1;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
-       color:var(--muted);font-family:var(--mono);font-size:14px;cursor:pointer}
+  .dur{flex:1;height:46px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+       color:var(--muted);font-family:var(--mono);font-size:14px;cursor:pointer;
+       padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dur.active{border-color:var(--accent);color:var(--text);background:#1A2340;font-weight:700}
-  .mode-hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.4}
+  .mode-hint{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.45;min-height:18px}
   .dur:disabled{opacity:.35;cursor:not-allowed}
+  /* Sekundäre Aktionen (Statistik/Scannen/Tutorial): leiser als der Start-Button */
+  .sec-actions{margin-top:20px}
+  .sec-row{display:flex;gap:8px}
+  .sec-btn{flex:1;height:44px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);
+           color:var(--muted);font-size:13px;font-weight:700;cursor:pointer}
+  .sec-btn.full{width:100%;margin-top:8px}
+  .sec-btn:hover{border-color:var(--accent);color:var(--text)}
+  /* Regeln aufklappbar – hält den ersten Blick aufgeräumt */
+  .rules-box{margin-top:26px;border-top:1px solid var(--line)}
+  .rules-box summary{list-style:none;cursor:pointer;padding:14px 2px 2px;font-family:var(--mono);
+                     font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .rules-box summary::-webkit-details-marker{display:none}
+  .rules-box summary::after{content:"▾";float:right;font-size:13px;transition:transform .2s}
+  .rules-box[open] summary::after{transform:rotate(180deg)}
   .code-err{font-family:var(--mono);font-size:12px;color:var(--down);margin-top:6px;min-height:16px}
   .code-badge{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:14px}
   .code-badge b{color:var(--accent);font-size:16px;letter-spacing:.14em}
@@ -54,8 +69,8 @@
                 background:var(--panel-2);color:var(--muted);font-size:14px;font-weight:700;cursor:pointer}
   .start-btn{width:100%;height:54px;margin-top:24px;border:none;border-radius:12px;
              background:var(--accent);color:#1A1206;font-size:17px;font-weight:800;cursor:pointer}
-  .rules{margin-top:22px;border-top:1px solid var(--line);padding-top:14px;color:var(--muted);
-         font-size:13px;line-height:1.7}
+  .rules{color:var(--muted);font-size:13px;line-height:1.7;padding-bottom:4px}
+  .rules-box .rules{margin-top:0;border-top:none;padding-top:6px}
 
   /* ============ Match: Topbar ============ */
   .topbar{position:sticky;top:0;z-index:20;background:rgba(11,16,32,.92);

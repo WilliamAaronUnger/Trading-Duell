@@ -47,7 +47,14 @@ A4 „Experten-Modus"), `ROADMAP.md`.
 7. **Stimmungsband = UI-Begleiter (A10 Stufe A fällt mit ab):** die Raum-Schieflage pro
    Aktie wird im Spiel (dezent) und auf der Leinwand (groß) angezeigt — so SIEHT man das
    Squeeze-Risiko wachsen, und Contrarian-Spiel wird eine echte Strategie.
-8. **Konservativ tunen, dann Test-Abend.** Wucht ist Gefühlssache, keine Rechenaufgabe.
+8. **Startkapital-Wahl (entschieden).** Im „Runden-Optionen"-Block wählt der Ersteller das
+   Startkapital der Runde: 10k / 25k / 50k / 100k $ (dieselbe Staffel wie die Sandbox,
+   `START_CASH` ist dafür schon ein `let`). Der Wert ist Teil der Runden-Ressource
+   (`rounds.cash`, Default 25 000, serverseitig gegen die Preset-Liste validiert) → alle
+   starten identisch. Abend-Wertung bleibt absolut (bewusst: „Finalrunde mit 100k" als
+   High-Stakes-Eskalation); der LOKALE Bestwert-Rekord wird nur bei 25k-Runden
+   aktualisiert (Vergleichbarkeit, wie Sandbox).
+9. **Konservativ tunen, dann Test-Abend.** Wucht ist Gefühlssache, keine Rechenaufgabe.
    Startwerte (alle als benannte Konstanten, justierbar):
    - Blockorder-Schwelle: Orderwert ≥ 20 % von `START_CASH` (5 000 $).
    - Flow-Impact je Blockorder: ~0,3 % (liquide Werte wie SPCX/MKT) bis ~2 % (kleine
@@ -59,8 +66,9 @@ A4 „Experten-Modus"), `ROADMAP.md`.
 
 ## Phase 1 — Server (worker.js v4 + worker.test.js)
 
-- `rounds` bekommt `expert INTEGER` (0/1); `POST /room/{code}/start {expert?}` nimmt das
-  Flag, das Aggregat liefert es mit der Runde aus.
+- `rounds` bekommt `expert INTEGER` (0/1) und `cash INTEGER` (Default 25000, nur
+  Preset-Werte); `POST /room/{code}/start {expert?, cash?}` nimmt beides, das Aggregat
+  liefert es mit der Runde aus.
 - Neue Tabelle `trades(code, n, id, p, tick, sym, side, vol, PK(code,n,id))` — `tick` wird
   SERVERSEITIG aus `startAt` gestempelt (nicht dem Client geglaubt), `vol` in groben
   Stufen normalisiert (kein exakter Depotblick). Nur bei `expert=1` angenommen.
@@ -73,6 +81,8 @@ A4 „Experten-Modus"), `ROADMAP.md`.
 
 ## Phase 2 — Client-Kern (game.js): Flow-Impact + Schlussauktion
 
+- `START_CASH = rd.cash` beim Rundenstart (Anzeige im Raum/Lobby-Kopf, z. B. „💰 50.000 $");
+  `updateRecord()` nur bei 25k-Runden.
 - Effektivkurs-Schicht NUR im Raum + Expert: `eff[sym][t] = paths[sym][t] × overlay(sym,t)`;
   Overlay deterministisch aus dem Journal (Ramp bei `tick+REACT_TICKS`, Fade, Deckel).
   `price()` liefert im Expert-Raum den Effektivkurs; `drawChart` bekommt die effektiven
@@ -99,6 +109,32 @@ A4 „Experten-Modus"), `ROADMAP.md`.
   laut IDEAS.md — auch in Solo denkbar, aber erst hier im Paket).
 - Abend-Wertung: optionale Auflösung „größter Marktbeweger" (🐘). Awards („🥷 Leisetreter")
   als späterer Polish.
+
+## Weitere Experten-Bausteine (Kandidaten, noch NICHT entschieden)
+
+Alle rein deterministisch (kein `rnd()`-Verbrauch, kein Server nötig), einzeln schaltbar
+denkbar, Reihenfolge = Empfehlung:
+
+1. **⭐ Limit- & Stop-Orders.** Vorgemerkte Orders („kaufe bei ≤ 95", „Stop-Loss bei 88"),
+   ausgeführt sobald der Kurs die Schwelle kreuzt (Prüfung in `processTick`). DER
+   Tiefgangs-Baustein: Absichern vor News, Abfischen von Panik-Spikes — und im
+   Experten-Raum die Profi-Antwort auf Squeezes („Limit in die Blase legen").
+   Größter UI-Aufwand der Liste (Order-Verwaltung im Depot), aber alle Modi profitieren.
+2. **Spread (Geld-/Briefkurs).** Kaufen leicht über, verkaufen leicht unter Kurs;
+   Spanne je Aktie über den `liq`-Trait (Synergie mit dem Impact-Tuning!) und für
+   ~30 s verbreitert nach News/Megas („dünnes Buch in der Panik"). Bestraft
+   Zappel-Trading realistischer als die flache Gebühr. Kleiner Eingriff in `trade()`.
+3. **Handelsstopp (Volatilitätsunterbrechung).** Bei Mega-Panik wird der betroffene
+   Wert für ~15 s vom Handel ausgesetzt (Buttons gesperrt, „⛔ Handel ausgesetzt",
+   Leinwand-Flash) — wie echte Circuit Breaker: wer den Crash nicht kommen sah,
+   kommt nicht mehr raus. Winziger Aufwand (deterministisch aus `market.events`),
+   großer Dramamoment.
+4. **(Später) Hebel & Margin-Call.** Kaufen auf Kredit mit Zwangsliquidierung bei
+   Unterdeckung. Maximales Risiko-Theater, aber balancing-heikel und erklärungs-
+   bedürftig — erst evaluieren, wenn der Rest des Pakets steht.
+
+Bereits gesetzt im Paket: dynamischer Markt (nur Raum), Short-Dividende, ACT-Haltekosten
+(IDEAS.md A4), Startkapital-Wahl (Entscheidung 8).
 
 ## Verifikation
 

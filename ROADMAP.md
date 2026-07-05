@@ -11,11 +11,12 @@ Evaluationen), `ONLINE-PLAN.md` (Architektur der Online-Schicht), `CLAUDE.md` (C
 ## 📍 Wo wir stehen (Lesezeichen, zuletzt Juli 2026)
 
 - **B1 erledigt** (Tests im Repo, CI nur manuell über Actions → „Tests" → Run workflow).
-- **B2 wartet auf einen Handgriff des Betreibers:** Database-ID der D1-Datenbank in
-  `wrangler.jsonc` eintragen (Platzhalter markiert), danach im Cloudflare-Dashboard den
-  Worker per „Settings → Build" mit dem GitHub-Repo verbinden (Build command leer,
-  Deploy `npx wrangler deploy`, Branch-Previews AUS).
-- **Danach als Nächstes: A1 (Live-Rennen).**
+- **B2: Database-ID eingetragen ✓** — letzter Handgriff des Betreibers: im Cloudflare-
+  Dashboard den Worker per „Settings → Build" mit dem GitHub-Repo verbinden (Build command
+  leer, Deploy `npx wrangler deploy`, Branch-Previews AUS). Der erste Build deployt dann
+  automatisch die pnl-Endpunkte für A1.
+- **A1 (Live-Rennen) umgesetzt** — Worker-Endpunkte + Live-Leiste in der Topbar.
+- **Danach als Nächstes: A2 (Online-Revanche), dann A9 (Leinwand).**
 - Neu aufgenommen: A9 (Leinwand-/Moderator-Ansicht) und A10 (dynamischer Online-Markt)
   — Details und Bewertung in `IDEAS.md`.
 
@@ -23,7 +24,7 @@ Evaluationen), `ONLINE-PLAN.md` (Architektur der Online-Schicht), `CLAUDE.md` (C
 
 ## Spur A — Features
 
-### A1. Live-Rennen (nächster großer Spielspaß-Gewinn)
+### A1. Live-Rennen — ✅ umgesetzt (Juli 2026)
 Während der Runde tickt neben dem eigenen P&L der der Mitspieler mit (alle ~3–5 s über den
 Worker gepollt; nur die Zahl, nie Positionen — sonst könnte man Strategien nachhandeln).
 Aus „jeder spielt für sich, Vergleich am Ende" wird ein echtes Kopf-an-Kopf-Rennen; bei
@@ -105,7 +106,7 @@ mehrere Geräte gegen den echten Worker-Handler) lebt nur in der Session. Plan:
   Empfehlung: vor jedem größeren Merge einmal auslösen. Lokal weiterhin jederzeit:
   `node worker.test.js && node e2e.test.js`.
 
-### B2. Worker-Deploy automatisieren — 🔧 vorbereitet (`wrangler.jsonc` im Repo)
+### B2. Worker-Deploy automatisieren — ✅ Repo-Seite fertig (Verbinden im Dashboard offen)
 Heute: `worker.js` wird nach jeder Server-Änderung von Hand ins Dashboard kopiert (bereits
 3× passiert, wird wieder passieren). Plan: **Workers Builds** (Git-Integration) —
 `wrangler.jsonc` ins Repo (Name, D1-Binding mit database_id, `main = worker.js`), Repo einmal

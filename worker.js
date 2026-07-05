@@ -20,6 +20,8 @@
                                           (seed erst ab startAt; joined = ≥2 – Kompatibilität für alte App-Versionen)
      PUT  /game/{code}/result/{p}      → 201                       Header x-token, Body SPCX5.…, write-once
      GET  /game/{code}/result/{p}      → Text | 404
+     PUT  /game/{code}/pnl/{p} {pnl}   → 200                       Live-Rennen: eigenen P&L melden (x-token, erst nach Start)
+     GET  /game/{code}/pnl             → {pnls:{p:v,…}}            Live-Rennen: alle P&L abholen
 
    Einträge älter als 24 h gelten als abgelaufen und werden beim Anlegen neuer Spiele
    gelöscht – räumt sich selbst auf. */
@@ -53,6 +55,8 @@ async function ensureSchema(db){
     code TEXT, p INTEGER, token TEXT, name TEXT, PRIMARY KEY(code, p))`).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS results(
     code TEXT, p INTEGER, body TEXT, created INTEGER, PRIMARY KEY(code, p))`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS pnl(
+    code TEXT, p INTEGER, v REAL, t INTEGER, PRIMARY KEY(code, p))`).run();
   schemaReady = true;
 }
 
@@ -82,6 +86,7 @@ async function route(req, db){
     // abgelaufene Spiele bei der Gelegenheit aufräumen
     const cut = now - TTL_MS;
     await db.prepare("DELETE FROM results WHERE created < ?").bind(cut).run();
+    await db.prepare("DELETE FROM pnl WHERE code IN (SELECT code FROM games WHERE created < ?)").bind(cut).run();
     await db.prepare("DELETE FROM players WHERE code IN (SELECT code FROM games WHERE created < ?)").bind(cut).run();
     await db.prepare("DELETE FROM games WHERE created < ?").bind(cut).run();
     const seedBuf = new Uint32Array(1); crypto.getRandomValues(seedBuf);
@@ -150,6 +155,34 @@ async function route(req, db){
             .bind(now + START_DELAY_MS, code).run();
     const cur = await db.prepare("SELECT startAt, seed FROM games WHERE code = ?").bind(code).first();
     return json({startAt: cur.startAt, seed: cur.seed});
+  }
+
+  // Live-Rennen: P&L melden/abholen – reine Anzeige-Daten, klein und überschreibbar
+  if(rest[0] === "pnl"){
+    if(rest.length === 1){
+      if(req.method !== "GET") return err(405, "method");
+      const rows = (await db.prepare("SELECT p, v FROM pnl WHERE code = ?").bind(code).all()).results;
+      const pnls = {};
+      for(const r of rows) pnls[r.p] = r.v;
+      return json({pnls});
+    }
+    if(rest.length === 2){
+      if(req.method !== "PUT") return err(405, "method");
+      const p = +rest[1];
+      if(!Number.isInteger(p) || p < 1 || p > MAX_PLAYERS) return err(400, "player");
+      const tok = await playerToken(p);
+      if(!tok || req.headers.get("x-token") !== tok) return err(403, "token");
+      if(!g.startAt) return err(409, "not started"); // Rennen gibt es erst ab dem Start
+      const body = await readJson(req);
+      const v = body && +body.pnl;
+      if(!Number.isFinite(v) || Math.abs(v) > 1e7) return err(400, "pnl");
+      await db.prepare(
+        `INSERT INTO pnl(code, p, v, t) VALUES(?,?,?,?)
+         ON CONFLICT(code, p) DO UPDATE SET v = excluded.v, t = excluded.t`)
+        .bind(code, p, Math.round(v * 100) / 100, now).run();
+      return json({ok: true});
+    }
+    return err(404, "not found");
   }
 
   if(rest[0] === "result" && rest.length === 2){

@@ -130,6 +130,19 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   st = await (await call("GET", "/game/" + g4.code)).json();
   ok(st.joined === true, "Alt-Client: joined-Flag vorhanden");
 
+  // ---- Live-Rennen: P&L melden/abholen ----
+  ok((await call("PUT", `/game/${g4.code}/pnl/1`, jbody({pnl: 5}), {"x-token": g4.token})).status === 409, "P&L vor Start → 409");
+  ok((await call("PUT", `/game/${g1.code}/pnl/1`, jbody({pnl: 123.456}), {"x-token": j2.token})).status === 403, "P&L mit fremdem Token → 403");
+  ok((await call("PUT", `/game/${g1.code}/pnl/1`, jbody({pnl: 123.456}), {"x-token": g1.token})).status === 200, "eigenen P&L melden → 200");
+  ok((await call("PUT", `/game/${g1.code}/pnl/2`, jbody({pnl: -42}), {"x-token": j2.token})).status === 200, "zweiter Spieler meldet → 200");
+  let pn = await (await call("GET", `/game/${g1.code}/pnl`)).json();
+  ok(pn.pnls["1"] === 123.46 && pn.pnls["2"] === -42, "GET liefert alle P&L (gerundet)");
+  await call("PUT", `/game/${g1.code}/pnl/1`, jbody({pnl: 200}), {"x-token": g1.token});
+  pn = await (await call("GET", `/game/${g1.code}/pnl`)).json();
+  ok(pn.pnls["1"] === 200, "P&L wird überschrieben (kein write-once)");
+  ok((await call("PUT", `/game/${g1.code}/pnl/1`, jbody({pnl: "quatsch"}), {"x-token": g1.token})).status === 400, "kaputter P&L → 400");
+  ok((await call("GET", `/game/${g4.code}/pnl`)).status === 200, "GET P&L auch ohne Meldungen (leer)");
+
   // ---- Routing/CORS ----
   ok((await call("GET", "/game/000001")).status === 404, "unbekanntes Spiel → 404");
   ok((await call("GET", "/game/abc")).status === 400, "kaputter Code → 400");

@@ -145,6 +145,16 @@ const noop=()=>{};
       && $id("lobbyStartBtn").textContent.indexOf("3 Spieler")>=0;
     await $id("lobbyStartBtn").onclick();
     out["3er: gearmt, Roster gemerkt"]= marketSeed!==null && startAt>Date.now() && (onlineGame.players||[]).length===3;
+    // Live-Rennen: F meldet P&L per API, E synct und rendert die Leiste
+    players=[newPlayer("Anna","var(--p1)")]; round=0;
+    await fetch(ONLINE_API+"/game/"+E.onlineGame.code+"/pnl/2",
+      {method:"PUT",body:JSON.stringify({pnl:-50}),headers:{"x-token":jF.token}});
+    await syncRace();
+    const rr=$id("raceRow").innerHTML||"";
+    out["Rennen: Leiste zeigt alle (eigener zuerst, Krone)"]=
+      rr.indexOf("Anna")>=0 && rr.indexOf("Ben")>rr.indexOf("Anna") &&
+      rr.indexOf("\ud83d\udc51")>=0 && rr.indexOf("…")>=0;
+    out["Rennen: fremder P&L angekommen"]= racePnls["2"]===-50;
     const mk=(nm,pnl)=>{ const pl=newPlayer(nm,"var(--p2)"); pl.result={pnl:pnl,total:25000+pnl}; return pl; };
     await fetch(ONLINE_API+"/game/"+E.onlineGame.code+"/result/2",{method:"PUT",body:packResult(mk("Ben",-50)),headers:{"x-token":jF.token}});
     await fetch(ONLINE_API+"/game/"+E.onlineGame.code+"/result/3",{method:"PUT",body:packResult(mk("Cleo",200)),headers:{"x-token":jG.token}});

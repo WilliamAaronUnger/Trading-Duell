@@ -962,6 +962,56 @@ function showRankDetail(p){
   $("rankBack").style.display = "";
 }
 $("rankBack").onclick = () => { showRankView(); renderRanking(); };
+/* ===== Live-Rennen: eigenen P&L melden + alle abholen (nur Online-Runden) =====
+   Reine Anzeige (nur die Zahl, nie Positionen) – Fairness unberührt. ~Alle 5 s ein
+   PUT + GET; Netzfehler werden still geschluckt, die Leiste zeigt dann alte Werte. */
+let raceTimer = null, racePnls = {};
+function startRace(){
+  stopRace();
+  if(mode !== "remote" || !onlineGame || onlineGame.seed == null) return;
+  if(!(onlineGame.players || []).length) return;
+  racePnls = {};
+  $("raceRow").style.display = "";
+  $("raceRow").innerHTML = "";
+  raceTimer = setInterval(syncRace, 5000);
+  syncRace();
+}
+function stopRace(){
+  clearInterval(raceTimer); raceTimer = null;
+  $("raceRow").style.display = "none";
+}
+async function syncRace(){
+  const og = onlineGame;
+  if(!og){ stopRace(); return; }
+  const own = totalOf(players[round]) - START_CASH;
+  try{
+    await api("/game/" + og.code + "/pnl/" + og.p,
+              {method: "PUT", body: JSON.stringify({pnl: Math.round(own * 100) / 100}),
+               headers: {"x-token": og.token}});
+  }catch(e){}
+  try{
+    const r = await apiJson("/game/" + og.code + "/pnl");
+    if(onlineGame === og && r.pnls) racePnls = r.pnls;
+  }catch(e){}
+  if(onlineGame === og) renderRace(own);
+}
+function renderRace(own){
+  const roster = (onlineGame && onlineGame.players) || [];
+  if(roster.length < 2) return;
+  const rows = roster.map(pl => ({
+    p: pl.p, name: pl.name, me: pl.p === onlineGame.p,
+    v: pl.p === onlineGame.p ? own : (racePnls[pl.p] !== undefined ? racePnls[pl.p] : null),
+  })).sort((a, b) => (b.v === null ? -Infinity : b.v) - (a.v === null ? -Infinity : a.v));
+  let html = "";
+  rows.forEach((r, i) => {
+    const val = r.v === null ? "…" : sgn(r.v);
+    const cls = r.v === null ? "" : (r.v >= 0 ? " up" : " down");
+    html += `<span class="race-chip${r.me ? " me" : ""}">${i === 0 && r.v !== null ? "👑 " : ""}` +
+            `${esc(r.name)} <b class="rc${cls}">${val}</b></span>`;
+  });
+  $("raceRow").innerHTML = html;
+}
+
 /* Fehlende Ergebnisse einsammeln (~3 s Takt, 20-Min-Deckel) und die Liste füllen */
 function pollRankResults(){
   clearTimeout(rankTimer);
@@ -1095,6 +1145,7 @@ function startRound(r){
     timer = setInterval(tick, TICK_MS);
     lastTickAt = performance.now();
     startChartLoop();
+    startRace(); // Live-Rennen (nur Online-Runden; sonst sofortiger No-op)
     saveSnapshot("play");
     renderAll();
   };
@@ -1855,6 +1906,7 @@ function endRound(){
   over = true;
   clearInterval(timer);
   stopChartLoop();
+  stopRace();
   if(sandbox) matchTicks = tickCount; else tickCount = matchTicks;
   const p = players[round];
   payDividend(p, false); // letzte aufgelaufene Dividende noch auszahlen

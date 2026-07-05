@@ -1182,16 +1182,18 @@ function startRound(r){
   // Remote läuft strikt nach Weltzeit – keine Pause möglich; im Tutorial pausiert der Coach
   $("pauseBtn").style.display = (wallClock() || tutorial) ? "none" : "";
   $("endSandboxBtn").style.display = sandbox ? "" : "none";
-  roundAnchor = mode === "remote" ? startAt : Date.now();
+  roundAnchor = wallClock() ? startAt : Date.now();
   $("roundTag").textContent = tutorial
     ? "🎓 Tutorial"
     : (mode === "solo" && sandbox)
       ? "🏖️ Sandbox"
       : mode === "solo"
         ? "Einzelspiel"
-        : mode === "remote"
-          ? `Code ${String(gameCode).padStart(6,"0")}`
-          : `Runde ${r+1}/2`;
+        : mode === "room"
+          ? `🌐 Runde ${room && room.played ? room.played : 1}`
+          : mode === "remote"
+            ? `Code ${String(gameCode).padStart(6,"0")}`
+            : `Runde ${r+1}/2`;
 
   const p = players[round];
   $("pillDot").style.background = p.color;

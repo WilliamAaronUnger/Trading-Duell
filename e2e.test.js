@@ -27,7 +27,9 @@ const noop = () => {};
   // ---- DOM-/Browser-Stub ----
   const els = {};
   const store = {};
-  const ctx2d = new Proxy({}, {get: () => () => {}, set: () => true});
+  // Canvas-2D-Stub: jede Methode gibt den Proxy selbst zurück, damit verkettete Aufrufe
+  // (z. B. createLinearGradient().addColorStop()) im echten drawChart nicht crashen.
+  const ctx2d = new Proxy({}, {get: () => (() => ctx2d), set: () => true});
   const mkEl = () => new Proxy(function(){}, {
     get: (t, p) => { if(p === "classList") return {add: noop, remove: noop, toggle: noop, contains: () => false};
       if(p === "style") return t.__style || (t.__style = {});

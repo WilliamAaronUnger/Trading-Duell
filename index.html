@@ -190,7 +190,13 @@
     </div>
     <div class="wall-main">
       <div class="wall-chartbox">
-        <div class="wall-focus"><b id="wallSym">SPCX</b> <span id="wallPx"></span> <span id="wallChg"></span></div>
+        <div class="wall-focus">
+          <b id="wallSym">SPCX</b> <span id="wallPx"></span> <span id="wallChg"></span>
+          <span class="wall-ctg" id="wallToggle">
+            <button class="ctg active" data-w="line">Linie</button>
+            <button class="ctg" data-w="candle">Kerzen</button>
+          </span>
+        </div>
         <canvas id="wallChart"></canvas>
       </div>
       <div class="wall-board">

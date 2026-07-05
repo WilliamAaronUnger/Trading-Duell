@@ -41,6 +41,15 @@
   /* Raum: sechs Dauer-Knöpfe → sauber als 2×3-Raster umbrechen */
   #roomDurRow{flex-wrap:wrap}
   #roomDurRow .dur{flex:1 1 30%}
+  /* Runden-Optionen (nur Ersteller): 🎓-Toggle als Checkbox-Zeile */
+  .opt-row{display:flex;gap:10px;width:100%;text-align:left;align-items:flex-start;
+           background:var(--panel);border:1px solid var(--line);border-radius:10px;
+           padding:12px;color:var(--text);cursor:pointer;font-size:14px}
+  .opt-row.on{border-color:var(--accent);background:#141C33}
+  .opt-row .opt-check{font-size:18px;line-height:1.2;color:var(--muted)}
+  .opt-row.on .opt-check{color:var(--accent)}
+  .opt-row .opt-body{display:block}
+  .opt-row .opt-sub{display:block;color:var(--muted);font-size:12px;margin-top:3px;line-height:1.45}
   .dur{flex:1;height:46px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
        color:var(--muted);font-family:var(--mono);font-size:14px;cursor:pointer;
        padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

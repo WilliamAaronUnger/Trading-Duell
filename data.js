@@ -7,34 +7,34 @@ const REACT_TICKS = Math.round(8000 / TICK_MS);
    Markt-Seed, Auto-Ergebnisvergleich. Leerer String = Online komplett aus (rein offline). */
 const ONLINE_API = "https://spcx-duell.william-aaron-unger.workers.dev";
 const STOCK_DEFS = {
-  SPCX:{name:"SpaceX",     type:"growth",   start:135.00, sigma:0.0015, drift:0.00001, newsMult:1.25,
+  SPCX:{name:"SpaceX",     type:"growth",   start:135.00, sigma:0.0015, drift:0.00001, newsMult:1.25, liq:3.0,
         char:"🚀 Hype-Wert: reagiert besonders heftig auf News"},
-  TSLA:{name:"Tesla",      type:"growth",   start:312.40, sigma:0.0010, drift:0, momentum:0.45,
+  TSLA:{name:"Tesla",      type:"growth",   start:312.40, sigma:0.0010, drift:0, momentum:0.45, liq:2.0,
         char:"📈 Momentum-Wert: Trends verstärken sich selbst"},
-  NVDA:{name:"NVIDIA",     type:"dividend", start:176.80, sigma:0.0008, drift:0, meanRev:0.002, divMult:0.8,
+  NVDA:{name:"NVIDIA",     type:"dividend", start:176.80, sigma:0.0008, drift:0, meanRev:0.002, divMult:0.8, liq:2.5,
         char:"🛡️ Stabiler Riese: schwankt wenig, zahlt Dividende"},
-  RKLB:{name:"Rocket Lab", type:"risk",     start:38.65,  sigma:0.0011, drift:0, spikeP:0.006, spikeMag:0.010,
+  RKLB:{name:"Rocket Lab", type:"risk",     start:38.65,  sigma:0.0011, drift:0, spikeP:0.006, spikeMag:0.010, liq:0.5,
         char:"🎢 Zock-Papier: lange ruhig, dann plötzliche Sprünge"},
-  AMZN:{name:"Amazon",     type:"dividend", start:185.00, sigma:0.0009, drift:0, meanRev:0.0015, divMult:0.9,
+  AMZN:{name:"Amazon",     type:"dividend", start:185.00, sigma:0.0009, drift:0, meanRev:0.0015, divMult:0.9, liq:2.5,
         char:"🐢 Schwergewicht: bedächtig, zahlt Dividende"},
-  AAPL:{name:"Apple",      type:"dividend", start:228.00, sigma:0.0007, drift:0, meanRev:0.0025, divMult:1.1,
+  AAPL:{name:"Apple",      type:"dividend", start:228.00, sigma:0.0007, drift:0, meanRev:0.0025, divMult:1.1, liq:3.0,
         char:"🍎 Sicherer Hafen: ruhig, zahlt Dividende"},
-  MSFT:{name:"Microsoft",  type:"dividend", start:430.00, sigma:0.0008, drift:0.00001,
+  MSFT:{name:"Microsoft",  type:"dividend", start:430.00, sigma:0.0008, drift:0.00001, liq:3.0,
         char:"🏢 Solider Wachstumswert: ruhiger Aufwärtstrend, Dividende"},
-  GOOGL:{name:"Alphabet",  type:"growth",   start:190.00, sigma:0.0010, drift:0, newsMult:1.15,
+  GOOGL:{name:"Alphabet",  type:"growth",   start:190.00, sigma:0.0010, drift:0, newsMult:1.15, liq:2.0,
         char:"🔎 Nachrichten-getrieben: reagiert spürbar auf Schlagzeilen"},
-  AMD:{name:"AMD",         type:"growth",   start:165.00, sigma:0.0012, drift:0, momentum:0.40,
+  AMD:{name:"AMD",         type:"growth",   start:165.00, sigma:0.0012, drift:0, momentum:0.40, liq:1.2,
         char:"⚡ Trendläufer: Bewegungen verstärken sich"},
-  META:{name:"Meta",       type:"risk",     start:600.00, sigma:0.0011, drift:0, spikeP:0.005, spikeMag:0.011,
+  META:{name:"Meta",       type:"risk",     start:600.00, sigma:0.0011, drift:0, spikeP:0.005, spikeMag:0.011, liq:1.5,
         char:"🎭 Stimmungswert: kann sprunghaft drehen"},
 };
 const ETF_SYM = "MKT", ETF_BASE = 100.00;
-const ETF_DEF = {name:"Markt-ETF", type:"index", start:ETF_BASE,
+const ETF_DEF = {name:"Markt-ETF", type:"index", start:ETF_BASE, liq:4.0,
                  char:"📊 Markt-ETF: ganzer Markt, ruhig, zahlt erhöhte Dividende fürs Sparen"};
 /* Zweites synthetisches Instrument: aktiver, gehebelter Wachstumskorb – hohe Vola,
    hohe Ordergebühr, KEINE Dividende, KEIN garantierter Vorteil. Wie MKT abgeleitet. */
 const ETF2_SYM = "ACT", ETF2_BASE = 100.00;
-const ETF2_DEF = {name:"Aktiv-Fonds", type:"active", start:ETF2_BASE,
+const ETF2_DEF = {name:"Aktiv-Fonds", type:"active", start:ETF2_BASE, liq:1.0,
                   char:"⚡ Aktiv-Fonds: gehebelter Wachstumskorb – hohe Chance, hohes Risiko, teure Order"};
 const ACTIVE_LEV = 3.0;            // Hebel auf die %-Abweichung des Korbs (~Vola der wildesten Aktie)
 const ACTIVE_FEE_PCT = 0.005;      // 0,5 % Ordergebühr (≈3× normal)
@@ -45,6 +45,17 @@ const DISPLAY_SYMS = [...Object.keys(STOCK_DEFS), ETF_SYM, ETF2_SYM];
 const FEE_PCT = 0.0015;                                  // 0,15 % Gebühr je Order (Normalfall)
 const feeRate = sym => sym === ETF2_SYM ? ACTIVE_FEE_PCT : FEE_PCT;   // Aktiv-Fonds teurer
 const feeOf = (v, sym) => Math.round(v * feeRate(sym) * 100) / 100;   // auf Cent gerundet (keine Float-Drift)
+/* ===== Experten-Modus (IMPACT-PLAN.md): Tuning-Konstanten =====
+   liq = Markttiefe je Wert (höher = träger; siehe liq-Trait in STOCK_DEFS). Alle
+   Impact-Formeln sind reine Funktionen des Server-Journals – kein rnd()-Verbrauch. */
+const BLOCK_MIN_FRAC    = 0.2;    // Blockorder ab 20 % des Startkapitals
+const IMPACT_BASE       = 0.008;  // Preis-Impact je vol=1.0 bei liq=1 (0,8 %)
+const IMPACT_CAP        = 0.05;   // Deckel des Gesamt-Overlays je Aktie (±5 %)
+const IMPACT_RAMP_TICKS = Math.round(5000 / TICK_MS);   // Wirkung rampt über ~5 s herein
+const IMPACT_FADE_TICKS = Math.round(60000 / TICK_MS);  // ~60 s Rückgabe des Großteils
+const IMPACT_KEEP       = 1/3;    // Anteil, der dauerhaft bleibt
+const CASH_PRESETS      = [10000, 25000, 50000, 100000]; // Startkapital-Wahl (Expert)
+const liqOf = sym => defOf(sym).liq || 1;
 const DIV_PCT = 0.00006;                                 // ~2,5 % Brutto-Dividende übers 10-Min-Spiel (Einzelwerte; je Wert via divMult gespreizt)
 const DIV_PCT_ETF = 0.00010;                             // ~4,2 % – Sparplan-Bonus, macht den Index-Stil gegen aktives Traden konkurrenzfähig
 const DIV_PAYOUT = Math.max(1, Math.round(20000 / TICK_MS)); // Dividende wird alle ~20 s sichtbar ausgezahlt

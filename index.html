@@ -173,6 +173,23 @@
         <div class="code-err" id="roomErr"></div>
       </div>
       <div class="mode-hint" id="roomWaitHint" style="display:none;text-align:center;margin-top:10px"></div>
+      <!-- Runden-Optionen: eigener Block unterhalb des Start-Bereichs, nur für den Ersteller -->
+      <div class="field" id="roomOptField" style="display:none">
+        <label>Runden-Optionen</label>
+        <button class="opt-row" id="expertToggle"><span class="opt-check">☐</span>
+          <span class="opt-body"><b>🎓 Experten-Modus</b>
+          <span class="opt-sub">Blockorders bewegen den Markt · Squeeze · Spread · Limit-Orders · Handelsstopp · Short-Leihgebühr</span></span>
+        </button>
+        <div id="expertCash" style="display:none;margin-top:10px">
+          <label>💰 Startkapital</label>
+          <div class="dur-row">
+            <button class="dur rcash" data-c="10000">10k $</button>
+            <button class="dur rcash" data-c="25000">25k $</button>
+            <button class="dur rcash" data-c="50000">50k $</button>
+            <button class="dur rcash" data-c="100000">100k $</button>
+          </div>
+        </div>
+      </div>
       <div class="field">
         <label>Im Raum · <span id="roomCount" class="room-count"></span></label>
         <div id="roomMembers"></div>

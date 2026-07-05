@@ -130,7 +130,8 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   ok((await call("POST", `/room/${L.code}/join`, jbody({name: "Nr21"}))).status === 409, "21. Spieler → 409 (voll)");
   const wallJoin = await call("POST", `/room/${L.code}/join`, jbody({name: "TV", role: "wall"}));
   ok(wallJoin.status === 200, "Leinwand kommt trotz vollem Raum rein");
-  ok((await call("POST", `/room/${L.code}/role`, jbody({token: (await wallJoin.json()).token, role: "player"}))).status === 409,
+  const wallTok = (await wallJoin.json()).token;
+  ok((await call("POST", `/room/${L.code}/role`, jbody({token: wallTok, role: "player"}))).status === 409,
      "Leinwand → Spieler scheitert am Limit");
 
   // ---- Längere Rundendauern (nur Raum; Offline-Codes bleiben bei 5/10/15) ----
@@ -139,6 +140,42 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 11*60000, L.code);
   r = await call("POST", `/room/${L.code}/start`, jbody({token: L.token, dur: 60}));
   ok(r.status === 201 && (await r.json()).dur === 60, "lange Dauer 60 Min erlaubt");
+
+  // ---- Experten-Runden: Flag, Startkapital, Blockorder-Journal ----
+  db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 61*60000, L.code);
+  r = await call("POST", `/room/${L.code}/start`, jbody({token: L.token, expert: true, cash: 50000}));
+  const rdE = await r.json();
+  ok(r.status === 201 && rdE.expert === 1 && rdE.cash === 50000, "Expert-Runde mit 50k Startkapital");
+  st = await agg(L.code);
+  ok(st.round.expert === 1 && st.round.cash === 50000 && Array.isArray(st.trades) && st.trades.length === 0,
+     "Aggregat: Expert-Flag, Kapital, leeres Journal");
+  ok((await call("POST", `/room/${L.code}/round/${rdE.n}/trade`, jbody({sym: "SPCX", side: "buy", vol: 0.5}),
+     {"x-token": L.token})).status === 409, "Blockorder vor Rundenstart → 409");
+  db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = ?").run(Date.now() - 60000, L.code, rdE.n);
+  r = await call("POST", `/room/${L.code}/round/${rdE.n}/trade`, jbody({sym: "SPCX", side: "buy", vol: 0.5}),
+     {"x-token": L.token});
+  const tr1 = await r.json();
+  ok(r.status === 201 && tr1.id === 1 && tr1.at > 0, "Blockorder angenommen, Server stempelt at");
+  st = await agg(L.code);
+  ok(st.trades.length === 1 && st.trades[0].sym === "SPCX" && st.trades[0].side === "buy" &&
+     st.trades[0].vol === 0.5 && !("p" in st.trades[0]), "Journal im Aggregat – anonym (ohne p)");
+  ok((await call("POST", `/room/${L.code}/round/${rdE.n}/trade`, jbody({sym: "NRG", side: "sell", vol: 0.3}),
+     {"x-token": L.token})).status === 429, "Rate-Limit: zweite Blockorder sofort → 429");
+  db._db.prepare("UPDATE trades SET at = at - 16000 WHERE code = ?").run(L.code);
+  r = await call("POST", `/room/${L.code}/round/${rdE.n}/trade`, jbody({sym: "NRG", side: "sell", vol: 9}),
+     {"x-token": L.token});
+  ok(r.status === 201, "nach dem Rate-Fenster wieder erlaubt");
+  st = await agg(L.code);
+  ok(st.trades.length === 2 && st.trades[1].vol === 2, "Volumen auf 2.0 gedeckelt");
+  ok((await call("POST", `/room/${L.code}/round/${rdE.n}/trade`, jbody({sym: "SPCX", side: "buy", vol: 1}),
+     {"x-token": wallTok})).status === 403, "Leinwand darf keine Blockorder senden");
+  ok((await call("POST", `/room/${L.code}/round/${rdE.n}/trade`, jbody({sym: "spcx!", side: "buy", vol: 1}),
+     {"x-token": L.token})).status === 400, "kaputtes Symbol → 400");
+  ok((await call("POST", `/room/${R.code}/round/2/trade`, jbody({sym: "SPCX", side: "buy", vol: 1}),
+     {"x-token": R.token})).status === 409, "Blockorder in Nicht-Expert-Runde → 409");
+  db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 6*60000, R.code);
+  r = await call("POST", `/room/${R.code}/start`, jbody({token: R.token, cash: 100000}));
+  ok(r.status === 201 && (await r.json()).cash === 25000, "ohne Expert bleibt das Startkapital 25k");
 
   // ---- Verfall ----
   db._db.prepare("UPDATE rooms SET lastActive = ? WHERE code = ?").run(Date.now() - 25*3600*1000, solo.code);

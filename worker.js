@@ -1,4 +1,4 @@
-/* Trading Duell – Cloudflare Worker v3: der Online-RAUM (Speicher: D1)
+/* Trading Duell – Cloudflare Worker v4: der Online-RAUM (Speicher: D1)
    Ein Raum ist der Treffpunkt für den Abend: Mitglieder treten EINMAL bei (QR/Code),
    sind mit Anwesenheit sichtbar und wählen ihre Rolle (🎮 Spieler / 🖥️ Leinwand).
    Der Ersteller startet Runde um Runde – jede mit frischem, geheimem Markt-Seed und
@@ -16,17 +16,29 @@
    - v3 ersetzt die alte /game-API vollständig; deren Tabellen werden entsorgt. Alte
      App-Versionen fallen dadurch sauber auf ihren Offline-Modus zurück.
 
+   v4 (Experten-Modus, siehe IMPACT-PLAN.md): Runden tragen `expert` (0/1) und `cash`
+   (Startkapital-Preset; ohne Expert immer 25 000). In Expert-Runden nehmen Spieler-Geräte
+   Blockorders an: POST …/trade wird SERVERSEITIG zeitgestempelt (`at`), anonym im
+   Aggregat als Journal veröffentlicht und clientseitig deterministisch in einen
+   Preis-Impact übersetzt (Meldung sofort, Wirkung erst REACT_TICKS später – dieselbe
+   Grammatik wie News, daher kein Latenz-Vorteil). Rate-Limit pro Spieler.
+
    Endpunkte (JSON; CORS offen, da öffentliche Spiel-API):
      POST /room {name}                          → {code, token, p:1, dur}
      POST /room/{code}/join {name, role?}       → {token, p, dur}   (auch während laufender Runde;
                                                    role "wall" umgeht das Spielerlimit)
      POST /room/{code}/role {token, role}       → {ok, role}        (player|wall; Limit-geprüft)
-     POST /room/{code}/start {token, dur?}      → {n, startAt, seed} (nur Ersteller, ≥2 Spieler,
-                                                   nicht während laufender Runde; dur wird neuer Standard)
+     POST /room/{code}/start {token, dur?, expert?, cash?}
+                                                → {n, startAt, seed, expert, cash} (nur Ersteller,
+                                                   ≥2 Spieler, nicht während laufender Runde;
+                                                   dur wird neuer Standard; cash nur mit expert)
      GET  /room/{code}?me={token}               → Aggregat {dur, curRound, members, round, pnls,
-                                                   results, scoreboard}; me = Anwesenheits-Herzschlag
-     PUT  /room/{code}/round/{n}/result/{p}?pnl=X → 201  (x-token, write-once, SPCX5.…, ≤600)
-     PUT  /room/{code}/round/{n}/pnl/{p} {pnl}  → 200   (x-token, überschreibbar) */
+                                                   results, scoreboard, trades?}; me = Herzschlag
+     PUT  /room/{code}/round/{n}/result/{p}?pnl=X → 201  (x-token, write-once, SPCX5./SPCX6., ≤700)
+     PUT  /room/{code}/round/{n}/pnl/{p} {pnl}  → 200   (x-token, überschreibbar)
+     POST /room/{code}/round/{n}/trade {sym, side, vol}
+                                                → 201 {id, at} (x-token, nur Spieler, nur laufende
+                                                   Expert-Runde, Rate-Limit; anonym im Aggregat) */
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -40,6 +52,9 @@ const DURS = [5, 10, 15, 20, 30, 60]; // erlaubte Rundendauern (Minuten) – die
                                       // code % 3 und bleiben deshalb bei 5/10/15
 const START_DELAY_MS = 10000;     // Puffer zwischen Start-Befehl und Rundenbeginn
 const MAX_PLAYERS = 20;           // Spieler-Rollen je Raum (Leinwände zählen nicht)
+const CASHES = [10000, 25000, 50000, 100000]; // Startkapital-Presets (nur Expert-Runden)
+const CASH_DEFAULT = 25000;
+const TRADE_RATE_MS = 15000;      // höchstens eine Blockorder je Spieler je 15 s
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {status, headers: {...CORS, "content-type": "application/json"}});
@@ -62,7 +77,15 @@ async function ensureSchema(db){
   await db.prepare(`CREATE TABLE IF NOT EXISTS members(
     code TEXT, p INTEGER, token TEXT, name TEXT, role TEXT, lastSeen INTEGER, PRIMARY KEY(code, p))`).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS rounds(
-    code TEXT, n INTEGER, seed INTEGER, dur INTEGER, startAt INTEGER, PRIMARY KEY(code, n))`).run();
+    code TEXT, n INTEGER, seed INTEGER, dur INTEGER, startAt INTEGER,
+    expert INTEGER DEFAULT 0, cash INTEGER DEFAULT 25000, PRIMARY KEY(code, n))`).run();
+  // Bestandsdatenbanken (v3) um die Expert-Spalten ergänzen – scheitert still, wenn schon da
+  for(const alter of ["ALTER TABLE rounds ADD COLUMN expert INTEGER DEFAULT 0",
+                      "ALTER TABLE rounds ADD COLUMN cash INTEGER DEFAULT 25000"])
+    try{ await db.prepare(alter).run(); }catch(e){}
+  await db.prepare(`CREATE TABLE IF NOT EXISTS trades(
+    code TEXT, n INTEGER, id INTEGER, p INTEGER, at INTEGER, sym TEXT, side TEXT, vol REAL,
+    PRIMARY KEY(code, n, id))`).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS roundResults(
     code TEXT, n INTEGER, p INTEGER, body TEXT, pnlFinal REAL, created INTEGER, PRIMARY KEY(code, n, p))`).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS roundPnl(
@@ -113,7 +136,7 @@ async function route(req, db){
     const body = await readJson(req);
     // verfallene Räume samt Anhang aufräumen
     const cut = now - TTL_MS;
-    for(const t of ["roundPnl", "roundResults", "rounds", "members"])
+    for(const t of ["trades", "roundPnl", "roundResults", "rounds", "members"])
       await db.prepare(`DELETE FROM ${t} WHERE code IN (SELECT code FROM rooms WHERE lastActive < ?)`)
               .bind(cut).run();
     await db.prepare("DELETE FROM rooms WHERE lastActive < ?").bind(cut).run();
@@ -159,14 +182,20 @@ async function route(req, db){
     const out = {dur: room.dur, curRound: room.curRound, members, round: null, pnls: {}, results: {},
                  scoreboard: await scoreboard(db, code)};
     if(room.curRound > 0){
-      const rd = await db.prepare("SELECT n, dur, startAt, seed FROM rounds WHERE code = ? AND n = ?")
+      const rd = await db.prepare("SELECT n, dur, startAt, seed, expert, cash FROM rounds WHERE code = ? AND n = ?")
                          .bind(code, room.curRound).first();
       if(rd){
-        out.round = {n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed};
+        out.round = {n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed, expert: rd.expert, cash: rd.cash};
         for(const r of (await db.prepare("SELECT p, v FROM roundPnl WHERE code = ? AND n = ?")
                                 .bind(code, rd.n).all()).results) out.pnls[r.p] = r.v;
         for(const r of (await db.prepare("SELECT p, body FROM roundResults WHERE code = ? AND n = ?")
                                 .bind(code, rd.n).all()).results) out.results[r.p] = r.body;
+        // Blockorder-Journal der Expert-Runde – ANONYM (ohne p): das Rätselraten am
+        // Tisch ist Teil des Spiels, und niemand kann Strategien nachhandeln.
+        if(rd.expert)
+          out.trades = (await db.prepare(
+            "SELECT id, at, sym, side, vol FROM trades WHERE code = ? AND n = ? ORDER BY id")
+            .bind(code, rd.n).all()).results;
       }
     }
     return json(out);
@@ -219,16 +248,59 @@ async function route(req, db){
       if(cur && now < cur.startAt + cur.dur * 60000) return err(409, "running");
     }
     const dur = body && DURS.includes(body.dur) ? body.dur : room.dur;
+    const expert = body && body.expert ? 1 : 0;
+    // Startkapital nur in Expert-Runden wählbar; sonst (und bei Nicht-Preset) Standard
+    const cash = expert && body && CASHES.includes(body.cash) ? body.cash : CASH_DEFAULT;
     const n = room.curRound + 1;
     const r = await db.prepare(
-      `INSERT INTO rounds(code, n, seed, dur, startAt) VALUES(?,?,?,?,?) ON CONFLICT(code, n) DO NOTHING`)
-      .bind(code, n, rndSeed(), dur, now + START_DELAY_MS).run();
+      `INSERT INTO rounds(code, n, seed, dur, startAt, expert, cash) VALUES(?,?,?,?,?,?,?)
+       ON CONFLICT(code, n) DO NOTHING`)
+      .bind(code, n, rndSeed(), dur, now + START_DELAY_MS, expert, cash).run();
     if(r.meta.changes !== 1) return err(409, "running"); // Doppel-Start im Rennen
     await db.prepare("UPDATE rooms SET curRound = ?, dur = ?, lastActive = ? WHERE code = ?")
             .bind(n, dur, now, code).run();
-    const rd = await db.prepare("SELECT n, dur, startAt, seed FROM rounds WHERE code = ? AND n = ?")
+    const rd = await db.prepare("SELECT n, dur, startAt, seed, expert, cash FROM rounds WHERE code = ? AND n = ?")
                        .bind(code, n).first();
-    return json({n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed}, 201);
+    return json({n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed, expert: rd.expert, cash: rd.cash}, 201);
+  }
+
+  // Blockorder melden: nur Spieler, nur während einer LAUFENDEN Expert-Runde.
+  // Der Server stempelt die Zeit (`at`) – daraus leiten alle Clients denselben
+  // Wirk-Tick ab. Anonymisierung passiert im Aggregat (p bleibt nur intern).
+  if(rest[0] === "round" && rest.length === 3 && rest[2] === "trade"){
+    if(req.method !== "POST") return err(405, "method");
+    const n = +rest[1];
+    if(!Number.isInteger(n) || n < 1) return err(400, "round");
+    const rd = await db.prepare("SELECT startAt, dur, expert FROM rounds WHERE code = ? AND n = ?")
+                       .bind(code, n).first();
+    if(!rd) return err(404, "unknown round");
+    if(!rd.expert) return err(409, "not expert");
+    if(now < rd.startAt || now >= rd.startAt + rd.dur * 60000) return err(409, "not running");
+    const m = await memberByToken(req.headers.get("x-token"));
+    if(!m) return err(403, "token");
+    if(m.role !== "player") return err(403, "wall");
+    const body = await readJson(req);
+    const sym = body && typeof body.sym === "string" && /^[A-Z0-9]{1,6}$/.test(body.sym) ? body.sym : null;
+    const side = body && (body.side === "buy" || body.side === "sell") ? body.side : null;
+    if(!sym || !side) return err(400, "trade");
+    // Volumen in grobe Stufen normalisieren (0.1 … 2.0 relativ zum Startkapital):
+    // kein exakter Depot-Einblick, aber genug Signal für die Impact-Formel.
+    let vol = +((body && body.vol) || 0);
+    if(!Number.isFinite(vol) || vol <= 0) return err(400, "vol");
+    vol = Math.min(2, Math.max(0.1, Math.round(vol * 10) / 10));
+    const last = await db.prepare("SELECT MAX(at) AS t FROM trades WHERE code = ? AND n = ? AND p = ?")
+                         .bind(code, n, m.p).first();
+    if(last && last.t && now - last.t < TRADE_RATE_MS) return err(429, "rate");
+    for(let i = 0; i < 3; i++){
+      const id = (await db.prepare("SELECT COALESCE(MAX(id),0)+1 AS id FROM trades WHERE code = ? AND n = ?")
+                          .bind(code, n).first()).id;
+      const r = await db.prepare(
+        `INSERT INTO trades(code, n, id, p, at, sym, side, vol) VALUES(?,?,?,?,?,?,?,?)
+         ON CONFLICT(code, n, id) DO NOTHING`)
+        .bind(code, n, id, m.p, now, sym, side, vol).run();
+      if(r.meta.changes === 1){ await touch(); return json({id, at: now}, 201); }
+    }
+    return err(409, "busy");
   }
 
   // Runden-Daten: /round/{n}/result/{p} und /round/{n}/pnl/{p}
@@ -245,7 +317,7 @@ async function route(req, db){
 
     if(kind === "result"){
       const body = (await req.text()).trim();
-      if(body.length > 600 || !body.startsWith("SPCX5.")) return err(400, "payload");
+      if(body.length > 700 || !/^SPCX[56]\./.test(body)) return err(400, "payload");
       const pnl = +url.searchParams.get("pnl");
       if(!Number.isFinite(pnl) || Math.abs(pnl) > 1e7) return err(400, "pnl");
       const r = await db.prepare(

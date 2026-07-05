@@ -89,6 +89,18 @@
   .live-pnl{font-family:var(--mono);font-size:14px;font-weight:700}
   .target{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted)}
   .target b{font-weight:700}
+  /* Online-Raum: zentrierte Karte – aufgeräumt auch auf großen Schirmen */
+  .room-panel{max-width:540px;margin:20px auto 8px;background:var(--panel);border:1px solid var(--line);
+              border-radius:16px;padding:22px 18px}
+  .room-head{text-align:center;padding:4px 0 2px}
+  .room-head .lobby-code{margin:8px 0 0}
+  .room-invite-toggle{width:auto;min-width:150px;height:40px;margin-top:12px;padding:0 18px}
+  .room-count{color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0}
+  #roomMembers,#roomScore{max-height:42vh;overflow-y:auto}
+  @media (min-width:560px){ /* zwei Spalten für die Listen, sobald Platz ist */
+    #roomMembers,#roomScore{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+    #roomMembers .room-member,#roomScore .rank-row{margin-top:0}
+  }
   /* Online-Raum: Mitglieder + Wertung */
   .room-member{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid var(--line);
                border-radius:10px;background:var(--panel-2);margin-top:6px}

@@ -776,6 +776,14 @@ const apiJson = async (path, opts) => (await api(path, opts)).json();
 
 /* Mitgliedschaft: {code, token, p, role, name, played, ts} – überlebt Reloads/App-Wechsel */
 let room = null, roomState = null, roomTimer = null, roomPhase = "idle", roomTickN = 0, roomDurPick = null;
+/* Einladung (QR + Link) ist einklappbar: automatisch offen, solange man allein ist,
+   danach zu – bis jemand den Knopf antippt (dann bleibt die Wahl bestehen). */
+let roomInviteOpen = true, roomInviteTouched = false;
+function applyRoomInvite(){
+  $("roomInvite").style.display = roomInviteOpen ? "" : "none";
+  $("roomInviteBtn").textContent = roomInviteOpen ? "▲ Einladung ausblenden" : "📤 Einladung";
+}
+$("roomInviteBtn").onclick = () => { roomInviteTouched = true; roomInviteOpen = !roomInviteOpen; applyRoomInvite(); };
 const ROOM_KEY = "spcx-duell-room";
 function saveRoomState(){
   if(!room) return;
@@ -820,6 +828,7 @@ function showRoomScreen(){
   const url = shareUrl("room", room ? room.code : "");
   const qrOk = url && typeof drawQR === "function" && drawQR($("roomQR"), url, {size:200});
   $("roomQRWrap").style.display = qrOk ? "" : "none";
+  roomInviteOpen = true; roomInviteTouched = false; applyRoomInvite(); // frisch: Einladung offen
   window.scrollTo(0, 0);
   startRoomTimer();
   roomTick();
@@ -978,6 +987,10 @@ function renderRoomScreen(st){
     ? "Warte auf Mitspieler – mindestens 2 Spieler nötig …"
     : "Der Ersteller startet die nächste Runde …";
   $("roomRoleBtn").textContent = room.role === "wall" ? "🎮 Wieder mitspielen" : "🖥️ Dieses Gerät als Leinwand";
+  // Teilnehmerzahl + Einladung automatisch ein-/ausklappen (offen, solange man allein ist)
+  const total = st.members.length;
+  $("roomCount").textContent = total + (total === 1 ? " Person" : " Personen");
+  if(!roomInviteTouched){ roomInviteOpen = playersN < 2; applyRoomInvite(); }
 }
 
 /* Runde angenommen: Markt aus dem Runden-Seed bauen und auf das gemeinsame

@@ -136,42 +136,46 @@
 
 <!-- ================= ONLINE-RAUM ================= -->
 <div class="screen" id="roomScreen">
-  <div class="wrap" style="max-width:480px">
-    <div class="start-hero" style="padding:30px 0 10px">
-      <div class="eyebrow">🌐 Online-Raum</div>
-      <div class="lobby-code" id="roomCodeBig"></div>
-      <div class="mode-hint" id="roomHint">Code oder QR an die Mitspieler – beitreten geht jederzeit.</div>
-    </div>
-    <button class="start-btn" id="roomShareBtn" style="height:44px;font-size:14px">📤 Einladung teilen</button>
-    <div class="qr-wrap" id="roomQRWrap" style="display:none">
-      <canvas id="roomQR" width="200" height="200"></canvas>
-      <div class="qr-hint">Oder mit der Kamera scannen</div>
-    </div>
-    <div class="field">
-      <label>Im Raum</label>
-      <div id="roomMembers"></div>
-    </div>
-    <div class="field" id="roomScoreField" style="display:none">
-      <label>Abend-Wertung</label>
-      <div id="roomScore"></div>
-    </div>
-    <div class="field" id="roomLiveField" style="display:none">
-      <label id="roomLiveLabel">Runde läuft</label>
-      <div id="roomLive"></div>
-    </div>
-    <div class="field" id="roomStartField" style="display:none">
-      <label>Nächste Runde (Dauer)</label>
-      <div class="dur-row" id="roomDurRow">
-        <button class="dur rdur" data-m="5">5 Min</button>
-        <button class="dur rdur" data-m="10">10 Min</button>
-        <button class="dur rdur" data-m="15">15 Min</button>
+  <div class="wrap">
+    <div class="room-panel">
+      <div class="room-head">
+        <div class="eyebrow">🌐 Online-Raum</div>
+        <div class="lobby-code" id="roomCodeBig"></div>
+        <button class="sec-btn room-invite-toggle" id="roomInviteBtn">📤 Einladung</button>
       </div>
-      <button class="start-btn" id="roomStartBtn" style="margin-top:10px">▶️ Runde starten</button>
-      <div class="code-err" id="roomErr"></div>
+      <div id="roomInvite" style="display:none">
+        <button class="start-btn" id="roomShareBtn" style="height:44px;font-size:14px;margin-top:14px">📤 Einladung teilen</button>
+        <div class="qr-wrap" id="roomQRWrap" style="display:none">
+          <canvas id="roomQR" width="200" height="200"></canvas>
+          <div class="qr-hint">Oder mit der Kamera scannen</div>
+        </div>
+      </div>
+      <div class="field" id="roomScoreField" style="display:none">
+        <label>🏆 Abend-Wertung</label>
+        <div id="roomScore"></div>
+      </div>
+      <div class="field" id="roomLiveField" style="display:none">
+        <label id="roomLiveLabel">Runde läuft</label>
+        <div id="roomLive"></div>
+      </div>
+      <div class="field" id="roomStartField" style="display:none">
+        <label>Nächste Runde (Dauer)</label>
+        <div class="dur-row" id="roomDurRow">
+          <button class="dur rdur" data-m="5">5 Min</button>
+          <button class="dur rdur" data-m="10">10 Min</button>
+          <button class="dur rdur" data-m="15">15 Min</button>
+        </div>
+        <button class="start-btn" id="roomStartBtn" style="margin-top:10px">▶️ Runde starten</button>
+        <div class="code-err" id="roomErr"></div>
+      </div>
+      <div class="mode-hint" id="roomWaitHint" style="display:none;text-align:center;margin-top:10px"></div>
+      <div class="field">
+        <label>Im Raum · <span id="roomCount" class="room-count"></span></label>
+        <div id="roomMembers"></div>
+      </div>
+      <button class="lobby-cancel" id="roomRoleBtn" style="margin-top:16px">🖥️ Dieses Gerät als Leinwand</button>
+      <button class="lobby-cancel" id="roomLeaveBtn" style="margin-top:10px">Raum verlassen</button>
     </div>
-    <div class="mode-hint" id="roomWaitHint" style="display:none;text-align:center;margin-top:10px"></div>
-    <button class="lobby-cancel" id="roomRoleBtn" style="margin-top:16px">🖥️ Dieses Gerät als Leinwand</button>
-    <button class="lobby-cancel" id="roomLeaveBtn" style="margin-top:10px">Raum verlassen</button>
   </div>
 </div>
 

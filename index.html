@@ -41,7 +41,8 @@
       </div>
       <div class="dur-row" id="modeSub" style="display:none">
         <button class="dur mode active" data-mode="local">📱 Gleiches Gerät</button>
-        <button class="dur mode" data-mode="remote">📱📱 Mehrere Geräte</button>
+        <button class="dur mode" data-mode="remote">📱📱 Offline</button>
+        <button class="dur mode" data-mode="room">🌐 Online-Raum</button>
       </div>
       <div class="mode-hint" id="modeHint"></div>
       <div class="dur-row" id="soloSub">
@@ -94,12 +95,15 @@
       deinen eigenen Rekord zu knacken.<br><br>
       <b style="color:var(--text)">👥 Mehrspieler · 📱 Gleiches Gerät:</b> Beide spielen nacheinander auf
       diesem Handy (Spieler 2 schaut bei Runde 1 nicht zu 🙈), danach wird automatisch verglichen.<br><br>
-      <b style="color:var(--text)">👥 Mehrspieler · 📱📱 Mehrere Geräte:</b> Du legst ein Spiel an und bekommst
-      einen 6-stelligen Code. <b style="color:var(--text)">2 bis 8 Spieler</b> treten damit auf ihren Geräten
-      bei – alle spielen exakt dasselbe Spiel; bei mehr als zwei gibt's am Ende die Rangliste.
-      Mit Internet wartet die Lobby auf deinen Gegner, ihr startet per Knopf exakt gleichzeitig
-      und der Vergleich öffnet sich am Ende von selbst. ⏱️ Ohne Internet gilt der Minuten-Start
-      und ihr tauscht die Ergebnis-Codes selbst aus.
+      <b style="color:var(--text)">👥 Mehrspieler · 📱📱 Offline:</b> Zwei Geräte, komplett ohne Internet:
+      gleicher 6-stelliger Code = exakt dasselbe Spiel, Start zur übernächsten vollen Minute,
+      danach tauscht ihr die Ergebnis-Codes selbst (Einfügen oder QR).<br><br>
+      <b style="color:var(--text)">👥 Mehrspieler · 🌐 Online-Raum:</b> Eröffne einen Raum und lade per
+      Code, Link oder QR ein – <b style="color:var(--text)">2 bis 20 Spieler</b>, Beitritt jederzeit.
+      Der Ersteller startet Runde um Runde (Dauer frei wählbar, geheimer Markt, gemeinsamer
+      Countdown), während der Runde läuft das Live-Rennen, am Ende füllt sich die Rangliste von
+      selbst und der Raum führt die Abend-Wertung. Jedes Gerät kann statt zu spielen auch als
+      🖥️ Leinwand dienen (TV/Beamer/Discord).
     </div>
     <button class="lobby-cancel" id="clearBtn" style="margin-top:10px;display:none">🗑 Gespeicherte Daten löschen</button>
   </div>
@@ -120,6 +124,47 @@
       <button class="lobby-cancel" id="statsCmpBtn" style="margin-top:0">⚔️ Vergleichen</button>
     </div>
     <button class="start-btn" id="statsBack" style="margin-top:14px">← Zurück</button>
+  </div>
+</div>
+
+<!-- ================= ONLINE-RAUM ================= -->
+<div class="screen" id="roomScreen">
+  <div class="wrap" style="max-width:480px">
+    <div class="start-hero" style="padding:30px 0 10px">
+      <div class="eyebrow">🌐 Online-Raum</div>
+      <div class="lobby-code" id="roomCodeBig"></div>
+      <div class="mode-hint" id="roomHint">Code oder QR an die Mitspieler – beitreten geht jederzeit.</div>
+    </div>
+    <button class="start-btn" id="roomShareBtn" style="height:44px;font-size:14px">📤 Einladung teilen</button>
+    <div class="qr-wrap" id="roomQRWrap" style="display:none">
+      <canvas id="roomQR" width="200" height="200"></canvas>
+      <div class="qr-hint">Oder mit der Kamera scannen</div>
+    </div>
+    <div class="field">
+      <label>Im Raum</label>
+      <div id="roomMembers"></div>
+    </div>
+    <div class="field" id="roomScoreField" style="display:none">
+      <label>Abend-Wertung</label>
+      <div id="roomScore"></div>
+    </div>
+    <div class="field" id="roomLiveField" style="display:none">
+      <label id="roomLiveLabel">Runde läuft</label>
+      <div id="roomLive"></div>
+    </div>
+    <div class="field" id="roomStartField" style="display:none">
+      <label>Nächste Runde (Dauer)</label>
+      <div class="dur-row" id="roomDurRow">
+        <button class="dur rdur" data-m="5">5 Min</button>
+        <button class="dur rdur" data-m="10">10 Min</button>
+        <button class="dur rdur" data-m="15">15 Min</button>
+      </div>
+      <button class="start-btn" id="roomStartBtn" style="margin-top:10px">▶️ Runde starten</button>
+      <div class="code-err" id="roomErr"></div>
+    </div>
+    <div class="mode-hint" id="roomWaitHint" style="display:none;text-align:center;margin-top:10px"></div>
+    <button class="lobby-cancel" id="roomRoleBtn" style="margin-top:16px">🖥️ Dieses Gerät als Leinwand</button>
+    <button class="lobby-cancel" id="roomLeaveBtn" style="margin-top:10px">Raum verlassen</button>
   </div>
 </div>
 
@@ -225,8 +270,6 @@
     <div class="lobby-code" id="lobbyCode"></div>
     <div class="sub" id="lobbySub"></div>
     <div class="lobby-start" id="lobbyStartRow">Start um <b id="lobbyTime"></b> Uhr · noch <b id="lobbyCount"></b></div>
-    <div class="lobby-start" id="lobbyOpp" style="display:none"></div>
-    <button class="start-btn" id="lobbyStartBtn" style="display:none;margin-top:16px;height:46px;font-size:15px">▶️ Jetzt starten</button>
     <div class="tip-line" id="lobbyTip"></div>
     <button class="start-btn" id="lobbyShare" style="margin-top:20px;height:46px;font-size:15px">📤 Einladung teilen</button>
     <div class="qr-wrap" id="lobbyQRWrap" style="display:none">
@@ -299,7 +342,6 @@
     <button class="lobby-cancel" id="rankBack" style="display:none;margin-top:10px">← Zur Rangliste</button>
     <div class="ana" id="analysis"></div>
     <div id="cmpBox" style="display:none">
-      <div class="code-err" id="cmpWait" style="display:none;color:var(--accent)">⏳ Warte auf das Ergebnis des Gegners – der Vergleich öffnet sich automatisch …</div>
       <button class="start-btn" id="shareBtn" style="margin-top:14px;height:44px;font-size:14px">📤 Mein Ergebnis teilen</button>
       <div class="field" style="text-align:left">
         <label>Ergebnis des Gegners einfügen</label>
@@ -308,8 +350,6 @@
       </div>
       <button class="lobby-cancel" id="cmpBtn" style="margin-top:0">⚔️ Vergleichen</button>
     </div>
-    <button class="start-btn" id="rematchOnlineBtn" style="display:none;margin-top:14px;height:44px;font-size:14px">🔁 Revanche – gleiche Runde, neues Spiel</button>
-    <button class="start-btn" id="rematchJoinBtn" style="display:none;margin-top:14px;height:44px;font-size:14px">🔁 Revanche angeboten – beitreten</button>
     <div class="code-badge">Spiel-Code: <b id="resCode"></b></div>
     <button class="start-btn" id="rematchBtn">Revanche</button>
   </div>

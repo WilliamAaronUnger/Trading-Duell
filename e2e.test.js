@@ -1,282 +1,267 @@
-/* Ende-zu-Ende-Tests für die Online-Schicht + Teil-Links. Ausführen mit:  node e2e.test.js
-   Braucht nur Node ≥ 22 (fetch, WebCrypto, node:sqlite), keine Abhängigkeiten.
-   Simuliert mehrere "Geräte" (DOM-Stub, getrennte localStorage-Zustände) gegen den ECHTEN
-   worker.js-Handler (D1 über node:sqlite): Lobby, Geheim-Seed, 2er-Auto-Vergleich,
-   3er-Rangliste, Reload-Robustheit, Offline-Fallback, ?join=/?vs=-Links. */
-const fs=require("fs"), os=require("os"), path=require("path"), {pathToFileURL}=require("url");
-const noop=()=>{};
-(async()=>{
-  // ---- Worker laden (echter Handler, KV als Map) ----
-  const tmp=path.join(os.tmpdir(),"spcx-w-"+process.pid+".mjs");
-  fs.copyFileSync(path.join(__dirname,"worker.js"),tmp);
-  const worker=(await import(pathToFileURL(tmp).href)).default; fs.unlinkSync(tmp);
-  const {DatabaseSync}=require("node:sqlite");
-  const sq=new DatabaseSync(":memory:");
-  const env={DB:{prepare(sql){return{_a:[],bind(...a){this._a=a;return this;},
-    async first(){const r=sq.prepare(sql).get(...this._a);return r===undefined?null:r;},
-    async run(){const i=sq.prepare(sql).run(...this._a);return{success:true,meta:{changes:Number(i.changes)}};},
-    async all(){return{results:sq.prepare(sql).all(...this._a)};}};}}};
-  global.__killFetch=false;
-  global.fetch=async(url,opts)=>{ if(global.__killFetch) throw new TypeError("network down");
-    return worker.fetch(new Request(url,opts),env); };
+/* Ende-zu-Ende-Tests: Offline-Modus (beweisbar OHNE Netz) + Online-Raum + Teil-Links.
+   Ausführen mit:  node e2e.test.js  – braucht nur Node ≥ 22, keine Abhängigkeiten.
+   Simuliert mehrere "Geräte" (DOM-Stub, je eigener Raum-Speicher) gegen den ECHTEN
+   worker.js-v3-Handler (D1 über node:sqlite): Raum-Lebenszyklus, Rollen/Leinwand,
+   Runden-Serie mit Abend-Wertung, Live-Rennen, Zuspätkommer, Reload, ?room=/?join=. */
+const fs = require("fs"), os = require("os"), path = require("path"), {pathToFileURL} = require("url");
+const noop = () => {};
 
-  // ---- DOM/Browser-Stub ----
-  const els={}, store={};
-  const ctx2d={fillStyle:"",fillRect:noop,clearRect:noop};
-  const mkEl=()=>new Proxy(function(){},{
-    get:(t,p)=>{ if(p==="classList")return{add:noop,remove:noop,toggle:noop,contains:()=>false};
-      if(p==="style")return t.__style||(t.__style={});
-      if(p==="getContext")return ()=>ctx2d;
-      if(p==="querySelectorAll")return ()=>[]; if(p==="querySelector")return ()=>mkEl();
-      if(["appendChild","addEventListener","setAttribute","focus","prepend","removeChild","scrollIntoView","dispatchEvent","play"].includes(p))return noop;
-      if(p==="dataset")return{}; if(p==="children")return[]; if(p==="clientWidth")return 200;
-      return t[p]!==undefined?t[p]:"";},
-    set:(t,p,v)=>{t[p]=v;return true;}, apply:()=>mkEl()});
-  global.document={getElementById:id=>els[id]||(els[id]=mkEl()),querySelectorAll:()=>[],querySelector:()=>mkEl(),addEventListener:noop,createElement:()=>mkEl(),body:mkEl()};
-  global.window={addEventListener:noop,devicePixelRatio:1,matchMedia:()=>({matches:false,addEventListener:noop}),location:{protocol:"https:",origin:"https://spcx.test",pathname:"/",search:"",href:"https://spcx.test/"}};
-  global.location=global.window.location; global.history={replaceState:noop};
-  global.navigator={serviceWorker:{register:()=>({catch:noop})}};
-  global.localStorage={getItem:k=>store[k]??null,setItem:(k,v)=>store[k]=v,removeItem:k=>delete store[k]};
-  global.performance={now:()=>0};global.requestAnimationFrame=noop;global.cancelAnimationFrame=noop;
-  global.addEventListener=noop;global.setInterval=()=>0;global.clearInterval=noop;
-  global.setTimeout=()=>0;global.clearTimeout=noop;global.alert=noop;
+(async () => {
+  // ---- Worker v3 laden (echter Handler, D1 = echtes SQLite) ----
+  const tmp = path.join(os.tmpdir(), "spcx-w-" + process.pid + ".mjs");
+  fs.copyFileSync(path.join(__dirname, "worker.js"), tmp);
+  const worker = (await import(pathToFileURL(tmp).href)).default;
+  fs.unlinkSync(tmp);
+  const {DatabaseSync} = require("node:sqlite");
+  const sq = new DatabaseSync(":memory:");
+  const env = {DB: {prepare(sql){ return {_a: [],
+    bind(...a){ this._a = a; return this; },
+    async first(){ const r = sq.prepare(sql).get(...this._a); return r === undefined ? null : r; },
+    async run(){ const i = sq.prepare(sql).run(...this._a); return {success: true, meta: {changes: Number(i.changes)}}; },
+    async all(){ return {results: sq.prepare(sql).all(...this._a)}; }};}}};
 
-  // ---- Spiel-Code + Hook laden ----
-  const qr=fs.readFileSync(path.join(__dirname,"qr.js"),"utf8");
-  const data=fs.readFileSync(path.join(__dirname,"data.js"),"utf8");
-  const game=fs.readFileSync(path.join(__dirname,"game.js"),"utf8");
+  // ---- fetch-Stub MIT Zähler: beweist, dass der Offline-Modus nichts sendet ----
+  let fetchCount = 0;
+  global.fetch = async (url, opts) => { fetchCount++; return worker.fetch(new Request(url, opts), env); };
+
+  // ---- DOM-/Browser-Stub ----
+  const els = {};
+  const store = {};
+  const ctx2d = {fillStyle: "", fillRect: noop, clearRect: noop};
+  const mkEl = () => new Proxy(function(){}, {
+    get: (t, p) => { if(p === "classList") return {add: noop, remove: noop, toggle: noop, contains: () => false};
+      if(p === "style") return t.__style || (t.__style = {});
+      if(p === "getContext") return () => ctx2d;
+      if(p === "querySelectorAll") return () => []; if(p === "querySelector") return () => mkEl();
+      if(["appendChild","addEventListener","setAttribute","focus","prepend","removeChild","scrollIntoView","dispatchEvent","play"].includes(p)) return noop;
+      if(p === "dataset") return {}; if(p === "children") return []; if(p === "clientWidth") return 200;
+      return t[p] !== undefined ? t[p] : ""; },
+    set: (t, p, v) => { t[p] = v; return true; }, apply: () => mkEl()});
+  global.document = {getElementById: id => els[id] || (els[id] = mkEl()), querySelectorAll: () => [],
+                     querySelector: () => mkEl(), addEventListener: noop, createElement: () => mkEl(), body: mkEl()};
+  global.window = {addEventListener: noop, devicePixelRatio: 1,
+                   matchMedia: () => ({matches: false, addEventListener: noop}),
+                   location: {protocol: "https:", origin: "https://spcx.test", pathname: "/", search: "", href: "https://spcx.test/"}};
+  global.location = global.window.location; global.history = {replaceState: noop};
+  global.navigator = {serviceWorker: {register: () => ({catch: noop})}};
+  global.localStorage = {getItem: k => (k in store ? store[k] : null), setItem: (k, v) => store[k] = v,
+                         removeItem: k => delete store[k]};
+  global.performance = {now: () => 0}; global.requestAnimationFrame = noop; global.cancelAnimationFrame = noop;
+  global.addEventListener = noop; global.setInterval = () => 0; global.clearInterval = noop;
+  global.setTimeout = () => 0; global.clearTimeout = noop; global.alert = noop;
+
+  const qr = fs.readFileSync(path.join(__dirname, "qr.js"), "utf8");
+  const data = fs.readFileSync(path.join(__dirname, "data.js"), "utf8");
+  const game = fs.readFileSync(path.join(__dirname, "game.js"), "utf8");
+
   const hookFn = async function(){
-    const out={};
-    const $id=id=>document.getElementById(id);
-    mode="remote"; sandbox=false; tutorial=false; over=false; START_CASH=25000;
+    const out = {};
+    const $id = id => document.getElementById(id);
+    const settle = async cond => { for(let i = 0; i < 300 && !cond(); i++) await Promise.resolve(); };
+    over = false; sandbox = false; tutorial = false; START_CASH = 25000;
 
-    // === Client A legt online an ===
-    durationMin=10; codeIn.value=""; market=null; onlineGame=null; marketSeed=null; startAt=0;
+    // ================= OFFLINE-MODUS: nachweislich NULL Netz-Requests =================
+    const fc0 = globalThis.__fetchCount();
+    mode = "remote"; durationMin = 10; codeIn.value = ""; market = null;
     await $id("startBtn").onclick();
-    out["A online angelegt (p1)"]= !!onlineGame && onlineGame.p===1;
-    out["Code 6-stellig, Dauer kodiert"]= /^\d{6}$/.test(String(onlineGame.code)) && (+onlineGame.code)%3===1;
-    out["Markt/Seed VOR Start unbekannt"]= market===null && marketSeed===null && startAt===0;
-    await pollLobby();
-    out["A wartet auf Gegner"]= $id("lobbyOpp").textContent.indexOf("niemand beigetreten")>=0;
-    const stash=()=>({onlineGame,marketSeed,gameCode,durationMin,market,startAt,players,soloP,matchTicks});
-    const restore=c=>{ ({onlineGame,marketSeed,gameCode,durationMin,market,startAt,players,soloP,matchTicks}=c); };
-    const A=stash();
-
-    // === Client B tritt bei (anderes Gerät: eigener localStorage!) ===
-    const aRec = localStorage.getItem("spcx-duell-lobby");
-    localStorage.removeItem("spcx-duell-lobby");
-    onlineGame=null; marketSeed=null; market=null; startAt=0; durationMin=15;
-    codeIn.value=String(A.gameCode);
+    out["Offline: Spiel angelegt, Markt sofort da"] = market !== null && /^\d{6}$/.test(String(gameCode));
+    out["Offline: Minuten-Start gesetzt"] = startAt > Date.now() && startAt % 60000 === 0;
+    const offCode = gameCode, offPath = JSON.stringify(market.paths.SPCX.slice(0, 40));
+    market = null; codeIn.value = String(offCode); // "zweites Gerät" mit demselben Code
     await $id("startBtn").onclick();
-    out["B beigetreten (p2), Dauer vom Server"]= !!onlineGame && onlineGame.p===2 && durationMin===10;
-    await pollLobby();
-    out["B: noch kein Start"]= startAt===0 && market===null;
-    const B=stash();
+    out["Offline: Beitritt → exakt derselbe Markt"] = JSON.stringify(market.paths.SPCX.slice(0, 40)) === offPath;
+    out["Offline: NULL Requests (bewiesen)"] = globalThis.__fetchCount() === fc0;
 
-    // === A sieht Beitritt und startet ===
+    // ================= RAUM: Geräte-Simulation =================
+    const stash = () => ({mode, room: room && Object.assign({}, room), roomState, roomPhase, roomTickN, roomDurPick,
+                          marketSeed, gameCode, durationMin, market, startAt, players, soloP,
+                          rankResults, rankRoom, over, round, matchTicks,
+                          _rk: localStorage.getItem("spcx-duell-room")});
+    const restore = c => { ({mode, roomState, roomPhase, roomTickN, roomDurPick,
+                             marketSeed, gameCode, durationMin, market, startAt, players, soloP,
+                             rankResults, rankRoom, over, round, matchTicks} = c);
+      room = c.room && Object.assign({}, c.room);
+      if(c._rk == null) localStorage.removeItem("spcx-duell-room");
+      else localStorage.setItem("spcx-duell-room", c._rk); };
+
+    // --- Anna eröffnet den Raum ---
+    localStorage.removeItem("spcx-duell-room");
+    mode = "room"; $id("name1").value = "Anna"; codeIn.value = ""; market = null; roomPhase = "idle";
+    await $id("startBtn").onclick();
+    out["Raum: eröffnet (p1)"] = !!room && room.p === 1 && /^\d{6}$/.test(room.code);
+    await roomTick();
+    out["Raum: Roster zeigt Anna (du) mit Krone"] =
+      ($id("roomMembers").innerHTML || "").indexOf("Anna") >= 0 && ($id("roomMembers").innerHTML || "").indexOf("👑") >= 0;
+    out["Raum: allein → kein Start-Bereich, Warte-Hinweis"] =
+      $id("roomStartField").style.display === "none" && $id("roomWaitHint").style.display === "";
+    const RC = room.code;
+    const A = stash();
+
+    // --- Ben tritt bei (eigenes Gerät) ---
+    localStorage.removeItem("spcx-duell-room");
+    room = null; roomState = null; roomPhase = "idle"; market = null;
+    $id("name1").value = "Ben"; codeIn.value = RC;
+    await $id("startBtn").onclick();
+    out["Raum: Ben beigetreten (p2)"] = !!room && room.p === 2;
+    await roomTick();
+    const B = stash();
+
+    // --- Cleo tritt bei und wird Leinwand ---
+    localStorage.removeItem("spcx-duell-room");
+    room = null; roomState = null; roomPhase = "idle";
+    $id("name1").value = "Cleo"; codeIn.value = RC;
+    await $id("startBtn").onclick();
+    await $id("roomRoleBtn").onclick();
+    await roomTick();
+    out["Raum: Cleo ist Leinwand"] = room.role === "wall" &&
+      (roomState.members.find(m => m.p === 3) || {}).role === "wall";
+    out["Raum: Rollen-Knopf bietet Rückweg an"] = ($id("roomRoleBtn").textContent || "").indexOf("mitspielen") >= 0;
+    const C = stash();
+
+    // --- Anna sieht 2 Spieler → startet Runde 1 mit Dauer 5 ---
     restore(A);
-    await pollLobby();
-    out["A sieht Beitritt ✓"]= $id("lobbyOpp").textContent.indexOf("Dabei (2)")>=0;
-    await $id("lobbyStartBtn").onclick();
-    out["A: Start fixiert + Markt gebaut"]= startAt>Date.now() && marketSeed!==null && market!==null;
-    const A2=stash();
+    await roomTick();
+    out["Raum: Start-Bereich da (2 Spieler, Leinwand zählt nicht)"] = $id("roomStartField").style.display === "";
+    roomDurPick = 5;
+    await $id("roomStartBtn").onclick();
+    out["Runde 1: Countdown, Markt aus geheimem Seed, Dauer 5"] =
+      roomPhase === "countdown" && room.played === 1 && durationMin === 5 &&
+      marketSeed !== null && market !== null && startAt > Date.now();
+    const seed1 = marketSeed, path1 = JSON.stringify(market.paths.SPCX.slice(0, 40));
+    out["Runde 1: Seed ≠ Raum-Code (Vorspiel-Schutz)"] = marketSeed !== (+RC >>> 0);
+    const A2 = stash();
 
-    // === B bekommt Start + Seed per Poll ===
+    // --- Ben erkennt die Runde über den Puls ---
     restore(B);
-    await pollLobby();
-    out["B: gleicher Start, gleicher Seed"]= startAt===A2.startAt && marketSeed===A2.marketSeed;
-    out["Seed ≠ Beitritts-Code (Vorspiel-Schutz)"]= marketSeed!==(A2.gameCode>>>0);
-    const B2=stash();
-    out["identischer Markt auf beiden"]=
-      JSON.stringify(B2.market.paths.SPCX.slice(0,60))===JSON.stringify(A2.market.paths.SPCX.slice(0,60)) &&
-      B2.market.paths.ACT.length===A2.market.paths.ACT.length;
-    const offline=genMarket(A2.gameCode, A2.matchTicks);
-    out["≠ Markt aus Code-als-Seed"]=
-      JSON.stringify(offline.paths.SPCX.slice(0,60))!==JSON.stringify(A2.market.paths.SPCX.slice(0,60));
+    await roomTick();
+    out["Runde 1: Ben automatisch dabei – gleicher Seed, gleicher Markt"] =
+      room.played === 1 && marketSeed === seed1 && JSON.stringify(market.paths.SPCX.slice(0, 40)) === path1;
+    const B2 = stash();
 
-    // === Snapshot trägt Seed + Online-Daten ===
-    restore(A2); tickCount=42; round=0;
-    saveSnapshot("play");
-    const snap=JSON.parse(localStorage.getItem("spcx-duell-game"));
-    out["Snapshot: marketSeed + Token"]= snap.marketSeed===A2.marketSeed && snap.online && snap.online.token===A2.onlineGame.token;
+    // --- Leinwand bleibt draußen; Runde "läuft" → Live-Stand ---
+    restore(C);
+    await roomTick();
+    out["Runde 1: Leinwand bleibt im Raum"] = roomPhase === "idle" && (room.played || 0) === 0;
+    globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 20000, RC);
+    restore(A2); roomPhase = "playing"; round = 0; over = false; roomTickN = 1; // (im Browser setzt startRound das)
+    await roomTick(); // roomTickN→2: meldet eigenen P&L und rendert das Rennen
+    out["Rennen: Chips gerendert (Anna + Ben)"] = (($id("raceRow").innerHTML || "").match(/race-chip/g) || []).length === 2;
+    const A3 = stash();
+    restore(B2); roomPhase = "playing"; round = 0; over = false; roomTickN = 1;
+    players[0].cash += 150; // Ben liegt vorn
+    await roomTick();
+    const B3 = stash();
+    restore(C);
+    await roomTick();
+    const liveHtml = $id("roomLive").innerHTML || "";
+    out["Leinwand: Live-Stand sichtbar, Ben vorn"] = $id("roomLiveField").style.display === "" &&
+      liveHtml.indexOf("Ben") >= 0 && liveHtml.indexOf("Ben") < liveHtml.indexOf("Anna");
 
-    // === Ergebnisse: Auto-Upload + Auto-Vergleich ===
-    let captured=null;
-    renderCompare=(me,opp)=>{ captured={me,opp}; };
-    restore(B2);
-    players=[newPlayer("Berta","var(--p2)")]; players[0].result={pnl:-42.5,total:24957.5}; soloP=players[0];
-    await onlineShareResult(soloP);
-    out["B hochgeladen, wartet"]= captured===null;
-    const B3=stash();
-    restore(A2);
-    players=[newPlayer("Anna","var(--p1)")]; players[0].result={pnl:120.25,total:25120.25}; soloP=players[0];
-    await onlineShareResult(soloP);
-    out["A: Vergleich öffnet sich automatisch"]= !!captured && captured.opp.name==="Berta" &&
-      Math.abs(captured.opp.result.pnl+42.5)<1e-9 && captured.opp.seed===A2.marketSeed;
-    captured=null;
-    restore(B3);
-    await pollOppResult();
-    out["B: Vergleich öffnet sich automatisch"]= !!captured && captured.opp.name==="Anna";
+    // --- Runde 1 endet: Ergebnisse → Rangliste + Abend-Wertung ---
+    restore(A3); roomPhase = "idle";
+    players[0].result = {pnl: 120, total: 25120}; soloP = players[0];
+    await roomShareResult(players[0]);
+    out["Ergebnis: Rangliste geöffnet, eigenes drin"] = !!rankResults && !!rankResults[1];
+    const A4 = stash();
+    restore(B3); roomPhase = "idle";
+    players[0].result = {pnl: -40, total: 24960}; soloP = players[0];
+    await roomShareResult(players[0]);
+    restore(A4);
+    await roomTick(); // holt Bens Ergebnis in die Rangliste
+    const rb = $id("rankBox").innerHTML || "";
+    out["Rangliste: füllt sich über den Puls, Anna vorn mit Krone"] =
+      !!rankResults[2] && rb.indexOf("👑") >= 0 && rb.indexOf("👑") < rb.indexOf("Anna") &&
+      rb.indexOf("Anna") < rb.indexOf("Ben");
+    let sb = Object.fromEntries((roomState.scoreboard || []).map(s => [s.p, s]));
+    out["Abend-Wertung nach Runde 1: Sieg für Anna"] = sb[1] && sb[1].wins === 1 && sb[1].total === 120;
 
-    // === Altformat SPCX4 bleibt lesbar ===
-    const oldF=[gameCode,"Alt","10.00","25010.00",1,1,0,0,100,"0.00","x","x",0,0,5,"25010.00","25000.00","0.00",0,"0.0000","SPCX","0.15","0.00"];
-    const u4=unpackResult("SPCX4."+btoa(unescape(encodeURIComponent(oldF.join("|")))), gameCode);
-    out["SPCX4-Altformat lesbar"]= !!u4 && !u4.wrongGame && u4.seed===undefined && u4.name==="Alt";
+    // --- Runde 2 (Dauer 15): Serie, frischer Seed, Wertung summiert ---
+    globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 6*60000, RC);
+    roomDurPick = 15;
+    await $id("roomStartBtn").onclick();
+    out["Runde 2: Dauer 15, frischer Seed"] = room.played === 2 && durationMin === 15 && marketSeed !== seed1;
+    const A5 = stash();
+    restore(B3); roomPhase = "idle";
+    await roomTick();
+    out["Runde 2: Ben wieder automatisch dabei"] = room.played === 2 && marketSeed === A5.marketSeed;
+    players = [newPlayer("Ben", "var(--p2)")]; players[0].result = {pnl: 200, total: 25200}; soloP = players[0];
+    roomPhase = "idle";
+    await roomShareResult(players[0]);
+    restore(A5); roomPhase = "idle";
+    players = [newPlayer("Anna", "var(--p1)")]; players[0].result = {pnl: -10, total: 24990}; soloP = players[0];
+    await roomShareResult(players[0]);
+    await roomTick();
+    sb = Object.fromEntries((roomState.scoreboard || []).map(s => [s.p, s]));
+    out["Abend-Wertung nach Runde 2: 1:1 Siege, Summen stimmen"] =
+      sb[1].wins === 1 && sb[2].wins === 1 && sb[1].total === 110 && sb[2].total === 160;
 
-    // === Seed-Mismatch wird abgelehnt (manueller Vergleich) ===
-    const sv=marketSeed; marketSeed=(sv^0xDEADBEEF)>>>0;
-    const wrong=packResult(soloP); marketSeed=sv;
-    $id("cmpIn").value=wrong; captured=null;
-    $id("cmpBtn").onclick();
-    out["Seed-Mismatch abgelehnt"]= captured===null && $id("cmpErr").textContent.indexOf("Anderer Markt")>=0;
-
-    // === Mehrspieler: 3er-Spiel mit Rangliste ===
-    localStorage.removeItem("spcx-duell-lobby");
-    onlineGame=null; marketSeed=null; market=null; startAt=0; durationMin=10; codeIn.value="";
-    $id("name1").value="Anna";
+    // --- Zuspätkommer: Dana kommt mitten in einer laufenden Runde ---
+    globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 60000, RC);
+    localStorage.removeItem("spcx-duell-room");
+    room = null; roomState = null; roomPhase = "idle"; market = null; marketSeed = null;
+    $id("name1").value = "Dana"; codeIn.value = RC; mode = "room";
     await $id("startBtn").onclick();
-    const E=stash();
-    const jF=await (await fetch(ONLINE_API+"/game/"+E.onlineGame.code+"/join",{method:"POST",body:JSON.stringify({name:"Ben"})})).json();
-    const jG=await (await fetch(ONLINE_API+"/game/"+E.onlineGame.code+"/join",{method:"POST",body:JSON.stringify({name:"Cleo"})})).json();
-    out["3er: Plaetze 2+3 vergeben"]= jF.p===2 && jG.p===3;
-    restore(E);
-    await pollLobby();
-    out["3er: Ersteller sieht alle + Startknopf"]= $id("lobbyOpp").textContent.indexOf("Dabei (3)")>=0
-      && $id("lobbyStartBtn").textContent.indexOf("3 Spieler")>=0;
-    await $id("lobbyStartBtn").onclick();
-    out["3er: gearmt, Roster gemerkt"]= marketSeed!==null && startAt>Date.now() && (onlineGame.players||[]).length===3;
-    // Live-Rennen: F meldet P&L per API, E synct und rendert die Leiste
-    players=[newPlayer("Anna","var(--p1)")]; round=0;
-    await fetch(ONLINE_API+"/game/"+E.onlineGame.code+"/pnl/2",
-      {method:"PUT",body:JSON.stringify({pnl:-50}),headers:{"x-token":jF.token}});
-    await syncRace();
-    const rr=$id("raceRow").innerHTML||"";
-    out["Rennen: Leiste zeigt alle (eigener zuerst, Krone)"]=
-      rr.indexOf("Anna")>=0 && rr.indexOf("Ben")>rr.indexOf("Anna") &&
-      rr.indexOf("\ud83d\udc51")>=0 && rr.indexOf("…")>=0;
-    out["Rennen: fremder P&L angekommen"]= racePnls["2"]===-50;
-    const mk=(nm,pnl)=>{ const pl=newPlayer(nm,"var(--p2)"); pl.result={pnl:pnl,total:25000+pnl}; return pl; };
-    await fetch(ONLINE_API+"/game/"+E.onlineGame.code+"/result/2",{method:"PUT",body:packResult(mk("Ben",-50)),headers:{"x-token":jF.token}});
-    await fetch(ONLINE_API+"/game/"+E.onlineGame.code+"/result/3",{method:"PUT",body:packResult(mk("Cleo",200)),headers:{"x-token":jG.token}});
-    players=[mk("Anna",100)]; soloP=players[0];
-    await onlineShareResult(soloP);
-    out["3er: Rangliste vollstaendig (3 Ergebnisse)"]= !!rankResults && Object.keys(rankResults).length===3;
-    const rh=$id("rankBox").innerHTML||"";
-    out["3er: Reihenfolge Cleo > Anna > Ben, Krone vorn"]= rh.indexOf("Cleo")>=0
-      && rh.indexOf("Cleo")<rh.indexOf("Anna") && rh.indexOf("Anna")<rh.indexOf("Ben")
-      && rh.indexOf("\ud83d\udc51")>=0 && rh.indexOf("\ud83d\udc51")<rh.indexOf("Cleo");
-    out["3er: eigene Zeile markiert"]= rh.indexOf("(du)")>=0;
-    captured=null; showRankDetail(2);
-    out["3er: Detailvergleich per Tipp (Ben)"]= !!captured && captured.opp.name==="Ben";
-    localStorage.removeItem("spcx-duell-lobby");
+    await roomTick();
+    out["Zuspätkommer: im Raum, aber NICHT in der laufenden Runde"] =
+      !!room && room.p === 4 && roomPhase === "idle" && (room.played || 0) === 0;
+    out["Zuspätkommer: sieht 'Runde läuft'"] = $id("roomLiveField").style.display === "";
 
-    // === Online-Revanche: A bietet an, B sieht und tritt bei ===
-    restore(A2); // A ist im alten 2er-Spiel
-    const oldCode = onlineGame.code;
-    await $id("rematchOnlineBtn").onclick();
-    out["Revanche: A hat neues Spiel (p1)"]= !!onlineGame && onlineGame.p===1 && onlineGame.code!==oldCode;
-    const newCode = onlineGame.code;
-    const oldSt = await (await fetch(ONLINE_API+"/game/"+oldCode)).json();
-    out["Revanche: alter Raum kennt den neuen Code"]= oldSt.next===newCode;
-    const A3ctx = stash();
-    localStorage.removeItem("spcx-duell-lobby"); // B = anderes Geraet, eigener Speicher
-    restore(B3); // B haengt noch im alten Ergebnis-Screen
-    startRematchWatch();
-    await rematchTick();
-    out["Revanche: B sieht den Beitritts-Knopf"]= rematchNextCode===newCode
-      && $id("rematchJoinBtn").textContent.indexOf(newCode)>=0;
-    $id("rematchJoinBtn").onclick();
-    await new Promise(res => { const t0=Date.now(); (function wait(){ (onlineGame && onlineGame.code===newCode) || Date.now()-t0>500 ? res() : Promise.resolve().then(wait); })(); });
-    out["Revanche: B ist im neuen Spiel (p2)"]= !!onlineGame && onlineGame.code===newCode && onlineGame.p===2;
-    const nSt = await (await fetch(ONLINE_API+"/game/"+newCode)).json();
-    out["Revanche: neues Spiel hat 2 Spieler"]= nSt.players.length===2;
-    // A koennte jetzt starten (voller Kreislauf moeglich)
-    restore(A3ctx); await pollLobby();
-    out["Revanche: A sieht B im neuen Spiel"]= $id("lobbyOpp").textContent.indexOf("Dabei (2)")>=0;
-    localStorage.removeItem("spcx-duell-lobby");
+    // --- Reload: Mitgliedschaft übersteht den Neustart ---
+    room = null; roomState = null;
+    const rec = loadRoomState();
+    out["Reload: Raum-Mitgliedschaft ladbar"] = !!rec && rec.code === RC && rec.p === 4;
 
-    // === Reload-Robustheit: Ersteller verliert die Seite und kommt zurück ===
-    // Neues Spiel als Ersteller C anlegen
-    onlineGame=null; marketSeed=null; market=null; startAt=0; durationMin=5; codeIn.value="";
-    await $id("startBtn").onclick();
-    const cCode=onlineGame.code, cTok=onlineGame.token;
-    out["C: Lobby-Zustand gesichert"]= !!localStorage.getItem("spcx-duell-lobby");
-    // 'Reload': alles weg außer localStorage
-    onlineGame=null; marketSeed=null; market=null; startAt=0; players=[];
-    const rec=loadLobbyState();
-    out["C: Zustand ladbar (p1+Token)"]= !!rec && rec.p===1 && rec.token===cTok && rec.code===cCode;
-    resumeLobby(rec);
-    out["C: Lobby als Ersteller wiederhergestellt"]= !!onlineGame && onlineGame.p===1 && onlineGame.token===cTok
-      && $id("lobbyOpp").textContent.indexOf("niemand beigetreten")>=0;
-    // Ersteller tippt (statt Auto-Resume) den EIGENEN Code ein → Rolle statt Selbst-Beitritt
-    onlineGame=null; marketSeed=null; market=null; startAt=0;
-    codeIn.value=String(cCode);
-    await $id("startBtn").onclick();
-    out["C: eigener Code → Ersteller-Rolle (kein Selbst-Beitritt)"]= !!onlineGame && onlineGame.p===1 && onlineGame.token===cTok;
-    const stC=await (await fetch("https://spcx-duell.william-aaron-unger.workers.dev/game/"+cCode)).json();
-    out["C: Server sagt weiterhin joined=false"]= stC.joined===false;
-    // Gegner D tritt bei, C startet, 'Reload' im Countdown → Lobby-Resume findet startAt+Seed
-    const C=stash();
-    onlineGame=null; marketSeed=null; market=null; startAt=0; codeIn.value=String(cCode);
-    localStorage.removeItem("spcx-duell-lobby"); // D ist ein anderes Gerät
-    await $id("startBtn").onclick();
-    const D=stash();
-    restore(C); await pollLobby(); await $id("lobbyStartBtn").onclick();
-    const armedSeed=marketSeed, armedAt=startAt;
-    saveLobbyState(); // C sichert (im echten Code beim Anlegen geschehen; hier nach D-Kontext nötig)
-    onlineGame=null; marketSeed=null; market=null; startAt=0; players=[]; // 'Reload' im Countdown
-    resumeLobby(loadLobbyState());
-    await pollLobby();
-    out["C: Reload im Countdown → wieder gearmt (gleicher Seed/Start)"]= marketSeed===armedSeed && startAt===armedAt;
-    // 404-Fall: unbekanntes Spiel in der Lobby melden
-    onlineGame={code:"000001",token:"x",p:1,seed:null}; startAt=0;
-    await pollLobby();
-    out["404-Spiel wird gemeldet"]= $id("lobbyOpp").textContent.indexOf("nicht mehr vorhanden")>=0;
-
-    // === Offline-Fallback: Server weg → Verhalten wie früher ===
-    globalThis.__killFetch=true;
-    onlineGame=null; marketSeed=null; market=null; startAt=0; codeIn.value="";
-    await $id("startBtn").onclick();
-    out["Offline-Fallback (Minuten-Start, Markt sofort)"]=
-      onlineGame===null && market!==null && startAt>Date.now() &&
-      $id("lobbyStartRow").style.display==="" && $id("lobbyOpp").style.display==="none";
-    globalThis.__killFetch=false;
-    // === Teil-Links & Einfüge-Toleranz (?join= / ?vs=) ===
-    onlineGame=null; marketSeed=null; sandbox=false; gameCode=333333;
-    durationMin=DURATIONS[333333%3]; buildMarket();
-    const meP=newPlayer("Ich","var(--p1)");    meP.result={pnl:111.5,total:25111.5};
-    const opP=newPlayer("Gegner","var(--p2)"); opP.result={pnl:-50,total:24950};
-    const myCode=packResult(meP), oppCode=packResult(opP);
-    const vurl=shareUrl("vs", oppCode);
-    out["Teil-Link: shareUrl baut https-Link"]= !!vurl && vurl.indexOf("?vs=")>0;
-    out["Einfuegen: roher Code"]= extractResultCode(oppCode)===oppCode;
-    out["Einfuegen: ganze Nachricht"]= extractResultCode("Mein Ergebnis:\n"+oppCode+"\nGruss!")===oppCode;
-    out["Einfuegen: kompletter Link"]= extractResultCode("Vergleich: "+vurl)===oppCode;
-    const prot=location.protocol; location.protocol="file:";
-    out["file://: kein Teil-Link"]= shareUrl("join","123456")===null;
-    location.protocol=prot;
-    out["unpack ok + fremdes Spiel abgelehnt"]= (unpackResult(oppCode,333333)||{}).name==="Gegner"
-      && !!(unpackResult(oppCode,111111)||{}).wrongGame;
-    localStorage.setItem("spcx-duell", JSON.stringify({games:[{code:myCode,durationMin,name:"Ich",pnl:111.5,date:1750000000000,fav:"SPCX",mode:"remote"}]}));
-    cmpFromStats=false; captured=null;
-    openSharedCompare(oppCode);
-    out["?vs mit Historie -> Vergleich oeffnet"]= cmpFromStats===true && !!captured;
-    localStorage.removeItem("spcx-duell");
-    codeIn.value=""; openSharedCompare(oppCode);
-    out["?vs ohne Historie -> Code vorbefuellt"]= codeIn.value==="333333";
-    location.search="?join=222333"; codeIn.value="";
+    // --- ?room=-Link: Emil kommt per Einladung, tritt automatisch bei ---
+    localStorage.removeItem("spcx-duell-room");
+    room = null; roomState = null; roomPhase = "idle";
+    $id("name1").value = "Emil"; codeIn.value = "";
+    location.search = "?room=" + RC;
     handleShareParams();
-    out["?join -> Beitritts-Code vorbefuellt"]= codeIn.value==="222333";
-    location.search="?vs=quatsch";
-    out["kaputter Link wird still ignoriert"]= (()=>{ try{ handleShareParams(); return true; }catch(e){ return false; } })();
-    location.search="";
+    await settle(() => room && room.p === 5);
+    out["?room-Link: automatisch beigetreten (p5)"] = !!room && room.p === 5;
+    location.search = "";
+
+    // ================= Teil-Links & Einfüge-Toleranz (Offline-Welt) =================
+    room = null; mode = "remote";
+    sandbox = false; gameCode = 333333; durationMin = DURATIONS[333333 % 3]; marketSeed = null; buildMarket();
+    const meP = newPlayer("Ich", "var(--p1)");    meP.result = {pnl: 111.5, total: 25111.5};
+    const opP = newPlayer("Gegner", "var(--p2)"); opP.result = {pnl: -50, total: 24950};
+    const myCode = packResult(meP), oppCode = packResult(opP);
+    const vurl = shareUrl("vs", oppCode);
+    out["Einfuegen: roher Code / Nachricht / Link"] =
+      extractResultCode(oppCode) === oppCode &&
+      extractResultCode("Ergebnis:\n" + oppCode + "\nGruss!") === oppCode &&
+      extractResultCode("Vergleich: " + vurl) === oppCode;
+    const prot = location.protocol; location.protocol = "file:";
+    out["file://: kein Teil-Link"] = shareUrl("join", "123456") === null;
+    location.protocol = prot;
+    out["unpack ok + fremdes Spiel abgelehnt"] =
+      (unpackResult(oppCode, 333333) || {}).name === "Gegner" && !!(unpackResult(oppCode, 111111) || {}).wrongGame;
+    let captured = null; renderCompare = (me, opp) => { captured = {me, opp}; };
+    localStorage.setItem("spcx-duell", JSON.stringify({games: [{code: myCode, durationMin, name: "Ich",
+      pnl: 111.5, date: 1750000000000, fav: "SPCX", mode: "remote"}]}));
+    cmpFromStats = false;
+    openSharedCompare(oppCode);
+    out["?vs mit Historie -> Vergleich oeffnet"] = cmpFromStats === true && !!captured;
+    localStorage.removeItem("spcx-duell");
+    codeIn.value = ""; openSharedCompare(oppCode);
+    out["?vs ohne Historie -> Code vorbefuellt"] = codeIn.value === "333333";
+    location.search = "?join=222333"; codeIn.value = "";
+    handleShareParams();
+    out["?join -> Beitritts-Code vorbefuellt"] = codeIn.value === "222333";
+    location.search = "?vs=quatsch";
+    out["kaputter Link wird still ignoriert"] = (() => { try{ handleShareParams(); return true; }catch(e){ return false; } })();
+    location.search = "";
 
     return out;
   };
-  (0,eval)(qr+"\n"+data+"\n"+game+"\n;globalThis.__e2e = "+hookFn.toString()+";");
-  const out=await globalThis.__e2e();
-  let fail=0;
-  for(const [k,v] of Object.entries(out)){ console.log((v?"✔":"✘"),k); if(!v)fail++; }
-  console.log(fail? "\n"+fail+" FEHLER" : "\nENDE-ZU-ENDE OK ("+Object.keys(out).length+" Checks)");
-  process.exit(fail?1:0);
-})().catch(e=>{ console.error("Harness-Fehler:",e); process.exit(1); });
+
+  globalThis.__fetchCount = () => fetchCount;
+  globalThis.__sq = sq;
+  (0, eval)(qr + "\n" + data + "\n" + game + "\n;globalThis.__e2e = " + hookFn.toString() + ";");
+  const out = await globalThis.__e2e();
+  let fail = 0;
+  for(const [k, v] of Object.entries(out)){ console.log((v ? "✔" : "✘"), k); if(!v) fail++; }
+  console.log(fail ? "\n" + fail + " FEHLER" : "\nENDE-ZU-ENDE OK (" + Object.keys(out).length + " Checks)");
+  process.exit(fail ? 1 : 0);
+})().catch(e => { console.error("Harness-Fehler:", e); process.exit(1); });

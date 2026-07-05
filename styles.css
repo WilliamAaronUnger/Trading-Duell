@@ -74,6 +74,15 @@
   .live-pnl{font-family:var(--mono);font-size:14px;font-weight:700}
   .target{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted)}
   .target b{font-weight:700}
+  /* Online-Raum: Mitglieder + Wertung */
+  .room-member{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid var(--line);
+               border-radius:10px;background:var(--panel-2);margin-top:6px}
+  .room-member .rdot{width:9px;height:9px;border-radius:50%;background:#566081;flex:0 0 auto}
+  .room-member .rdot.on{background:var(--up)}
+  .room-member .rm-name{flex:1;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .room-member .rm-role{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  #roomScore .rank-row, #roomLive .rank-row{margin-top:6px}
+
   /* Live-Rennen (Online): kompakte P&L-Chips aller Mitspieler */
   .race-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-family:var(--mono);font-size:11px}
   .race-chip{border:1px solid var(--line);border-radius:99px;padding:3px 9px;background:var(--panel-2);

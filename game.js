@@ -356,9 +356,11 @@ let roundAnchor = 0;
 
 /* Spielmodus: "solo" = Einzelspieler (eine Runde, nur für sich),
    "local" = Mehrspieler am gleichen Gerät (Pass & Play, beide nacheinander),
-   "remote" = Mehrspieler auf zwei Geräten, gekoppelt über den Spiel-Code.
-   Timing: "solo" und "local" sind tick-basiert (pausierbar); nur "remote" läuft
-   nach Weltzeit. Ergebnis: "solo" und "remote" zeigen das eigene Ergebnis. */
+   "remote" = zwei Geräte OFFLINE (Code = Seed, Minuten-Start, kein Netz-Request),
+   "room"   = Online-Raum (Server-Runden mit geheimem Seed, Live-Rennen, Wertung).
+   Timing: "solo" und "local" sind tick-basiert (pausierbar); "remote" und "room"
+   laufen nach Weltzeit (wallClock()). "solo"/"remote"/"room" zeigen das eigene
+   Ergebnis über showResultSolo. */
 let mode = "local";
 let sandbox = false;
 let sandboxCash = 25000;
@@ -396,11 +398,11 @@ function applySoloUI(){
    Code mod 3 kodiert die Spieldauer (5/10/15 Min), damit beide Geräte
    automatisch dieselbe Tick-Anzahl und damit denselben Markt bekommen. */
 let gameCode = null;
-/* Online-Duell: geheimer Markt-Seed vom Server (Code ≠ Seed → niemand kann vorspielen).
+/* Raum-Runden: geheimer Markt-Seed vom Server (Code ≠ Seed → niemand kann vorspielen).
    null = klassisch offline, dann ist der Spiel-Code selbst der Seed. */
 let marketSeed = null;
-/* Laufendes Online-Spiel {code, token, p:1|2, seed} oder null (offline). */
-let onlineGame = null;
+/* Weltzeit-verankerte Modi (kein Pausieren, Tick aus Date.now()) */
+const wallClock = () => mode === "remote" || mode === "room";
 
 function makeCode(durIdx){
   let c = 100000 + Math.floor(Math.random()*900000);
@@ -418,6 +420,10 @@ function updateStartBtn(){
   }
   if(mode === "local"){ $("startBtn").textContent = "Duell starten 🔔"; return; }
   const valid = /^\d{6}$/.test(codeIn.value);
+  if(mode === "room"){
+    $("startBtn").textContent = valid ? "Raum beitreten 🌐" : "Raum eröffnen 🌐";
+    return;
+  }
   $("startBtn").textContent = valid ? "Spiel beitreten 🔔" : "Spiel anlegen 🔔";
 }
 
@@ -426,9 +432,11 @@ function setMode(m){
   mode = m;
   document.querySelectorAll(".mode").forEach(b => b.classList.toggle("active", b.dataset.mode === m));
   $("field2").style.display    = m === "local" ? "" : "none";   // 2. Name nur bei "Gleiches Gerät"
-  $("fieldCode").style.display = m === "remote" ? "" : "none";
+  $("fieldCode").style.display = (m === "remote" || m === "room") ? "" : "none";
+  $("durField").style.display  = m === "room" ? "none" : ""; // Raum: Dauer wird IM Raum gewählt
   $("label1").textContent = m === "local" ? "Spieler 1 (beginnt)" : "Dein Name";
-  if(m !== "remote"){
+  codeIn.placeholder = m === "room" ? "Leer lassen für neuen Raum" : "Leer lassen für neues Spiel";
+  if(m !== "remote" && m !== "room"){
     codeIn.value = "";
     document.querySelectorAll(".dur[data-m]").forEach(b => b.disabled = false);
   }
@@ -503,8 +511,8 @@ function saveSnapshot(phase){
   try{
     localStorage.setItem(GAME_KEY, JSON.stringify({
       v:2, mode, gameCode, durationMin, round,
-      startAt: mode === "remote" ? startAt : 0,
-      marketSeed, online: onlineGame, // Online-Spiel: Seed ≠ Code + Token fürs Ergebnis-Hochladen
+      startAt: wallClock() ? startAt : 0,
+      marketSeed, room, roomPhase, // Raum-Runde: Seed + Mitgliedschaft fürs Wiederaufnehmen
       tickCount, players, phase: phase || "play", ts: Date.now()
     }));
   }catch(e){}
@@ -513,7 +521,7 @@ function loadSnapshot(){
   try{
     const s = JSON.parse(localStorage.getItem(GAME_KEY));
     if(!s || s.v !== 2) return null;
-    if(s.mode !== "local" && s.mode !== "remote" && s.mode !== "solo") return null;
+    if(!["local","remote","solo","room"].includes(s.mode)) return null;
     if(typeof s.gameCode !== "number" || !Array.isArray(s.players) || !s.players.length) return null;
     if(Date.now() - s.ts > 24*3600*1000) return null; // alte Stände nicht wiederbeleben
     return s;
@@ -585,12 +593,12 @@ $("resumeBtn").onclick = () => {
   gameCode = snap.gameCode;
   durationMin = snap.durationMin;
   marketSeed = (typeof snap.marketSeed === "number") ? snap.marketSeed : null;
-  onlineGame = snap.online || null;
+  if(snap.room){ room = snap.room; roomPhase = 'playing'; saveRoomState(); startRoomTimer(); }
   matchTicks = Math.round(durationMin * 60000 / TICK_MS);
   market = genMarket(marketSeed == null ? gameCode : marketSeed, matchTicks);
   players = snap.players;
   round = snap.round;
-  if(mode === "remote") startAt = snap.startAt;
+  if(wallClock()) startAt = snap.startAt;
   $("startScreen").classList.remove("show");
 
   if(snap.phase === "handover"){
@@ -613,7 +621,7 @@ setTop("single"); // Startauswahl: Einzelspieler – mode-Variable an die UI ang
 
 $("startBtn").onclick = async () => {
   rememberNames();
-  onlineGame = null; marketSeed = null; // frischer Zustand für jedes neue Spiel
+  marketSeed = null; // frischer Zustand für jedes neue Spiel
   if(mode === "solo"){
     // Einzelspieler: ein Spieler, eine Runde, sofortiger Start (keine Lobby)
     START_CASH = sandbox ? sandboxCash : 25000;
@@ -635,59 +643,43 @@ $("startBtn").onclick = async () => {
     return;
   }
 
-  // Remote: ein Spieler auf diesem Gerät, gekoppelt über den Code.
-  // Zuerst online versuchen (echte Lobby + geheimer Seed); ohne Server: wie bisher offline.
   const raw = codeIn.value.trim();
   if(raw && !/^\d{6}$/.test(raw)){
-    $("codeErr").textContent = "Der Spiel-Code hat 6 Ziffern.";
+    $("codeErr").textContent = "Der Code hat 6 Ziffern.";
     return;
   }
-  const joined = !!raw;
-  const btn = $("startBtn"), oldTxt = btn.textContent;
-  btn.disabled = true; btn.textContent = "Verbinde …";
-  try{
-    if(joined){
-      gameCode = +raw;
-      durationMin = DURATIONS[gameCode % 3];
-      const own = loadLobbyState();
-      if(own && own.code === raw){
-        // Eigenes Spiel (z. B. nach Reload den Code erneut eingetippt):
-        // Rolle samt Token wiederherstellen statt dem eigenen Spiel beizutreten
-        onlineGame = {code: own.code, token: own.token, p: own.p, seed: null};
-        durationMin = own.dur;
-      }else try{
-        const j = await apiJson("/game/" + raw + "/join",
-                                {method:"POST", body: JSON.stringify({name: $("name1").value.trim()})});
-        onlineGame = {code: raw, token: j.token, p: j.p || 2, seed: null};
-        durationMin = j.dur; // die verbindliche Dauer kennt der Server
-      }catch(e){
-        if(String(e && e.message).includes("409")){
-          $("codeErr").textContent = "Beitritt nicht möglich – Spiel ist voll oder schon gestartet.";
-          return;
-        }
-        // 404/Netzfehler: Offline-Duell wie bisher (Code = Seed)
-      }
-    }else{
-      try{
-        const c = await apiJson("/game", {method:"POST",
-                                body: JSON.stringify({dur: durationMin, name: $("name1").value.trim()})});
-        onlineGame = {code: c.code, token: c.token, p: 1, seed: null};
-        gameCode = +c.code;
-      }catch(e){
-        gameCode = makeCode(DURATIONS.indexOf(durationMin)); // Offline-Fallback
-      }
+
+  // Online-Raum: eröffnen oder beitreten – der EINZIGE Weg, der den Server nutzt
+  if(mode === "room"){
+    const btn = $("startBtn"), oldTxt = btn.textContent;
+    btn.disabled = true; btn.textContent = "Verbinde …";
+    try{
+      await (raw ? joinRoom(raw) : createRoom());
+    }catch(e){
+      $("codeErr").textContent = String(e && e.message).includes("409")
+        ? "Beitritt nicht möglich – der Raum ist voll."
+        : "Raum nicht erreichbar – Internet prüfen oder Code kontrollieren.";
+    }finally{
+      btn.disabled = false; btn.textContent = oldTxt; updateStartBtn();
     }
-  }finally{
-    btn.disabled = false; btn.textContent = oldTxt; updateStartBtn();
+    return;
   }
-  if(!onlineGame) buildMarket(); // online kommt der geheime Seed erst mit dem Start
-  const guest = onlineGame ? onlineGame.p === 2 : joined; // Rolle kann wiederhergestellt sein
+
+  // Mehrere Geräte (OFFLINE): komplett ohne Netz – gleicher Code = gleicher Markt,
+  // Start zur übernächsten vollen Minute, Ergebnistausch per Code/QR.
+  const joined = !!raw;
+  if(joined){
+    gameCode = +raw;
+    durationMin = DURATIONS[gameCode % 3];
+  }else{
+    gameCode = makeCode(DURATIONS.indexOf(durationMin));
+  }
+  buildMarket();
   players = [newPlayer(
-    $("name1").value.trim() || (guest ? "Spieler 2" : "Spieler 1"),
-    guest ? "var(--p2)" : "var(--p1)"
+    $("name1").value.trim() || (joined ? "Spieler 2" : "Spieler 1"),
+    joined ? "var(--p2)" : "var(--p1)"
   )];
-  if(onlineGame) saveLobbyState(); // Rolle + Token überleben einen Reload (App-Wechsel!)
-  openLobby(guest);
+  openLobby(joined);
 };
 
 /* ====================== Lobby (zeitversetzter Start) ====================== */
@@ -714,44 +706,27 @@ const hhmm = ms => {
 };
 
 function openLobby(joined){
+  // Offline-Duell (Mehrere Geräte): Start zur übernächsten vollen Minute – serverloser
+  // Gleichstand: beide Geräte mit demselben Code in derselben Minute = gleicher Start.
+  startAt = (Math.floor(Date.now()/60000) + 2) * 60000;
   $("lobbyEyebrow").textContent = joined ? "Spiel beigetreten" : "Spiel angelegt";
   $("lobbyHead").textContent = joined ? "Auf die Plätze!" : "Bereitmachen!";
   $("lobbyCode").textContent = String(gameCode).padStart(6, "0");
   $("lobbyShare").textContent = "📤 Einladung teilen";
+  $("lobbySub").innerHTML = joined
+    ? "Exakt dasselbe Spiel wie auf dem anderen Gerät – gleiche Kurse, gleiche News.<br>" +
+      "Wurde es dort in derselben Minute angelegt, startet ihr zeitgleich."
+    : `Code fürs zweite Gerät – dort vor <b style="color:var(--text)">${hhmm(startAt - 60000)}</b> Uhr
+       beitreten, dann startet ihr zeitgleich.`;
   // QR-Code des Einladungs-Links zeigen (nur wenn es eine teilbare http(s)-URL gibt)
   const joinUrl = shareUrl("join", String(gameCode).padStart(6, "0"));
   const qrOk = joinUrl && typeof drawQR === "function" && drawQR($("lobbyQR"), joinUrl, {size:200});
   $("lobbyQRWrap").style.display = qrOk ? "" : "none";
+  $("lobbyStartRow").style.display = "";
+  $("lobbyTime").textContent = hhmm(startAt);
   clearInterval(lobbyTimer);
-  $("lobbyStartBtn").style.display = "none";
-  if(onlineGame){
-    // Online: der Ersteller startet, sobald der Gegner da ist; der geheime Markt-Seed
-    // kommt erst mit dem fixierten Start. Bis dahin: Lobby-Status pollen.
-    startAt = 0;
-    $("lobbySub").innerHTML = joined
-      ? "Beigetreten ✓ – exakt dasselbe Spiel, gleiche Kurse, gleiche News."
-      : "Code oder QR an die Mitspieler – bis zu 8 können beitreten; du startest, sobald alle da sind.";
-    $("lobbyStartRow").style.display = "none";
-    $("lobbyOpp").style.display = "";
-    $("lobbyOpp").textContent = joined
-      ? "Warte auf den Start durch den Ersteller …"
-      : "Noch niemand beigetreten …";
-    lobbyTimer = setInterval(pollLobby, 1500);
-    pollLobby();
-  }else{
-    // Offline wie gehabt: Start zur übernächsten vollen Minute (serverloser Gleichstand)
-    startAt = (Math.floor(Date.now()/60000) + 2) * 60000;
-    $("lobbySub").innerHTML = joined
-      ? "Exakt dasselbe Spiel wie auf dem anderen Gerät – gleiche Kurse, gleiche News.<br>" +
-        "Wurde es dort in derselben Minute angelegt, startet ihr zeitgleich."
-      : `Code fürs zweite Gerät – dort vor <b style="color:var(--text)">${hhmm(startAt - 60000)}</b> Uhr
-         beitreten, dann startet ihr zeitgleich.`;
-    $("lobbyOpp").style.display = "none";
-    $("lobbyStartRow").style.display = "";
-    $("lobbyTime").textContent = hhmm(startAt);
-    updateLobby();
-    lobbyTimer = setInterval(updateLobby, 250);
-  }
+  updateLobby();
+  lobbyTimer = setInterval(updateLobby, 250);
   $("lobby").classList.add("show");
   startTips(["lobbyTip", "preTip"]); // Tipps während der Wartezeit (auch im Vorlauf-Fenster)
 }
@@ -762,12 +737,12 @@ function updateLobby(){
     clearInterval(lobbyTimer);
     $("lobby").classList.remove("show");
     $("preStart").classList.remove("show");
-    startRound(0); // exakt bei startAt – kein lokales Delay, beide Geräte synchron
+    startRound(0); // exakt bei startAt – kein lokales Delay, alle Geräte synchron
     return;
   }
   if(left <= 5000){
-    // Letzte 5 s: vom Lobby- ins Vorlauf-Fenster wechseln. An die Weltuhr geankert,
-    // daher zählen beide Geräte denselben Wert und starten gleichzeitig bei startAt.
+    // Letzte 5 s: ins Vorlauf-Fenster wechseln. An die Weltuhr geankert, daher zählen
+    // alle Geräte denselben Wert und starten gleichzeitig bei startAt.
     $("lobby").classList.remove("show");
     $("preNum").textContent = Math.ceil(left/1000);
     $("preStart").classList.add("show");
@@ -778,14 +753,15 @@ function updateLobby(){
 $("lobbyCancel").onclick = () => {
   clearInterval(lobbyTimer);
   stopTips();
-  onlineGame = null; marketSeed = null; // Online-Spiel verwaist einfach (24-h-TTL räumt auf)
-  clearLobbyState();
   $("lobby").classList.remove("show");
 };
 
-/* ====================== Online (Cloudflare Worker) ====================== */
-/* Kleine fetch-Hülle mit Timeout. Jeder Fehler wirft → die Aufrufer fallen still auf den
-   Offline-Pfad zurück; das Spiel hängt nie an der Cloud. ONLINE_API leer = Schicht aus. */
+/* ====================== Online-Raum (Cloudflare Worker) ====================== */
+/* Der Raum ist der Treffpunkt des Abends: einmal beitreten, Runden auf Befehl des
+   Erstellers, Abend-Wertung, Rolle 🎮/🖥️ frei wählbar. Der Raum-Modus ist der EINZIGE
+   Pfad, der den Server nutzt – Solo/Lokal/Offline machen keinerlei Netz-Requests. */
+
+/* Kleine fetch-Hülle mit Timeout; Fehler werfen und werden vom Aufrufer behandelt. */
 async function api(path, opts, timeoutMs){
   if(!ONLINE_API) throw new Error("offline");
   const ctl = new AbortController();
@@ -798,136 +774,268 @@ async function api(path, opts, timeoutMs){
 }
 const apiJson = async (path, opts) => (await api(path, opts)).json();
 
-/* Lobby-Zustand übersteht Reloads: iOS lädt die PWA beim App-Wechsel (Teilen/Scannen!)
-   gern neu – und der Ersteller-Token existiert sonst nur im Speicher. Ohne ihn könnte
-   nach einem Reload niemand mehr starten (beide Geräte wären „Gäste"). */
-const LOBBY_KEY = "spcx-duell-lobby";
-function saveLobbyState(){
-  if(!onlineGame) return;
-  try{
-    localStorage.setItem(LOBBY_KEY, JSON.stringify({
-      code: onlineGame.code, token: onlineGame.token, p: onlineGame.p,
-      dur: durationMin, name: players && players[0] ? players[0].name : "", ts: Date.now()
-    }));
-  }catch(e){}
+/* Mitgliedschaft: {code, token, p, role, name, played, ts} – überlebt Reloads/App-Wechsel */
+let room = null, roomState = null, roomTimer = null, roomPhase = "idle", roomTickN = 0, roomDurPick = null;
+const ROOM_KEY = "spcx-duell-room";
+function saveRoomState(){
+  if(!room) return;
+  try{ localStorage.setItem(ROOM_KEY, JSON.stringify(Object.assign({}, room, {ts: Date.now()}))); }catch(e){}
 }
-const clearLobbyState = () => { try{ localStorage.removeItem(LOBBY_KEY); }catch(e){} };
-function loadLobbyState(){
+const clearRoomState = () => { try{ localStorage.removeItem(ROOM_KEY); }catch(e){} };
+function loadRoomState(){
   try{
-    const l = JSON.parse(localStorage.getItem(LOBBY_KEY));
-    if(!l || !l.code || !l.token || (l.p !== 1 && l.p !== 2)) return null;
-    if(Date.now() - l.ts > 20*60000) return null; // verwaiste Lobbys nicht ewig wiederbeleben
-    return l;
+    const r = JSON.parse(localStorage.getItem(ROOM_KEY));
+    if(!r || !/^\d{6}$/.test(r.code || "") || !r.token || !r.p) return null;
+    if(Date.now() - r.ts > 24*3600*1000) return null;
+    return r;
   }catch(e){ return null; }
 }
-/* Unterbrochene Online-Lobby wiederherstellen (richtige Rolle inkl. Ersteller-Token).
-   Deckt auch den Reload im 10-s-Countdown ab: der Poll liefert startAt+Seed erneut. */
-function resumeLobby(l){
-  mode = "remote"; sandbox = false; tutorial = false; START_CASH = 25000;
-  onlineGame = {code: l.code, token: l.token, p: l.p, seed: null};
-  gameCode = +l.code; durationMin = l.dur; marketSeed = null; startAt = 0;
-  players = [newPlayer(l.name || (l.p === 2 ? "Spieler 2" : "Spieler 1"),
-                       l.p === 2 ? "var(--p2)" : "var(--p1)")];
-  openLobby(l.p === 2);
-}
 
-/* Lobby-Status pollen (~1,5 s): Ersteller sieht den Beitritt und bekommt den Start-Knopf;
-   der Beigetretene wartet auf startAt + Seed. Netz-Aussetzer: einfach nächste Runde. */
-async function pollLobby(){
-  if(!onlineGame || startAt) return;
-  let st;
-  try{ st = await apiJson("/game/" + onlineGame.code); }
-  catch(e){
-    if(String(e && e.message).includes("404")){ // Spiel abgelaufen/unbekannt: klar sagen
-      clearInterval(lobbyTimer); clearLobbyState();
-      $("lobbyOpp").textContent = "Spiel nicht mehr vorhanden – bitte neu anlegen.";
-    }
-    return;
-  }
-  if(st.players && st.players.length) onlineGame.players = st.players; // Roster fürs Ergebnis-Sammeln
-  if(st.startAt){ armOnlineStart(st.startAt, st.seed); return; }
-  const names = (st.players || []).map(x => x.name);
-  if(onlineGame.p === 1){
-    if(names.length >= 2){
-      $("lobbyOpp").textContent = "Dabei (" + names.length + "): " + names.join(", ");
-      const b = $("lobbyStartBtn");
-      b.style.display = "";
-      b.textContent = "▶️ Jetzt starten (" + names.length + " Spieler)";
-    }
-  }else if(names.length){
-    $("lobbyOpp").textContent = "Dabei (" + names.length + "): " + names.join(", ") +
-                                " — der Ersteller startet gleich …";
-  }
+async function createRoom(){
+  const j = await apiJson("/room", {method: "POST",
+    body: JSON.stringify({name: $("name1").value.trim()})});
+  room = {code: j.code, token: j.token, p: j.p, role: "player",
+          name: $("name1").value.trim() || "Spieler 1", played: 0};
+  saveRoomState();
+  showRoomScreen();
 }
-$("lobbyStartBtn").onclick = async function(){
-  if(!onlineGame) return;
-  this.disabled = true;
+async function joinRoom(code){
+  const old = loadRoomState();
+  if(old && old.code === code){ room = old; }        // eigene Mitgliedschaft wiederverwenden
+  else{
+    const j = await apiJson("/room/" + code + "/join", {method: "POST",
+      body: JSON.stringify({name: $("name1").value.trim()})});
+    room = {code, token: j.token, p: j.p, role: "player",
+            name: $("name1").value.trim() || ("Spieler " + j.p), played: 0};
+  }
+  saveRoomState();
+  showRoomScreen();
+}
+function showRoomScreen(){
+  $("startScreen").classList.remove("show");
+  $("statsScreen").classList.remove("show");
+  $("matchScreen").classList.remove("show");
+  $("roomScreen").classList.add("show");
+  $("roomCodeBig").textContent = room ? room.code : "";
+  const url = shareUrl("room", room ? room.code : "");
+  const qrOk = url && typeof drawQR === "function" && drawQR($("roomQR"), url, {size:200});
+  $("roomQRWrap").style.display = qrOk ? "" : "none";
+  window.scrollTo(0, 0);
+  startRoomTimer();
+  roomTick();
+}
+function startRoomTimer(){
+  clearInterval(roomTimer);
+  roomTimer = setInterval(roomTick, 2500);
+}
+function leaveRoom(msg){
+  clearInterval(roomTimer); roomTimer = null;
+  room = null; roomState = null; roomPhase = "idle"; roomDurPick = null;
+  clearRoomState();
+  $("roomScreen").classList.remove("show");
+  $("startScreen").classList.add("show");
+  if(msg) $("codeErr").textContent = msg;
+}
+$("roomLeaveBtn").onclick = () => leaveRoom("");
+$("roomShareBtn").onclick = async function(){
+  if(!room) return;
+  const url = shareUrl("room", room.code);
+  const txt = `🚀 SPCX Trading-Duell – komm in unseren Raum!\nRaum-Code: ${room.code}` +
+              (url ? `\nZum Beitreten antippen: ${url}` : "");
   try{
-    const s = await apiJson("/game/" + onlineGame.code + "/start",
-                            {method: "POST", body: JSON.stringify({token: onlineGame.token})});
-    armOnlineStart(s.startAt, s.seed);
+    this.textContent = (await shareOut(txt)) === "geteilt" ? "✅ Geteilt!" : "✅ Kopiert!";
+    setTimeout(() => { this.textContent = "📤 Einladung teilen"; }, 1800);
   }catch(e){
-    $("lobbyOpp").textContent = "Start fehlgeschlagen – bitte nochmal versuchen.";
+    if(e && e.name === "AbortError") return;
+    window.prompt("Zum Kopieren markieren:", txt);
+  }
+};
+$("roomRoleBtn").onclick = async function(){
+  if(!room) return;
+  const target = room.role === "wall" ? "player" : "wall";
+  try{
+    await apiJson("/room/" + room.code + "/role",
+      {method: "POST", body: JSON.stringify({token: room.token, role: target})});
+    room.role = target; saveRoomState();
+    roomTick();
+  }catch(e){
+    $("roomHint").textContent = target === "player"
+      ? "Kein Spieler-Platz mehr frei (max. 20)." : "Wechsel gerade nicht möglich.";
+  }
+};
+document.querySelectorAll(".rdur").forEach(b => b.onclick = () => {
+  roomDurPick = +b.dataset.m;
+  if(roomState) renderRoomScreen(roomState);
+});
+$("roomStartBtn").onclick = async function(){
+  if(!room) return;
+  this.disabled = true; $("roomErr").textContent = "";
+  try{
+    const rd = await apiJson("/room/" + room.code + "/start",
+      {method: "POST", body: JSON.stringify({token: room.token, dur: roomDurPick || undefined})});
+    startRoomRound(rd);
+  }catch(e){
+    $("roomErr").textContent = "Start nicht möglich – läuft noch eine Runde, oder es fehlen Spieler.";
   }finally{ this.disabled = false; }
 };
-/* Start ist fixiert, der geheime Seed da: Markt jetzt bauen und auf den gemeinsamen
-   Zeitpunkt herunterzählen (beide Geräte teilen dasselbe wall-clock startAt). */
-function armOnlineStart(at, seed){
-  if(!onlineGame || startAt) return;
-  marketSeed = seed >>> 0;
-  onlineGame.seed = marketSeed;
+
+/* Der eine Puls des Raums (~2,5 s): Herzschlag + Aggregat. Verteilt die Daten je nach
+   Phase: Raum-Ansicht, Runden-Erkennung, Live-Rennen, Ranglisten-Nachzügler. */
+async function roomTick(){
+  if(!room) return;
+  let st;
+  try{ st = await apiJson("/room/" + room.code + "?me=" + room.token); }
+  catch(e){
+    if(String(e && e.message).includes("404")) leaveRoom("Der Raum ist abgelaufen – bitte einen neuen eröffnen.");
+    return; // kurzer Aussetzer: nächster Puls
+  }
+  if(!room) return;
+  roomState = st;
+  const rd = st.round;
+  // Neue Runde erkannt → mitspielen (nur Spieler-Rolle, nur wenn der Start frisch ist;
+  // Zuspätkommer und Leinwände bleiben im Raum und sehen den Live-Stand)
+  if(roomPhase === "idle" && rd && rd.n > (room.played || 0) &&
+     room.role === "player" && Date.now() <= rd.startAt + 30000){
+    startRoomRound(rd);
+    return;
+  }
+  if(roomPhase === "playing"){
+    if(room.role === "player" && rd && !over && players[round]){
+      roomTickN++;
+      if(roomTickN % 2 === 0){ // ~alle 5 s den eigenen Stand melden
+        const own = totalOf(players[round]) - START_CASH;
+        await api("/room/" + room.code + "/round/" + (room.played || rd.n) + "/pnl/" + room.p,
+            {method: "PUT", body: JSON.stringify({pnl: Math.round(own * 100) / 100}),
+             headers: {"x-token": room.token}}).catch(() => {});
+      }
+    }
+    renderRace(st);
+  }
+  // Runden-Rangliste offen: eingetroffene Ergebnisse der Mitspieler nachladen
+  if(rankRoom && st.results){
+    let added = false;
+    for(const p in st.results){
+      if(rankResults[p]) continue;
+      const o = unpackResult(st.results[p]);
+      if(o && !o.wrongGame && (o.seed === undefined || o.seed === (marketSeed >>> 0))){
+        rankResults[p] = o; added = true;
+      }
+    }
+    if(added) renderRanking();
+  }
+  renderRoomScreen(st);
+}
+
+function renderRoomScreen(st){
+  if(!room) return;
+  const names = {}; st.members.forEach(m => names[m.p] = m.name);
+  // Mitglieder
+  let mh = "";
+  for(const m of st.members){
+    mh += `<div class="room-member"><span class="rdot${m.online ? " on" : ""}"></span>` +
+          `<span class="rm-name">${m.p === 1 ? "👑 " : ""}${esc(m.name)}${m.p === room.p ? " (du)" : ""}</span>` +
+          `<span class="rm-role">${m.role === "wall" ? "🖥️ Leinwand" : "🎮"}</span></div>`;
+  }
+  $("roomMembers").innerHTML = mh;
+  // Abend-Wertung (sobald es Ergebnisse gibt)
+  const sb = (st.scoreboard || []).slice().sort((a, b) => b.wins - a.wins || b.total - a.total);
+  if(sb.length){
+    $("roomScore").innerHTML = sb.map((s, i) =>
+      `<div class="rank-row${s.p === room.p ? " me" : ""}">
+        <span class="rank-pos">${i === 0 ? "👑" : (i + 1) + "."}</span>
+        <span class="rank-name">${esc(names[s.p] || ("Spieler " + s.p))} · ${s.wins} ${s.wins === 1 ? "Sieg" : "Siege"}</span>
+        <span class="rank-pnl" style="color:${s.total >= 0 ? "var(--up)" : "var(--down)"}">${sgn(s.total)}</span></div>`).join("");
+    $("roomScoreField").style.display = "";
+  }else $("roomScoreField").style.display = "none";
+  // Läuft gerade eine Runde (und wir stehen im Raum)? → Live-Stand für Leinwand/Zuspätkommer
+  const now = Date.now();
+  const rd = st.round;
+  const running = rd && now >= rd.startAt - 1000 && now < rd.startAt + rd.dur * 60000;
+  if(running && roomPhase === "idle"){
+    const left = Math.max(0, rd.startAt + rd.dur * 60000 - now);
+    $("roomLiveLabel").textContent =
+      `Runde ${rd.n} läuft – noch ${Math.floor(left/60000)}:${String(Math.floor(left % 60000 / 1000)).padStart(2, "0")}`;
+    const rows = Object.keys(st.pnls || {}).map(p => ({p: +p, v: st.pnls[p]})).sort((a, b) => b.v - a.v);
+    $("roomLive").innerHTML = rows.length
+      ? rows.map((r, i) =>
+          `<div class="rank-row"><span class="rank-pos">${i === 0 ? "👑" : (i + 1) + "."}</span>
+           <span class="rank-name">${esc(names[r.p] || "?")}</span>
+           <span class="rank-pnl" style="color:${r.v >= 0 ? "var(--up)" : "var(--down)"}">${sgn(r.v)}</span></div>`).join("")
+      : '<div class="mode-hint">Gleich kommen die ersten Meldungen …</div>';
+    $("roomLiveField").style.display = "";
+  }else $("roomLiveField").style.display = "none";
+  // Start-Bereich: nur Ersteller, ≥2 Spieler, keine laufende Runde
+  const playersN = st.members.filter(m => m.role === "player").length;
+  const canStart = room.p === 1 && playersN >= 2 && !running && roomPhase === "idle";
+  $("roomStartField").style.display = canStart ? "" : "none";
+  if(canStart){
+    const pick = roomDurPick || st.dur;
+    document.querySelectorAll(".rdur").forEach(b => b.classList.toggle("active", +b.dataset.m === pick));
+  }
+  const waiting = roomPhase === "idle" && !running && !canStart;
+  $("roomWaitHint").style.display = waiting ? "" : "none";
+  if(waiting) $("roomWaitHint").textContent = room.p === 1
+    ? "Warte auf Mitspieler – mindestens 2 Spieler nötig …"
+    : "Der Ersteller startet die nächste Runde …";
+  $("roomRoleBtn").textContent = room.role === "wall" ? "🎮 Wieder mitspielen" : "🖥️ Dieses Gerät als Leinwand";
+}
+
+/* Runde angenommen: Markt aus dem Runden-Seed bauen und auf das gemeinsame
+   wall-clock startAt herunterzählen (3-2-1 übernimmt das Vorlauf-Fenster). */
+function startRoomRound(rd){
+  if(!room || room.role !== "player") return;
+  if(rd.n <= (room.played || 0)) return;
+  if(Date.now() > rd.startAt + 30000) return; // zu spät – ab der nächsten Runde dabei
+  room.played = rd.n; saveRoomState();
+  roomPhase = "countdown";
+  sandbox = false; tutorial = false; START_CASH = 25000;
+  durationMin = rd.dur;
+  gameCode = +room.code;          // Anzeige + Payload-Prüfung laufen über den Raum-Code
+  marketSeed = rd.seed >>> 0;     // der geheime Seed der Runde
   buildMarket();
-  startAt = at;
-  $("lobbyStartBtn").style.display = "none";
-  $("lobbyOpp").textContent = "Gegner bereit ✓ – los geht's!";
-  $("lobbyStartRow").style.display = "";
-  $("lobbyTime").textContent = hhmm(startAt);
+  players = [newPlayer(room.name || ("Spieler " + room.p),
+                       room.p === 1 ? "var(--p1)" : "var(--p2)")];
+  startAt = rd.startAt;
   clearInterval(lobbyTimer);
-  lobbyTimer = setInterval(updateLobby, 250);
   updateLobby();
+  lobbyTimer = setInterval(updateLobby, 250);
 }
 
-/* Nach Rundenende: eigenes Ergebnis hochladen (write-once; 409 nach Resume ist ok).
-   Bei 2 Spielern öffnet sich der klassische Duell-Vergleich von selbst, ab 3 Spielern
-   die Rangliste, die sich füllt, sobald die anderen fertig sind. */
-async function onlineShareResult(p){
-  if(!onlineGame || onlineGame.seed == null) return;
-  $("cmpWait").style.display = "";
+/* Ergebnis der Runde abliefern (write-once; ?pnl speist die Abend-Wertung),
+   dann die Runden-Rangliste öffnen – sie füllt sich über den Raum-Puls. */
+async function roomShareResult(p){
+  if(!room) return;
+  const n = room.played || 0;
+  if(!n) return;
   try{
-    await api("/game/" + onlineGame.code + "/result/" + onlineGame.p,
-              {method: "PUT", body: packResult(p), headers: {"x-token": onlineGame.token}});
-  }catch(e){ /* 409 = schon hochgeladen, Netzfehler = manueller Austausch bleibt */ }
-  // Verbindliches Roster holen (falls kurz vor dem Start noch jemand dazukam)
-  try{
-    const st = await apiJson("/game/" + onlineGame.code);
-    if(st.players && st.players.length) onlineGame.players = st.players;
-  }catch(e){}
-  if((onlineGame.players || []).length > 2) return startRanking(p);
-  return pollOppResult();
+    await api("/room/" + room.code + "/round/" + n + "/result/" + room.p +
+              "?pnl=" + (Math.round(p.result.pnl * 100) / 100),
+              {method: "PUT", body: packResult(p), headers: {"x-token": room.token}});
+  }catch(e){ /* 409 = schon abgeliefert (z. B. nach Resume) – unkritisch */ }
+  startRanking(p);
 }
 
-/* ===== Mehrspieler-Rangliste (3–8 Spieler) ===== */
-let rankResults = null, rankTimer = null, rankGame = null;
+/* ===== Runden-Rangliste (Raum) ===== */
+let rankResults = null, rankRoom = null;
 function startRanking(p){
-  rankGame = onlineGame;
+  rankRoom = {n: room.played || 0, members: (roomState && roomState.members) || []};
   rankResults = {};
   const own = unpackResult(packResult(p)); // eigenes Ergebnis in derselben Form wie die fremden
   own.self = true;
-  rankResults[rankGame.p] = own;
-  $("cmpBox").style.display = "none"; // manueller 1:1-Austausch passt nicht zur Rangliste
+  rankResults[room.p] = own;
+  $("cmpBox").style.display = "none";
   showRankView();
   renderRanking();
-  return pollRankResults();
 }
 function showRankView(){
-  $("resTitle").textContent = "Rangliste";
+  $("resTitle").textContent = "Rangliste · Runde " + (rankRoom ? rankRoom.n : "");
   document.querySelector(".res-row").style.display = "none";
   $("analysis").style.display = "none";
   $("rankBack").style.display = "none";
   $("rankBox").style.display = "";
 }
 function renderRanking(){
-  const roster = rankGame.players || [];
+  const roster = (rankRoom ? rankRoom.members : []).filter(m => m.role === "player");
   const rows = roster.map(pl => ({p: pl.p, name: pl.name, res: rankResults[pl.p] || null}))
     .sort((a, b) => (b.res ? b.res.result.pnl : -Infinity) - (a.res ? a.res.result.pnl : -Infinity));
   const done = rows.filter(r => r.res).length;
@@ -962,98 +1070,25 @@ function showRankDetail(p){
   $("rankBack").style.display = "";
 }
 $("rankBack").onclick = () => { showRankView(); renderRanking(); };
-/* ===== Online-Revanche: neues Spiel für dieselbe Runde =====
-   Jeder Mitspieler kann vom Ergebnis-Screen aus eine Revanche anbieten (legt ein neues
-   Online-Spiel an und hinterlegt den Code am alten). Die anderen sehen den Beitritts-Knopf
-   automatisch — das alte Spiel ist der Kanal, kein manuelles Teilen mehr nötig. */
-let rematchTimer = null, rematchWatch = null, rematchNextCode = null;
-function startRematchWatch(){
-  clearInterval(rematchTimer);
-  rematchNextCode = null;
-  rematchWatch = onlineGame ? {og: onlineGame, deadline: Date.now() + 15*60000} : null;
-  if(rematchWatch){ rematchTimer = setInterval(rematchTick, 4000); rematchTick(); }
-}
-async function rematchTick(){
-  const w = rematchWatch;
-  if(!w || onlineGame !== w.og || Date.now() > w.deadline){ clearInterval(rematchTimer); return; }
-  let st;
-  try{ st = await apiJson("/game/" + w.og.code); }catch(e){ return; }
-  if(st.next && onlineGame === w.og){
-    clearInterval(rematchTimer);
-    rematchNextCode = st.next;
-    $("rematchOnlineBtn").style.display = "none"; // jemand war schneller → beitreten statt anbieten
-    const b = $("rematchJoinBtn");
-    b.textContent = "🔁 Revanche angeboten – beitreten (Code " + st.next + ")";
-    b.style.display = "";
-  }
-}
-$("rematchOnlineBtn").onclick = async function(){
-  const old = onlineGame;
-  if(!old) return;
-  this.disabled = true;
-  // Neues Online-Spiel über den normalen Anlegen-Pfad erzeugen (öffnet die Lobby)
-  $("overlay").classList.remove("show");
-  $("matchScreen").classList.remove("show");
-  $("startScreen").classList.add("show");
-  setTop("multi"); setMode("remote");
-  codeIn.value = "";
-  await $("startBtn").onclick();
-  this.disabled = false;
-  // dem alten Spiel den neuen Code melden → bei den anderen erscheint der Beitritts-Knopf
-  if(onlineGame && onlineGame !== old){
-    try{
-      await api("/game/" + old.code + "/rematch",
-                {method: "POST", body: JSON.stringify({token: old.token, next: onlineGame.code})});
-    }catch(e){ /* 409 = jemand war schneller; die eigene Lobby bleibt trotzdem spielbar */ }
-  }
-};
-$("rematchJoinBtn").onclick = function(){
-  if(!/^\d{6}$/.test(rematchNextCode || "")) return;
-  $("overlay").classList.remove("show");
-  $("matchScreen").classList.remove("show");
-  applyJoinCode(rematchNextCode); // Start-Screen, Modus + Code vorbereitet
-  $("startBtn").onclick();        // direkt beitreten → Lobby
-};
 
-/* ===== Live-Rennen: eigenen P&L melden + alle abholen (nur Online-Runden) =====
-   Reine Anzeige (nur die Zahl, nie Positionen) – Fairness unberührt. ~Alle 5 s ein
-   PUT + GET; Netzfehler werden still geschluckt, die Leiste zeigt dann alte Werte. */
-let raceTimer = null, racePnls = {};
+/* ===== Live-Rennen: Chips in der Topbar, gespeist aus dem Raum-Puls ===== */
 function startRace(){
   stopRace();
-  if(mode !== "remote" || !onlineGame || onlineGame.seed == null) return;
-  if(!(onlineGame.players || []).length) return;
-  racePnls = {};
-  $("raceRow").style.display = "";
+  if(mode !== "room" || !room) return;
   $("raceRow").innerHTML = "";
-  raceTimer = setInterval(syncRace, 5000);
-  syncRace();
+  $("raceRow").style.display = "";
 }
 function stopRace(){
-  clearInterval(raceTimer); raceTimer = null;
   $("raceRow").style.display = "none";
 }
-async function syncRace(){
-  const og = onlineGame;
-  if(!og){ stopRace(); return; }
-  const own = totalOf(players[round]) - START_CASH;
-  try{
-    await api("/game/" + og.code + "/pnl/" + og.p,
-              {method: "PUT", body: JSON.stringify({pnl: Math.round(own * 100) / 100}),
-               headers: {"x-token": og.token}});
-  }catch(e){}
-  try{
-    const r = await apiJson("/game/" + og.code + "/pnl");
-    if(onlineGame === og && r.pnls) racePnls = r.pnls;
-  }catch(e){}
-  if(onlineGame === og) renderRace(own);
-}
-function renderRace(own){
-  const roster = (onlineGame && onlineGame.players) || [];
+function renderRace(st){
+  if(mode !== "room" || !room || !st || !players[round]) return;
+  const roster = (st.members || []).filter(m => m.role === "player");
   if(roster.length < 2) return;
-  const rows = roster.map(pl => ({
-    p: pl.p, name: pl.name, me: pl.p === onlineGame.p,
-    v: pl.p === onlineGame.p ? own : (racePnls[pl.p] !== undefined ? racePnls[pl.p] : null),
+  const own = totalOf(players[round]) - START_CASH;
+  const rows = roster.map(m => ({
+    p: m.p, name: m.name, me: m.p === room.p,
+    v: m.p === room.p ? own : (st.pnls && st.pnls[m.p] !== undefined ? st.pnls[m.p] : null),
   })).sort((a, b) => (b.v === null ? -Infinity : b.v) - (a.v === null ? -Infinity : a.v));
   let html = "";
   rows.forEach((r, i) => {
@@ -1065,46 +1100,6 @@ function renderRace(own){
   $("raceRow").innerHTML = html;
 }
 
-/* Fehlende Ergebnisse einsammeln (~3 s Takt, 20-Min-Deckel) und die Liste füllen */
-function pollRankResults(){
-  clearTimeout(rankTimer);
-  const og = rankGame, deadline = Date.now() + 20*60000;
-  const tick = async () => {
-    if(onlineGame !== og || Date.now() > deadline) return;
-    const roster = og.players || [];
-    for(const pl of roster){
-      if(rankResults[pl.p]) continue;
-      try{
-        const txt = await (await api("/game/" + og.code + "/result/" + pl.p)).text();
-        const o = unpackResult(txt);
-        if(o && !o.wrongGame && (o.seed === undefined || (o.seed >>> 0) === og.seed)) rankResults[pl.p] = o;
-      }catch(e){ /* 404: spielt noch */ }
-    }
-    renderRanking();
-    if(roster.every(pl => rankResults[pl.p])) return; // vollständig
-    rankTimer = setTimeout(tick, 3000);
-  };
-  return tick();
-}
-let oppTimer = null;
-function pollOppResult(){
-  clearTimeout(oppTimer);
-  const og = onlineGame, opp = og.p === 1 ? "2" : "1", deadline = Date.now() + 15*60000;
-  const tick = async () => {
-    if(onlineGame !== og || Date.now() > deadline){ $("cmpWait").style.display = "none"; return; }
-    try{
-      const txt = await (await api("/game/" + og.code + "/result/" + opp)).text();
-      const o = unpackResult(txt);
-      if(o && !o.wrongGame && (o.seed === undefined || (o.seed >>> 0) === og.seed)){
-        $("cmpWait").style.display = "none";
-        renderCompare(soloP, o);
-        return;
-      }
-    }catch(e){ /* 404: Gegner spielt noch */ }
-    oppTimer = setTimeout(tick, 3000);
-  };
-  return tick();
-}
 
 /* Einladung teilen: Link mit vorbefülltem Beitritts-Code (?join=…) – der Gegner
    tippt ihn an und muss nur noch seinen Namen eingeben und beitreten. */
@@ -1136,6 +1131,12 @@ $("rematchBtn").onclick = () => {
     window.scrollTo(0, 0);
     return;
   }
+  if(mode === "room" && room){ // Raum-Runde vorbei → zurück in den Raum (nächste Runde wartet)
+    $("overlay").classList.remove("show");
+    $("matchScreen").classList.remove("show");
+    showRoomScreen();
+    return;
+  }
   $("overlay").classList.remove("show");
   $("matchScreen").classList.remove("show");
   $("startScreen").classList.add("show");
@@ -1151,7 +1152,8 @@ $("rematchBtn").onclick = () => {
 };
 
 function startRound(r){
-  clearLobbyState(); // Runde läuft – ab jetzt deckt der Spiel-Snapshot Reloads ab
+  $("roomScreen").classList.remove("show");
+  if(mode === "room") roomPhase = "playing";
   round = r;
   tickCount = 0; paused = false; over = false; newsPaused = false; lastNewsTick = -999;
   clearInterval(preTimer); preTimer = null; $("preStart").classList.remove("show");
@@ -1163,7 +1165,7 @@ function startRound(r){
   $("flash").textContent = "";
   $("pauseBtn").textContent = "⏸ Pause";
   // Remote läuft strikt nach Weltzeit – keine Pause möglich; im Tutorial pausiert der Coach
-  $("pauseBtn").style.display = (mode === "remote" || tutorial) ? "none" : "";
+  $("pauseBtn").style.display = (wallClock() || tutorial) ? "none" : "";
   $("endSandboxBtn").style.display = sandbox ? "" : "none";
   roundAnchor = mode === "remote" ? startAt : Date.now();
   $("roundTag").textContent = tutorial
@@ -1193,7 +1195,7 @@ function startRound(r){
   // Spielzeit erst nach dem Vorlauf starten
   const beginTicking = () => {
     stopTips(); // Spiel läuft – keine Wartetipps mehr
-    roundAnchor = mode === "remote" ? startAt : Date.now();
+    roundAnchor = wallClock() ? startAt : Date.now();
     clearInterval(timer);
     timer = setInterval(tick, TICK_MS);
     lastTickAt = performance.now();
@@ -1301,7 +1303,7 @@ function tick(){
   if(over) return;
   lastTickAt = performance.now();
 
-  if(mode === "remote"){
+  if(wallClock()){
     /* Weltzeit-Anker: Spielzeit hängt nur an der Uhr, nie an Pausen oder
        Render-Aussetzern. Beide Geräte (gleicher startAt aus der Lobby)
        bleiben dadurch dauerhaft synchron; nach Tab-Schlaf wird aufgeholt. */
@@ -1332,9 +1334,9 @@ function tick(){
 let npTimer = null;
 
 function showNewsPop(e){
-  if(mode !== "remote") newsPaused = true; // solo & local: Popup pausiert; remote läuft weiter
+  if(!wallClock()) newsPaused = true; // solo & local: Popup pausiert; Weltzeit-Modi laufen weiter
   clearTimeout(npTimer);
-  if(mode === "remote") npTimer = setTimeout(closeNewsPop, e.mega ? 12000 : 6000);
+  if(wallClock()) npTimer = setTimeout(closeNewsPop, e.mega ? 12000 : 6000);
   const sym = e.ev.t;
   $("npLive").textContent = e.insider ? "Insider" : e.mega ? "Mega-Event" : "Breaking";
   $("npHint").style.display = e.insider ? "none" : "";
@@ -1960,6 +1962,7 @@ function endRound(){
   clearInterval(timer);
   stopChartLoop();
   stopRace();
+  if(mode === "room") roomPhase = "idle";
   if(sandbox) matchTicks = tickCount; else tickCount = matchTicks;
   const p = players[round];
   payDividend(p, false); // letzte aufgelaufene Dividende noch auszahlen
@@ -1976,7 +1979,7 @@ function endRound(){
   if(!sandbox){ updateRecord(p); appendGameHistory(p); } // Rekord + Historie auf diesem Gerät fortschreiben
 
   // Eine Runde, eigenes Ergebnis: Einzelspieler oder jedes Remote-Gerät
-  if(mode === "solo" || mode === "remote"){
+  if(mode === "solo" || wallClock()){
     showResultSolo(p);
     return;
   }
@@ -2300,8 +2303,7 @@ function runStatsCompare(entry, oppRaw, errEl){
   }
   errEl.textContent = "";
   // Ansicht sicher auf den klassischen Zwei-Spalten-Vergleich stellen
-  rankGame = null; clearTimeout(rankTimer);
-  $("rematchOnlineBtn").style.display = "none"; $("rematchJoinBtn").style.display = "none";
+  rankRoom = null;
   $("rankBox").style.display = "none"; $("rankBack").style.display = "none";
   document.querySelector(".res-row").style.display = "";
   $("analysis").style.display = "";
@@ -2360,28 +2362,23 @@ function showResultSolo(p){
   $("cmpBox").style.display = solo ? "none" : "";
   $("shareBtn").textContent = "📤 Mein Ergebnis teilen";
   $("cmpIn").value = ""; $("cmpErr").textContent = "";
-  $("cmpWait").style.display = "none";
   // Ansicht auf den klassischen Zustand zurücksetzen (falls zuvor eine Rangliste offen war)
-  rankGame = null; clearTimeout(rankTimer);
+  rankRoom = null;
   $("rankBox").style.display = "none"; $("rankBack").style.display = "none";
   document.querySelector(".res-row").style.display = "";
   $("analysis").style.display = "";
   $("resCode").textContent = String(gameCode).padStart(6,"0");
-  $("rematchBtn").textContent = "Neues Spiel";
-  // Online-Revanche: anbieten können alle Mitspieler; angebotene erscheint automatisch
-  const online = !solo && !sandbox && onlineGame;
-  $("rematchOnlineBtn").style.display = online ? "" : "none";
-  $("rematchOnlineBtn").disabled = false;
-  $("rematchJoinBtn").style.display = "none";
+  const inRoom = mode === "room" && room;
+  if(inRoom) $("cmpBox").style.display = "none"; // im Raum läuft alles automatisch
+  $("rematchBtn").textContent = inRoom ? "← Zurück in den Raum" : "Neues Spiel";
   $("overlay").classList.add("show");
-  // Online-Duell: Ergebnis hochladen; 2 Spieler → Auto-Vergleich, 3+ → Rangliste
-  if(online){ onlineShareResult(p); startRematchWatch(); }
+  // Raum-Runde: Ergebnis abliefern → Runden-Rangliste (füllt sich über den Raum-Puls)
+  if(inRoom && !sandbox) roomShareResult(p);
 }
 
 function showResult(){
   clearSnapshot(); // Duell entschieden – Snapshot entfernen
-  rankGame = null; clearTimeout(rankTimer); // falls zuvor eine Online-Rangliste offen war
-  $("rematchOnlineBtn").style.display = "none"; $("rematchJoinBtn").style.display = "none";
+  rankRoom = null; // falls zuvor eine Runden-Rangliste offen war
   $("rankBox").style.display = "none"; $("rankBack").style.display = "none";
   document.querySelector(".res-row").style.display = "";
   $("analysis").style.display = "";
@@ -2644,13 +2641,22 @@ function routeSharedText(text){
   if(q >= 0){ try{ params = new URLSearchParams(text.slice(q)); }catch(e){} }
   const vs = params && params.get("vs");
   if(vs){ openSharedCompare(vs); return true; }
+  const rm = params && params.get("room");
+  if(rm && /^\d{6}$/.test(rm)){ // Raum-Einladung: Modus setzen und direkt beitreten
+    $("startScreen").classList.add("show");
+    setTop("multi"); setMode("room");
+    codeIn.value = rm;
+    codeIn.dispatchEvent(new Event("input"));
+    $("startBtn").onclick();
+    return true;
+  }
   const join = (params && params.get("join")) || (/^\d{6}$/.test(text) ? text : null);
   return applyJoinCode(join);
 }
 function handleShareParams(){
   let p;
   try{ p = new URLSearchParams(location.search); }catch(e){ return false; }
-  if(p.get("join") === null && p.get("vs") === null) return false;
+  if(p.get("join") === null && p.get("vs") === null && p.get("room") === null) return false;
   const q = location.search;                                             // vor dem Aufräumen sichern
   try{ history.replaceState(null, "", location.pathname); }catch(e){}    // nicht erneut auslösen (Reload/PWA)
   routeSharedText(q);
@@ -2659,8 +2665,8 @@ function handleShareParams(){
 if(!handleShareParams() && !loadSnapshot()){
   // Unterbrochene Online-Lobby (Reload beim App-Wechsel) automatisch wieder öffnen –
   // laufende Runden deckt der Spiel-Snapshot ab, Teil-Links haben Vorrang.
-  const lby = loadLobbyState();
-  if(lby) resumeLobby(lby);
+  const rm = loadRoomState();
+  if(rm){ room = rm; showRoomScreen(); }
 }
 
 /* ====================== QR-Scanner (Einladung scannen) ====================== */

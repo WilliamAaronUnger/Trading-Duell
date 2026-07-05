@@ -237,7 +237,8 @@ const DURATIONS = [5, 10, 15];
 const MODE_HINTS = {
   solo:   "Du spielst allein und misst dich an deinem eigenen Rekord.",
   local:  "Beide nacheinander auf diesem Gerät – danach wird automatisch verglichen.",
-  remote: "2–8 Spieler, jeder auf seinem Gerät, gekoppelt per 6-stelligem Code – exakt derselbe Markt für alle.",
+  remote: "Zwei Geräte, komplett OHNE Internet: gleicher Code = gleicher Markt, Start zur vollen Minute, Ergebnistausch per Code/QR.",
+  room:   "2–20 Spieler online im Raum: Runde um Runde, Live-Rennen, Abend-Wertung – und jedes Gerät kann Leinwand sein.",
 };
 const TIPS = [
   "📰 News wirken erst ~8 Sekunden nach der Schlagzeile – nutze die Lücke zum Handeln.",

@@ -829,6 +829,7 @@ function showRoomScreen(){
   const qrOk = url && typeof drawQR === "function" && drawQR($("roomQR"), url, {size:200});
   $("roomQRWrap").style.display = qrOk ? "" : "none";
   roomInviteOpen = true; roomInviteTouched = false; applyRoomInvite(); // frisch: Einladung offen
+  $("roomBackBtn").style.display = "none";
   window.scrollTo(0, 0);
   startRoomTimer();
   roomTick();
@@ -841,6 +842,7 @@ function leaveRoom(msg){
   clearInterval(roomTimer); roomTimer = null;
   room = null; roomState = null; roomPhase = "idle"; roomDurPick = null;
   clearRoomState();
+  $("roomBackBtn").style.display = "none"; // Mitgliedschaft weg → kein Rückkehr-Knopf
   $("roomScreen").classList.remove("show");
   $("startScreen").classList.add("show");
   if(msg) $("codeErr").textContent = msg;
@@ -2676,10 +2678,20 @@ function handleShareParams(){
   return true;
 }
 if(!handleShareParams() && !loadSnapshot()){
-  // Unterbrochene Online-Lobby (Reload beim App-Wechsel) automatisch wieder öffnen –
-  // laufende Runden deckt der Spiel-Snapshot ab, Teil-Links haben Vorrang.
+  // Bestehende Raum-Mitgliedschaft NICHT still wiederbeleben (Gefahr: man landet
+  // unbemerkt in einem alten Raum, während die anderen längst in einem neuen sind).
+  // Stattdessen ein expliziter Knopf mit sichtbarem Raum-Code.
   const rm = loadRoomState();
-  if(rm){ room = rm; showRoomScreen(); }
+  if(rm){
+    const b = $("roomBackBtn");
+    b.textContent = "🚪 Zurück in den Raum " + rm.code;
+    b.style.display = "";
+    b.onclick = () => {
+      b.style.display = "none";
+      room = loadRoomState();
+      if(room) showRoomScreen();
+    };
+  }
 }
 
 /* ====================== QR-Scanner (Einladung scannen) ====================== */

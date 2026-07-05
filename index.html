@@ -180,6 +180,30 @@
   </div>
 </div>
 
+<!-- ================= LEINWAND (Großbild während der Runde) ================= -->
+<div class="screen" id="wallScreen">
+  <div class="wall">
+    <div class="wall-head">
+      <span class="wall-title">🌐 Raum <b id="wallRoom"></b> · Runde <b id="wallRound"></b></span>
+      <span class="wall-clock" id="wallTime">–:–</span>
+      <button class="wall-exit" id="wallExit">← Raum</button>
+    </div>
+    <div class="wall-main">
+      <div class="wall-chartbox">
+        <div class="wall-focus"><b id="wallSym">SPCX</b> <span id="wallPx"></span> <span id="wallChg"></span></div>
+        <canvas id="wallChart"></canvas>
+      </div>
+      <div class="wall-board">
+        <div class="wall-board-title">🏁 Live-Rennen</div>
+        <div id="wallBoard"></div>
+      </div>
+    </div>
+    <div class="wall-minis" id="wallMinis"></div>
+    <div class="wall-news" id="wallNews">Gleich geht's los …</div>
+  </div>
+  <div class="wall-flash" id="wallFlash" style="display:none"><div id="wallFlashText"></div></div>
+</div>
+
 <!-- ================= MATCH ================= -->
 <div class="screen" id="matchScreen">
   <div class="topbar">

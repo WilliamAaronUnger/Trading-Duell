@@ -27,7 +27,7 @@ const noop = () => {};
   // ---- DOM-/Browser-Stub ----
   const els = {};
   const store = {};
-  const ctx2d = {fillStyle: "", fillRect: noop, clearRect: noop};
+  const ctx2d = new Proxy({}, {get: () => () => {}, set: () => true});
   const mkEl = () => new Proxy(function(){}, {
     get: (t, p) => { if(p === "classList") return {add: noop, remove: noop, toggle: noop, contains: () => false};
       if(p === "style") return t.__style || (t.__style = {});
@@ -156,6 +156,18 @@ const noop = () => {};
     const liveHtml = $id("roomLive").innerHTML || "";
     out["Leinwand: Live-Stand sichtbar, Ben vorn"] = $id("roomLiveField").style.display === "" &&
       liveHtml.indexOf("Ben") >= 0 && liveHtml.indexOf("Ben") < liveHtml.indexOf("Anna");
+    // Großbild (Phase 3): eigener Markt aus dem Runden-Seed, Board, News, Exit
+    out["Großbild: an, richtige Runde, Markt aus Seed"] = wallOn === true && wallRoundN === 1 &&
+      !!wallMarket && JSON.stringify(wallMarket.paths.SPCX.slice(0, 40)) === path1;
+    out["Großbild: Rangliste zeigt Ben vorn"] = (($id("wallBoard").innerHTML || "").indexOf("Ben") >= 0) &&
+      ($id("wallBoard").innerHTML || "").indexOf("Ben") < ($id("wallBoard").innerHTML || "").indexOf("Anna");
+    out["Großbild: Zeit + Fokus gerendert"] = ($id("wallTime").textContent || "").indexOf(":") > 0 &&
+      DISPLAY_SYMS.includes($id("wallSym").textContent);
+    $id("wallExit").onclick();
+    out["Großbild: Exit schließt (für diese Runde)"] = wallOn === false;
+    await roomTick();
+    out["Großbild: bleibt nach Exit zu (dismissed)"] = wallOn === false;
+    wallDismissed = 0; // fürs weitere Testgeschehen zurücksetzen
 
     // --- Runde 1 endet: Ergebnisse → Rangliste + Abend-Wertung ---
     restore(A3); roomPhase = "idle";

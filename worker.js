@@ -1,4 +1,13 @@
-/* Trading Duell – Cloudflare Worker v4: der Online-RAUM (Speicher: D1)
+/* Trading Duell – Cloudflare Worker v5: der Online-RAUM (Speicher: D1)
+   mit ANTI-CHEAT: Ergebnisse werden nicht mehr geglaubt, sondern NACHGESPIELT.
+   Der Client reicht sein Trade-Log ein ({res, log}); der Worker baut den Markt
+   aus dem geheimen Seed selbst nach (gleiche engine.js wie die App!), spielt
+   jede Order mit identischen Regeln durch und errechnet das P&L SELBST –
+   pnlFinal in Wertung/Rangliste ist die Server-Zahl. Abweichende Angaben,
+   unmögliche Orders, zu frühe Einreichungen und Alt-Clients ohne Log werden
+   hart abgelehnt. Ergebnisse nahe der Orakel-Obergrenze (perfektes Timing)
+   bekommen ein 🤨-Verdachts-Flag (sus).
+
    Ein Raum ist der Treffpunkt für den Abend: Mitglieder treten EINMAL bei (QR/Code),
    sind mit Anwesenheit sichtbar und wählen ihre Rolle (🎮 Spieler / 🖥️ Leinwand).
    Der Ersteller startet Runde um Runde – jede mit frischem, geheimem Markt-Seed und
@@ -34,11 +43,15 @@
                                                    dur wird neuer Standard; cash nur mit expert)
      GET  /room/{code}?me={token}               → Aggregat {dur, curRound, members, round, pnls,
                                                    results, scoreboard, trades?}; me = Herzschlag
-     PUT  /room/{code}/round/{n}/result/{p}?pnl=X → 201  (x-token, write-once, SPCX5./SPCX6., ≤700)
+     PUT  /room/{code}/round/{n}/result/{p}?pnl=X → 201 {pnl, sus}
+                                                  (x-token, write-once, Body = JSON {res, log};
+                                                   nur nach Rundenende; Server-Replay entscheidet)
      PUT  /room/{code}/round/{n}/pnl/{p} {pnl}  → 200   (x-token, überschreibbar)
      POST /room/{code}/round/{n}/trade {sym, side, vol}
                                                 → 201 {id, at} (x-token, nur Spieler, nur laufende
                                                    Expert-Runde, Rate-Limit; anonym im Aggregat) */
+import "./data.js";   // Konstanten/Pools (publiziert via globalThis, siehe Datei-Ende)
+import "./engine.js"; // genMarket + replayRound + oracleMaxPnl – DIESELBE Engine wie die App
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -55,6 +68,8 @@ const MAX_PLAYERS = 20;           // Spieler-Rollen je Raum (Leinwände zählen 
 const CASHES = [10000, 25000, 50000, 100000]; // Startkapital-Presets (nur Expert-Runden)
 const CASH_DEFAULT = 25000;
 const TRADE_RATE_MS = 15000;      // höchstens eine Blockorder je Spieler je 15 s
+const SUBMIT_GRACE_MS = 5000;     // Ergebnis frühestens ~Rundenende (kleine Uhren-Toleranz)
+const SUS_FRAC = 0.85;            // 🤨 ab diesem Anteil der Orakel-Obergrenze
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {status, headers: {...CORS, "content-type": "application/json"}});
@@ -87,7 +102,9 @@ async function ensureSchema(db){
     code TEXT, n INTEGER, id INTEGER, p INTEGER, at INTEGER, sym TEXT, side TEXT, vol REAL,
     PRIMARY KEY(code, n, id))`).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS roundResults(
-    code TEXT, n INTEGER, p INTEGER, body TEXT, pnlFinal REAL, created INTEGER, PRIMARY KEY(code, n, p))`).run();
+    code TEXT, n INTEGER, p INTEGER, body TEXT, pnlFinal REAL, sus INTEGER DEFAULT 0,
+    created INTEGER, PRIMARY KEY(code, n, p))`).run();
+  try{ await db.prepare("ALTER TABLE roundResults ADD COLUMN sus INTEGER DEFAULT 0").run(); }catch(e){}
   await db.prepare(`CREATE TABLE IF NOT EXISTS roundPnl(
     code TEXT, n INTEGER, p INTEGER, v REAL, t INTEGER, PRIMARY KEY(code, n, p))`).run();
   schemaReady = true;
@@ -107,16 +124,17 @@ export default {
 
 /* Abend-Wertung aus allen Runden-Ergebnissen: Sieg = höchster P&L der Runde */
 async function scoreboard(db, code){
-  const rows = (await db.prepare("SELECT n, p, pnlFinal FROM roundResults WHERE code = ?")
+  const rows = (await db.prepare("SELECT n, p, pnlFinal, sus FROM roundResults WHERE code = ?")
                         .bind(code).all()).results;
   const byRound = {}, sb = {};
   for(const r of rows) (byRound[r.n] = byRound[r.n] || []).push(r);
   for(const n in byRound){
     let best = null;
     for(const r of byRound[n]){
-      const s = sb[r.p] = sb[r.p] || {p: r.p, wins: 0, total: 0, rounds: 0};
+      const s = sb[r.p] = sb[r.p] || {p: r.p, wins: 0, total: 0, rounds: 0, sus: 0};
       s.total = Math.round((s.total + r.pnlFinal) * 100) / 100;
       s.rounds++;
+      s.sus += r.sus ? 1 : 0;
       if(best === null || r.pnlFinal > best.pnlFinal) best = r;
     }
     if(best) sb[best.p].wins++;
@@ -188,8 +206,12 @@ async function route(req, db){
         out.round = {n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed, expert: rd.expert, cash: rd.cash};
         for(const r of (await db.prepare("SELECT p, v FROM roundPnl WHERE code = ? AND n = ?")
                                 .bind(code, rd.n).all()).results) out.pnls[r.p] = r.v;
-        for(const r of (await db.prepare("SELECT p, body FROM roundResults WHERE code = ? AND n = ?")
-                                .bind(code, rd.n).all()).results) out.results[r.p] = r.body;
+        out.sus = {};
+        for(const r of (await db.prepare("SELECT p, body, sus FROM roundResults WHERE code = ? AND n = ?")
+                                .bind(code, rd.n).all()).results){
+          out.results[r.p] = r.body;
+          if(r.sus) out.sus[r.p] = 1;
+        }
         // Blockorder-Journal der Expert-Runde – ANONYM (ohne p): das Rätselraten am
         // Tisch ist Teil des Spiels, und niemand kann Strategien nachhandeln.
         if(rd.expert)
@@ -308,7 +330,8 @@ async function route(req, db){
     const n = +rest[1], kind = rest[2], p = +rest[3];
     if(!Number.isInteger(n) || n < 1) return err(400, "round");
     if(!Number.isInteger(p) || p < 1) return err(400, "player");
-    const rd = await db.prepare("SELECT startAt FROM rounds WHERE code = ? AND n = ?").bind(code, n).first();
+    const rd = await db.prepare("SELECT seed, dur, startAt, expert, cash FROM rounds WHERE code = ? AND n = ?")
+                       .bind(code, n).first();
     if(!rd) return err(404, "unknown round");
     if(req.method !== "PUT") return err(405, "method");
     const tok = await db.prepare("SELECT token, role FROM members WHERE code = ? AND p = ?").bind(code, p).first();
@@ -316,17 +339,38 @@ async function route(req, db){
     if(tok.role !== "player") return err(403, "wall"); // Leinwände spielen nicht
 
     if(kind === "result"){
-      const body = (await req.text()).trim();
-      if(body.length > 700 || !/^SPCX[56]\./.test(body)) return err(400, "payload");
-      const pnl = +url.searchParams.get("pnl");
-      if(!Number.isFinite(pnl) || Math.abs(pnl) > 1e7) return err(400, "pnl");
+      /* ANTI-CHEAT: Body = JSON {res: "SPCX6.…", log: [[tick,sym,side,qty,block10],…]}.
+         Der Server spielt das Log auf dem selbst erzeugten Markt nach (engine.js) und
+         übernimmt SEIN Ergebnis; die Client-Angabe (?pnl) muss dazu passen. Alt-Clients
+         ohne Log scheitern hier bewusst (Update-Pflicht, mit Betreiber abgestimmt). */
+      let body;
+      try{ body = JSON.parse(await req.text()); }catch(e){ return err(400, "payload"); }
+      const res = body && typeof body.res === "string" ? body.res.trim() : "";
+      if(res.length > 700 || !/^SPCX6\./.test(res)) return err(400, "payload");
+      if(!Array.isArray(body.log)) return err(400, "log");
+      if(now < rd.startAt + rd.dur * 60000 - SUBMIT_GRACE_MS) return err(409, "running"); // erst nach Rundenende
+      const ticks = Math.round(rd.dur * 60000 / TICK_MS);
+      const mkt = genMarket(rd.seed >>> 0, ticks);
+      const cash0 = rd.cash || 25000;
+      let jr = [];
+      if(rd.expert)
+        jr = (await db.prepare("SELECT id, at, sym, side, vol FROM trades WHERE code = ? AND n = ? ORDER BY id")
+                      .bind(code, n).all()).results;
+      const rep = replayRound(mkt, body.log, {ticks, cash: cash0, expert: !!rd.expert,
+                                              room: true, journal: jr, anchor: rd.startAt});
+      if(!rep.ok) return err(422, "replay-" + rep.error);
+      const claim = +url.searchParams.get("pnl");
+      if(!Number.isFinite(claim) || Math.abs(claim - rep.pnl) > Math.max(2, cash0 * 0.001))
+        return err(422, "mismatch");
+      // 🤨-Verdacht: verdächtig nah an der Orakel-Obergrenze (nur bei nennenswertem Plus)
+      const sus = rep.pnl > cash0 * 0.05 && rep.pnl >= oracleMaxPnl(mkt, ticks, cash0) * SUS_FRAC ? 1 : 0;
       const r = await db.prepare(
-        `INSERT INTO roundResults(code, n, p, body, pnlFinal, created) VALUES(?,?,?,?,?,?)
+        `INSERT INTO roundResults(code, n, p, body, pnlFinal, sus, created) VALUES(?,?,?,?,?,?,?)
          ON CONFLICT(code, n, p) DO NOTHING`)
-        .bind(code, n, p, body, Math.round(pnl * 100) / 100, now).run();
+        .bind(code, n, p, res, rep.pnl, sus, now).run();
       if(r.meta.changes !== 1) return err(409, "write-once");
       await touch();
-      return json({ok: true}, 201);
+      return json({ok: true, pnl: rep.pnl, sus}, 201);
     }
     if(kind === "pnl"){
       const body = await readJson(req);

@@ -8,10 +8,11 @@ const noop = () => {};
 
 (async () => {
   // ---- Worker v3 laden (echter Handler, D1 = echtes SQLite) ----
-  const tmp = path.join(os.tmpdir(), "spcx-w-" + process.pid + ".mjs");
-  fs.copyFileSync(path.join(__dirname, "worker.js"), tmp);
-  const worker = (await import(pathToFileURL(tmp).href)).default;
-  fs.unlinkSync(tmp);
+  // worker.js importiert data.js/engine.js (Anti-Cheat-Replay) → alle drei in ein Temp-Verzeichnis
+  const tdir = fs.mkdtempSync(path.join(os.tmpdir(), "spcx-w-"));
+  for(const f of ["data.js", "engine.js"]) fs.copyFileSync(path.join(__dirname, f), path.join(tdir, f));
+  fs.copyFileSync(path.join(__dirname, "worker.js"), path.join(tdir, "worker.mjs"));
+  const worker = (await import(pathToFileURL(path.join(tdir, "worker.mjs")).href)).default;
   const {DatabaseSync} = require("node:sqlite");
   const sq = new DatabaseSync(":memory:");
   const env = {DB: {prepare(sql){ return {_a: [],
@@ -55,6 +56,7 @@ const noop = () => {};
 
   const qr = fs.readFileSync(path.join(__dirname, "qr.js"), "utf8");
   const data = fs.readFileSync(path.join(__dirname, "data.js"), "utf8");
+  const engine = fs.readFileSync(path.join(__dirname, "engine.js"), "utf8");
   const game = fs.readFileSync(path.join(__dirname, "game.js"), "utf8");
 
   const hookFn = async function(){
@@ -175,14 +177,44 @@ const noop = () => {};
     out["Großbild: bleibt nach Exit zu (dismissed)"] = wallOn === false;
     wallDismissed = 0; // fürs weitere Testgeschehen zurücksetzen
 
-    // --- Runde 1 endet: Ergebnisse → Rangliste + Abend-Wertung ---
+    // --- Runde 1 endet: Ergebnisse (mit Trade-Log!) → Server-Replay → Rangliste + Wertung ---
+    // Gewinnstrecke deterministisch aus dem Pfad: globales Min, danach Max
+    const bestPair = (path, T) => {
+      let bi = 1;
+      for(let i = 2; i < T - 2; i++) if(path[i] < path[bi]) bi = i;
+      let si = bi + 1;
+      for(let i = bi + 2; i < T; i++) if(path[i] > path[si]) si = i;
+      return [bi, si];
+    };
+    // Beste Gewinnstrecke über mehrere Werte suchen (falls ein Pfad monoton fällt)
+    const bestTrade = (mkt, T) => {
+      let best = null;
+      for(const sym of ["TSLA", "SPCX", "AMD", "META", "RKLB"]){
+        const [b, s] = bestPair(mkt.paths[sym], T);
+        const rel = mkt.paths[sym][s] / mkt.paths[sym][b] - 1;
+        if(!best || rel > best.rel) best = {sym, b, s, rel, qty: Math.max(1, Math.floor(6000 / mkt.paths[sym][b]))};
+      }
+      return best;
+    };
+    globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 6*60000, RC);
     restore(A3); roomPhase = "idle";
-    players[0].result = {pnl: 120, total: 25120}; soloP = players[0];
+    const T1r = matchTicks;
+    const bt1 = bestTrade(market, T1r);
+    const logA1 = [[bt1.b, bt1.sym, "buy", bt1.qty, 0], [bt1.s, bt1.sym, "sell", bt1.qty, 0]];
+    const pnlA1 = replayRound(market, logA1, {ticks: T1r, cash: 25000, expert: false, room: true, journal: [], anchor: 0}).pnl;
+    out["Anti-Cheat: konstruierter Gewinn-Log ist positiv"] = pnlA1 > 0;
+    // erfundenes Ergebnis (Log passt nicht zur Zahl) → Server lehnt hart ab
+    out["Anti-Cheat: erfundenes P&L → 422"] = await api("/room/" + RC + "/round/1/result/1?pnl=99999",
+        {method: "PUT", body: JSON.stringify({res: packResult(Object.assign(newPlayer("Anna", "x"), {result:{pnl: 99999, total: 124999}})), log: logA1}),
+         headers: {"x-token": room.token}}).then(() => false).catch(e => String(e && e.message).includes("422"));
+    tradeLog = logA1;
+    players[0].result = {pnl: pnlA1, total: 25000 + pnlA1}; soloP = players[0];
     await roomShareResult(players[0]);
-    out["Ergebnis: Rangliste geöffnet, eigenes drin"] = !!rankResults && !!rankResults[1];
+    out["Ergebnis: Rangliste geöffnet, eigenes drin"] = !!rankResults && !!rankResults[1] && submitFail === false;
     const A4 = stash();
     restore(B3); roomPhase = "idle";
-    players[0].result = {pnl: -40, total: 24960}; soloP = players[0];
+    tradeLog = [];                                   // Ben hat nicht gehandelt → P&L 0
+    players[0].result = {pnl: 0, total: 25000}; soloP = players[0];
     await roomShareResult(players[0]);
     restore(A4);
     await roomTick(); // holt Bens Ergebnis in die Rangliste
@@ -191,7 +223,8 @@ const noop = () => {};
       !!rankResults[2] && rb.indexOf("👑") >= 0 && rb.indexOf("👑") < rb.indexOf("Anna") &&
       rb.indexOf("Anna") < rb.indexOf("Ben");
     let sb = Object.fromEntries((roomState.scoreboard || []).map(s => [s.p, s]));
-    out["Abend-Wertung nach Runde 1: Sieg für Anna"] = sb[1] && sb[1].wins === 1 && sb[1].total === 120;
+    out["Abend-Wertung nach Runde 1: Sieg für Anna (Server-Zahl)"] =
+      sb[1] && sb[1].wins === 1 && Math.abs(sb[1].total - pnlA1) < 0.011 && sb[2] && sb[2].total === 0;
 
     // --- Runde 2 (Dauer 15): Serie, frischer Seed, Wertung summiert ---
     globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 6*60000, RC);
@@ -202,16 +235,25 @@ const noop = () => {};
     restore(B3); roomPhase = "idle";
     await roomTick();
     out["Runde 2: Ben wieder automatisch dabei"] = room.played === 2 && marketSeed === A5.marketSeed;
-    players = [newPlayer("Ben", "var(--p2)")]; players[0].result = {pnl: 200, total: 25200}; soloP = players[0];
+    // Runde 2 auslaufen lassen; diesmal gewinnt Ben (echtes Log), Anna reicht 0 ein
+    globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 16*60000, RC);
+    const T2r = matchTicks;
+    const bt2 = bestTrade(market, T2r);
+    const logB2 = [[bt2.b, bt2.sym, "buy", bt2.qty, 0], [bt2.s, bt2.sym, "sell", bt2.qty, 0]];
+    const pnlB2 = replayRound(market, logB2, {ticks: T2r, cash: 25000, expert: false, room: true, journal: [], anchor: 0}).pnl;
+    players = [newPlayer("Ben", "var(--p2)")]; players[0].result = {pnl: pnlB2, total: 25000 + pnlB2}; soloP = players[0];
+    tradeLog = logB2;
     roomPhase = "idle";
     await roomShareResult(players[0]);
     restore(A5); roomPhase = "idle";
-    players = [newPlayer("Anna", "var(--p1)")]; players[0].result = {pnl: -10, total: 24990}; soloP = players[0];
+    players = [newPlayer("Anna", "var(--p1)")]; players[0].result = {pnl: 0, total: 25000}; soloP = players[0];
+    tradeLog = [];
     await roomShareResult(players[0]);
     await roomTick();
     sb = Object.fromEntries((roomState.scoreboard || []).map(s => [s.p, s]));
-    out["Abend-Wertung nach Runde 2: 1:1 Siege, Summen stimmen"] =
-      sb[1].wins === 1 && sb[2].wins === 1 && sb[1].total === 110 && sb[2].total === 160;
+    out["Abend-Wertung nach Runde 2: 1:1 Siege, Server-Summen stimmen"] =
+      pnlB2 > 0 && sb[1].wins === 1 && sb[2].wins === 1 &&
+      Math.abs(sb[1].total - pnlA1) < 0.011 && Math.abs(sb[2].total - pnlB2) < 0.011;
 
     // ================= EXPERT-RUNDE: dynamischer Markt (Runde 3) =================
     // Runde 2 auslaufen lassen; Anna startet Runde 3 als 🎓-Runde mit 50k Startkapital
@@ -246,6 +288,13 @@ const noop = () => {};
     tickCount = Math.max(40, hitT + 2);
     out["Expert: Schlussauktion neutralisiert Eigen-Impact"] =
       totalOf(players[0]) > settleTotal(players[0]);
+    // Anti-Cheat-Parität: der ECHTE Client-Trade (inkl. Slippage/Spread/Blockorder)
+    // repliziert auf den Cent – ehrliche Spieler können nie fälschlich abgelehnt werden
+    tickCount = matchTicks;
+    const repE = replayRound(market, tradeLog,
+      {ticks: matchTicks, cash: START_CASH, expert: true, room: true, journal, anchor: roundAnchor});
+    out["Anti-Cheat: echter Expert-Trade repliziert exakt"] =
+      repE.ok && Math.abs(repE.pnl - (settleTotal(players[0]) - START_CASH)) < 0.011;
     const AE = stash();
     // Ben steigt über den Puls in die Expert-Runde ein → identische Effektivkurse
     restore(B3); roomPhase = "idle"; room.played = 2; market = null; effPaths = null; journal = [];
@@ -357,7 +406,7 @@ const noop = () => {};
 
   globalThis.__fetchCount = () => fetchCount;
   globalThis.__sq = sq;
-  (0, eval)(qr + "\n" + data + "\n" + game + "\n;globalThis.__e2e = " + hookFn.toString() + ";");
+  (0, eval)(qr + "\n" + data + "\n" + engine + "\n" + game + "\n;globalThis.__e2e = " + hookFn.toString() + ";");
   const out = await globalThis.__e2e();
   let fail = 0;
   for(const [k, v] of Object.entries(out)){ console.log((v ? "✔" : "✘"), k); if(!v) fail++; }

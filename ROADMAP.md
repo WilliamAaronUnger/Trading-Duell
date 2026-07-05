@@ -103,9 +103,11 @@ Umsetzungsplan: `IMPACT-PLAN.md`.
 
 ### A8. Reichweite (wenn das Spiel „fertig" wirkt)
 Englische Übersetzung (alle Texte liegen zentral in `data.js`/wenigen UI-Stellen — i18n-Map
-statt Framework), Anti-Cheat-Härtung für öffentliche Bestenlisten (Trade-Log einreichen,
-Server rechnet den Markt-Replay nach — die deterministische Engine macht das MÖGLICH,
-kaum ein Spiel kann das), README/Datenschutz-Absatz.
+statt Framework), README/Datenschutz-Absatz.
+**Anti-Cheat-Härtung: ✅ umgesetzt (Juli 2026, für den Raum):** Trade-Log wird eingereicht,
+der Server rechnet den Markt-Replay über die geteilte `engine.js` nach und bestimmt das
+P&L selbst; Orakel-Obergrenze liefert ein 🤨-Verdachts-Flag. Damit steht der Grundstein
+für die öffentliche Tages-Challenge-Bestenliste (A3).
 
 ---
 

@@ -55,294 +55,11 @@ const fmt = n => n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFracti
 const sgn = n => (n>=0?"+":"") + fmt(n);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-/* Seeded PRNG, damit beide Runden den identischen Markt bekommen */
-function mulberry32(a){
-  return function(){
-    a |= 0; a = a + 0x6D2B79F5 | 0;
-    let t = Math.imul(a ^ a >>> 15, 1 | a);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-
 /* ====================== Markt vorab generieren ====================== */
-/* market = { paths: {SYM:[preise...]}, events: [{tick, t, txt, tag}] } */
+/* Die Generierung (mulberry32/genMarket/ETF-Ableitungen) und die Impact-Mathe
+   liegen in engine.js – EINE Engine für Client UND Worker (Anti-Cheat-Replay).
+   market = { paths: {SYM:[preise...]}, events: [{tick, t, txt, tag}] } */
 let market = null;
-
-function genMarket(seed, ticks){
-  const rnd = mulberry32(seed);
-  const g = () => {
-    let u=0,v=0;
-    while(u===0)u=rnd();
-    while(v===0)v=rnd();
-    return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
-  };
-
-  const events = [];
-  const paths = {};
-  const prices = {};
-  for(const [sym,d] of Object.entries(STOCK_DEFS)){
-    paths[sym] = [d.start];
-    prices[sym] = d.start;
-  }
-
-  /* Platzhalter in News-Vorlagen füllen (%SYM% = Ticker, %NAME% = Firmenname). */
-  const fillTpl = (txt, sym) => {
-    const name = (STOCK_DEFS[sym] && STOCK_DEFS[sym].name) || sym;
-    return txt.replace(/%SYM%/g, sym).replace(/%NAME%/g, name);
-  };
-
-  /* Pro-Aktie-Kandidatenpool: handgeschriebene Einträge ∪ generische Vorlagen.
-     Garantiert, dass jede Aktie News bekommt. Verbraucht KEIN rnd() → fairness-neutral. */
-  const symList = Object.keys(prices);
-  const handBySym = {}; const allNews = [];
-  for(const ev of NEWS_POOL){
-    if(ev.t === "ALL"){ allNews.push(ev); continue; }
-    (handBySym[ev.t] ||= []).push(ev);
-  }
-  const candBySym = {};
-  for(const sym of symList)
-    candBySym[sym] = [...GENERIC_NEWS.up, ...GENERIC_NEWS.down, ...(handBySym[sym] || [])];
-
-  let effects = [];
-  let pendingJumps = [];
-  let lastEventSym = null; // bricht die Momentum-Schleife: nie zweimal dieselbe Aktie in Folge
-  let nextEvent = Math.round((30 + Math.floor(rnd()*40)) * TICK_SCALE);
-  let chainQueue = [];                // geplante Auflösungen (Bestätigung/Dementi)
-
-  // Generische Ketten an jede Aktie binden, mit handgeschriebenen mischen (kein rnd())
-  const genChainInstances = [];
-  for(const sym of symList)
-    for(const tpl of GENERIC_CHAINS)
-      genChainInstances.push({t:sym, rumor:tpl.rumor, confirm:tpl.confirm, deny:tpl.deny});
-  const chainsLeft = [...CHAIN_POOL, ...genChainInstances]; // jede Kette höchstens einmal pro Spiel
-
-  // Mega-Event vorab würfeln: ~50 % der Spiele, genau eines, im mittleren Spielteil
-  let megaAt = -1, megaEv = null;
-  if(rnd() < 0.5){
-    const genMegaInstances = [];
-    for(const sym of symList)
-      for(const tpl of GENERIC_MEGA)
-        genMegaInstances.push({t:sym, txt:tpl.txt, jump:tpl.jump, drift:tpl.drift, dur:tpl.dur});
-    const megaAll = [...MEGA_POOL, ...genMegaInstances];
-    megaEv = megaAll[Math.floor(rnd()*megaAll.length)];
-    megaAt = Math.min(Math.round(ticks * (0.3 + rnd()*0.45)), ticks - (MEGA_REACT_TICKS + 20));
-  }
-
-  /* Sprung einplanen: Kleine News knallen wie bisher in einem Tick rein.
-     Extreme Sprünge (vor allem Mega-Events) steigen dagegen über mehrere
-     Ticks als Kurve nach oben statt schlagartig – der Gesamtfaktor wird
-     gleichmäßig auf die Rampen-Ticks verteilt (factor^(1/n) je Tick).
-     Rein deterministisch: der Faktor steht schon fest, er wird nur über
-     mehr Ticks gestreckt – kein zusätzliches rnd(), Fairness bleibt. */
-  const pushJump = (at, sym, factor, forceRamp) => {
-    const dev = Math.abs(factor - 1);
-    const rampTicks = forceRamp
-      ? forceRamp                                            // erzwungene Rampenlänge (z. B. Mega-Vorbeben)
-      : dev < 0.04
-        ? 1                                                  // kleine News: sofort
-        : Math.max(2, Math.round(Math.min(dev * 50, 14) * 1000 / TICK_MS));
-    if(rampTicks <= 1){ pendingJumps.push({at, sym, factor}); return; }
-    const per = Math.pow(factor, 1 / rampTicks);            // gleicher Tick-Schritt
-    for(let k = 0; k < rampTicks; k++) pendingJumps.push({at: at + k, sym, factor: per});
-  };
-
-  /* Event auslösen: News erscheint bei Tick i, der Kurs reagiert erst
-     REACT_TICKS später – so bleibt Zeit, auf die Meldung zu reagieren.
-     Die rnd()-Aufrufe passieren trotzdem hier, damit die PRNG-Reihenfolge
-     deterministisch bleibt. */
-  function fire(i, ev, sym){
-    const dur = Math.round(ev.dur * TICK_SCALE);
-    const resolved = {t:sym, txt:fillTpl(ev.txt, sym),
-                      jump:ev.jump, drift:ev.drift, dur};
-    const targets = sym === "ALL" ? Object.keys(prices) : [sym];
-    const hits = i + REACT_TICKS;
-    for(const s of targets){
-      // newsMult: Hype-Werte reagieren stärker auf Schlagzeilen
-      const mult = STOCK_DEFS[s].newsMult || 1;
-      if(resolved.jump) pushJump(hits, s, 1 + resolved.jump * mult * (0.85 + rnd()*0.3));
-    }
-    if(resolved.drift) effects.push({sym, drift:resolved.drift * TICK_SCALE, from:hits, until:hits + dur});
-    if(sym !== "ALL") lastEventSym = sym;
-    events.push({tick:i, ev:resolved, tag: resolved.jump > 0 ? "up" : resolved.jump < 0 ? "down" : "neutral"});
-  }
-
-  /* Mega-Event: eigene, lange Zündschnur (MEGA_REACT_TICKS) und ohne newsMult.
-     Vor-Beben: ein kleiner Teil der Bewegung (~MEGA_PRE_FRAC) kriecht schon in
-     den ~12 Ticks VOR dem Hauptschlag in gleicher Richtung herein – ein
-     spürbares Warnsignal im Kurs, das aufmerksame Trader rechtzeitig
-     aussteigen (vor dem Crash) bzw. eindecken/aufspringen lässt. Der
-     Gesamtfaktor bleibt unverändert (preFactor * Rest == factor), nur ein
-     Teil der Bewegung wandert zeitlich nach vorne – kein zusätzliches rnd().
-     Spike-and-Fade: nach dem Hoch (Ende der Boost-Drift) ebbt ~MEGA_FADE_FRAC
-     der Bewegung langsam (~75 s) wieder ab – der Spike wird so zum echten
-     Verkaufsfenster statt zum neuen Dauerniveau. Reiner Zeit-Anhang, der den
-     bereits gestreuten factor weiterverwendet – kein zusätzliches rnd(). */
-  function fireMega(i, ev){
-    const dur = Math.round(ev.dur * TICK_SCALE);
-    const hits = i + MEGA_REACT_TICKS;
-    const targets = ev.t === "ALL" ? Object.keys(prices) : [ev.t];
-    const preTicks = Math.max(2, Math.round(MEGA_REACT_TICKS * 0.6));
-    const fadeStart = hits + dur;                            // Plateau nach der Boost-Drift
-    let fadeTicks = Math.round(75000 / TICK_MS);             // langsames Abebben
-    if(fadeStart < ticks - 4){                               // genug Platz bis Spielende?
-      fadeTicks = Math.min(fadeTicks, ticks - fadeStart);    // späte Megas faden schneller
-    }else{
-      fadeTicks = 0;                                         // kein Platz: kein Fade
-    }
-    for(const s of targets){
-      const factor = 1 + ev.jump * (0.9 + rnd()*0.2);
-      const preFactor = Math.pow(factor, MEGA_PRE_FRAC);
-      pushJump(hits - preTicks, s, preFactor, preTicks);     // sanfter Vorlauf
-      pushJump(hits, s, factor / preFactor);                 // Hauptschlag (Rest)
-      if(fadeTicks > 1){
-        // Rückkehr auf ~ein Drittel der Bewegung; R = Zielniveau / Sprungniveau
-        const netTarget = 1 + (factor - 1) * (1 - MEGA_FADE_FRAC);
-        pushJump(fadeStart, s, netTarget / factor, fadeTicks);
-      }
-    }
-    if(ev.drift) effects.push({sym:ev.t, drift:ev.drift * TICK_SCALE, from:hits, until:hits + dur});
-    if(ev.t !== "ALL") lastEventSym = ev.t;
-    events.push({tick:i, ev:{t:ev.t, txt:fillTpl(ev.txt, ev.t), jump:ev.jump, drift:ev.drift, dur},
-                 tag: ev.jump > 0 ? "up" : "down", mega:true});
-  }
-
-  const LOOKBACK = Math.round(60000 / TICK_MS); // Momentum über die letzte Minute
-
-  for(let i = 1; i <= ticks; i++){
-    // Opening-Pop fest am Anfang
-    if(i === 3) fire(i, OPENING_EVENT, "SPCX");
-
-    if(i === megaAt) fireMega(i, megaEv);
-
-    // Zufalls-News: ~50% Momentum-News über die gerade "beliebte" Aktie, sonst klassische News
-    // Spätgrenze so, dass der verzögerte Kurssprung noch vor Spielende passiert
-    if(i === nextEvent && i === megaAt){
-      // Kollision mit dem Mega-Event: normale News kurz nach hinten schieben
-      nextEvent = i + Math.round(20 * TICK_SCALE);
-    }else if(i === nextEvent && i < ticks - (REACT_TICKS + 12)){
-      if(rnd() < 0.5){
-        let best = null, bestScore = -1;
-        for(const sym of Object.keys(prices)){
-          if(sym === lastEventSym) continue; // nicht zweimal in Folge dieselbe Aktie
-          const back = Math.max(0, i - 1 - LOOKBACK);
-          const chg = paths[sym][i-1] / paths[sym][back] - 1;
-          // Bewegung relativ zur eigenen Volatilität, sonst gewinnt immer
-          // die schwankungsstärkste Aktie (SPCX) – plus ordentlich Zufall
-          const score = Math.abs(chg) / STOCK_DEFS[sym].sigma + rnd()*3;
-          if(score > bestScore){ bestScore = score; best = {sym, chg}; }
-        }
-        let pool;
-        if(best.chg >= 0) pool = rnd() < 0.65 ? MOMENTUM_POOL.upCont : MOMENTUM_POOL.upTake;
-        else              pool = rnd() < 0.5  ? MOMENTUM_POOL.downReb : MOMENTUM_POOL.downCont;
-        fire(i, pool[Math.floor(rnd()*pool.length)], best.sym);
-      }else if(chainsLeft.length && i < ticks*0.55 && rnd() < 0.35){
-        // Mehrstufig: Gerücht jetzt, Auflösung 1,5–2,5 Min später
-        const chain = chainsLeft.splice(Math.floor(rnd()*chainsLeft.length), 1)[0];
-        fire(i, chain.rumor, chain.t);
-        let at = i + Math.round((90 + rnd()*60) * 1000 / TICK_MS);
-        at = Math.min(at, ticks - (REACT_TICKS + 8));
-        chainQueue.push({at, chain});
-      }else{
-        // Klassische Einzel-News: erst ZIEL fair wählen, dann Text aus dessen Pool.
-        // So bekommt jede Aktie (auch neue) zuverlässig Schlagzeilen.
-        const P_ALL = 0.18; // Anteil marktweiter News
-        if(allNews.length && rnd() < P_ALL){
-          const ev = allNews[Math.floor(rnd()*allNews.length)];
-          fire(i, ev, "ALL");
-        }else{
-          let pickList = symList.filter(s => s !== lastEventSym);
-          if(pickList.length === 0) pickList = symList; // Edge: nur eine Aktie
-          const target = pickList[Math.floor(rnd()*pickList.length)];
-          const cand = candBySym[target];
-          fire(i, cand[Math.floor(rnd()*cand.length)], target);
-        }
-      }
-      nextEvent = i + Math.round((60 + Math.floor(rnd()*55)) * TICK_SCALE);
-    }
-
-    // Ketten-Auflösung fällig? Bestätigung (65%) oder Dementi (35%)
-    for(const c of chainQueue){
-      if(c.at === i) fire(i, rnd() < 0.65 ? c.chain.confirm : c.chain.deny, c.chain.t);
-    }
-    chainQueue = chainQueue.filter(c => c.at > i);
-
-    // Fällige News-Sprünge (REACT_TICKS nach der Meldung) anwenden
-    for(const j of pendingJumps){
-      if(j.at === i) prices[j.sym] = Math.max(1, prices[j.sym] * j.factor);
-    }
-    pendingJumps = pendingJumps.filter(j => j.at > i);
-
-    effects = effects.filter(e => e.until > i);
-
-    for(const [sym,d] of Object.entries(STOCK_DEFS)){
-      let drift = d.drift * TICK_SCALE;
-      for(const e of effects){
-        if(e.from <= i && (e.sym === sym || e.sym === "ALL")) drift += e.drift;
-      }
-      // Charakter der Aktie:
-      if(d.momentum) drift += d.momentum * (prices[sym] / paths[sym][Math.max(0, i - 1 - LOOKBACK)] - 1) / LOOKBACK;
-      if(d.meanRev)  drift -= d.meanRev * (prices[sym] / d.start - 1);
-      if(d.spikeP && rnd() < d.spikeP)
-        prices[sym] *= 1 + (rnd() < 0.5 ? -1 : 1) * d.spikeMag * (0.7 + rnd()*0.6);
-      let sig = d.sigma;
-      if(sym === "SPCX" && i < ticks*0.12) sig *= 1.3;
-      if(i > ticks*0.9) sig *= 1.2;
-      prices[sym] = Math.max(1, prices[sym] * Math.exp(drift - sig*sig/2 + sig*g()));
-      paths[sym].push(prices[sym]);
-    }
-  }
-
-  /* Insider-Tipps: kündigen zwei echte kommende Events vage an (~50 s Vorlauf).
-     Deterministisch aus dem Seed → beide Spieler/Geräte bekommen dieselben Tipps. */
-  const lead = Math.round(50000 / TICK_MS);
-  const tips = [];
-  const candidates = events.filter(e => !e.mega && e.ev.t !== "ALL" && Math.abs(e.ev.jump) >= 0.008 && e.tick > lead + 10);
-  for(const [lo, hi] of [[0.12, 0.5], [0.5, 0.95]]){
-    const zone = candidates.filter(e =>
-      e.tick >= ticks*lo && e.tick < ticks*hi && !tips.some(t => t.eventTick === e.tick));
-    if(zone.length){
-      const e = zone[Math.floor(rnd()*zone.length)];
-      tips.push({tick: e.tick - lead, eventTick: e.tick, sym: e.ev.t, dir: e.ev.jump > 0 ? 1 : -1});
-    }
-  }
-  tips.sort((a,b) => a.tick - b.tick);
-
-  addEtfPath(paths, ticks);
-  addActivePath(paths, ticks);
-  return {paths, events, tips};
-}
-
-/* Markt-ETF-Pfad ableiten: gleichgewichteter Index (jede Aktie auf ihren
-   Eröffnungskurs normiert, gemittelt, × ETF_BASE). Rein abgeleitet aus den
-   bereits fertigen Pfaden → verbraucht KEIN rnd(), bricht die Fairness nicht.
-   Niedrige Vola ergibt sich automatisch (Varianz ≈ 1/√Anzahl). */
-function addEtfPath(paths, ticks){
-  const syms = Object.keys(STOCK_DEFS);
-  const N = syms.length;
-  const etf = [];
-  for(let t = 0; t <= ticks; t++){
-    let acc = 0;
-    for(const s of syms) acc += paths[s][t] / STOCK_DEFS[s].start;
-    etf.push(acc / N * ETF_BASE);
-  }
-  paths[ETF_SYM] = etf;
-}
-
-/* Aktiv-Fonds-Pfad ableiten: gewichteter, auf Eröffnung normierter Wachstumskorb,
-   dann Hebel auf die Abweichung vom Start (ACTIVE_LEV) → deutlich höhere Vola.
-   Ebenfalls rein abgeleitet aus den fertigen Pfaden → KEIN rnd(), fairness-neutral. */
-function addActivePath(paths, ticks){
-  let wsum = 0; for(const s in ACTIVE_WEIGHTS) wsum += ACTIVE_WEIGHTS[s];
-  const act = [];
-  for(let t = 0; t <= ticks; t++){
-    let acc = 0;
-    for(const s in ACTIVE_WEIGHTS) acc += ACTIVE_WEIGHTS[s] * (paths[s][t] / STOCK_DEFS[s].start);
-    const lev = 1 + ACTIVE_LEV * (acc / wsum - 1); // t=0 → 1 → Start = ETF2_BASE
-    act.push(Math.max(1, lev * ETF2_BASE));
-  }
-  paths[ETF2_SYM] = act;
-}
 
 /* ====================== State ====================== */
 let players, round, selected, qtyMode;
@@ -536,6 +253,7 @@ function saveSnapshot(phase){
       startAt: wallClock() ? startAt : 0,
       marketSeed, room, roomPhase, // Raum-Runde: Seed + Mitgliedschaft fürs Wiederaufnehmen
       expert, cash: START_CASH,    // 🎓-Regeln + Startkapital der Runde
+      tradeLog,                    // Anti-Cheat-Log übersteht den Reload (sonst Ablehnung)
       tickCount, players, phase: phase || "play", ts: Date.now()
     }));
   }catch(e){}
@@ -619,6 +337,7 @@ $("resumeBtn").onclick = () => {
   expert = !!snap.expert;                 // 🎓-Regeln der Runde wiederherstellen
   START_CASH = snap.cash || 25000;
   journal = []; effPaths = null;          // Journal kommt frisch über den Raum-Puls
+  tradeLog = Array.isArray(snap.tradeLog) ? snap.tradeLog : [];
   if(snap.room){ room = snap.room; roomPhase = 'playing'; saveRoomState(); startRoomTimer(); }
   matchTicks = Math.round(durationMin * 60000 / TICK_MS);
   market = genMarket(marketSeed == null ? gameCode : marketSeed, matchTicks);
@@ -812,6 +531,10 @@ let roomExpertPick = false, roomCashPick = 25000; // Ersteller-Wahl für die nä
    die daraus abgeleiteten Effektiv-Pfade (Basis × Impact-Overlay). effPaths ist NUR
    im Expert-Raum gesetzt – alle anderen Modi laufen unverändert auf market.paths. */
 let journal = [], effPaths = null;
+/* Anti-Cheat: jede ausgeführte Order der Raum-Runde wird mitgeschrieben
+   ([tick, sym, side, qty, block10]) und am Ende MIT dem Ergebnis eingereicht –
+   der Server spielt das Log nach und errechnet das P&L selbst (worker.js v5). */
+let tradeLog = [], roomSus = {}, submitFail = false;
 /* Einladung (QR + Link) ist einklappbar: automatisch offen, solange man allein ist,
    danach zu – bis jemand den Knopf antippt (dann bleibt die Wahl bestehen). */
 let roomInviteOpen = true, roomInviteTouched = false;
@@ -948,6 +671,7 @@ async function roomTick(){
   }
   if(!room) return;
   roomState = st;
+  roomSus = st.sus || {};   // 🤨-Verdachts-Flags der laufenden Runde (Server-Orakel-Check)
   const rd = st.round;
   /* Expert-Runde: Blockorder-Journal übernehmen. Neue Einträge landen als Meldung im
      Feed; die Effektiv-Pfade werden neu aufgebaut (Wirkung erst REACT_TICKS nach dem
@@ -1025,7 +749,8 @@ function renderRoomScreen(st){
     $("roomScore").innerHTML = sb.map((s, i) =>
       `<div class="rank-row${s.p === room.p ? " me" : ""}">
         <span class="rank-pos">${i === 0 ? "👑" : (i + 1) + "."}</span>
-        <span class="rank-name">${esc(names[s.p] || ("Spieler " + s.p))} · ${s.wins} ${s.wins === 1 ? "Sieg" : "Siege"}</span>
+        <span class="rank-name">${esc(names[s.p] || ("Spieler " + s.p))} · ${s.wins} ${s.wins === 1 ? "Sieg" : "Siege"}${
+          s.sus ? ` <span title="${s.sus} Runde(n) verdächtig nah am theoretischen Maximum">🤨${s.sus > 1 ? "×" + s.sus : ""}</span>` : ""}</span>
         <span class="rank-pnl" style="color:${s.total >= 0 ? "var(--up)" : "var(--down)"}">${sgn(s.total)}</span></div>`).join("");
     $("roomScoreField").style.display = "";
   }else $("roomScoreField").style.display = "none";
@@ -1311,6 +1036,7 @@ function startRoomRound(rd){
   expert = !!rd.expert;                                  // 🎓-Flag der Runden-Ressource
   START_CASH = expert && rd.cash ? rd.cash : 25000;      // Startkapital nur per Expert wählbar
   journal = []; effPaths = null;
+  tradeLog = []; submitFail = false;                     // frisches Anti-Cheat-Log je Runde
   durationMin = rd.dur;
   gameCode = +room.code;          // Anzeige + Payload-Prüfung laufen über den Raum-Code
   marketSeed = rd.seed >>> 0;     // der geheime Seed der Runde
@@ -1330,10 +1056,17 @@ async function roomShareResult(p){
   const n = room.played || 0;
   if(!n) return;
   try{
+    // Anti-Cheat (worker.js v5): Ergebnis + komplettes Trade-Log – der Server
+    // spielt das Log nach und übernimmt SEIN P&L in Wertung und Rangliste.
     await api("/room/" + room.code + "/round/" + n + "/result/" + room.p +
               "?pnl=" + (Math.round(p.result.pnl * 100) / 100),
-              {method: "PUT", body: packResult(p), headers: {"x-token": room.token}});
-  }catch(e){ /* 409 = schon abgeliefert (z. B. nach Resume) – unkritisch */ }
+              {method: "PUT", body: JSON.stringify({res: packResult(p), log: tradeLog}),
+               headers: {"x-token": room.token}});
+  }catch(e){
+    // 409 = schon abgeliefert (z. B. nach Resume) – unkritisch.
+    // 422 = Server-Replay widerspricht → Ergebnis zählt nicht (Hinweis in der Rangliste).
+    if(String(e && e.message).includes("422")) submitFail = true;
+  }
   startRanking(p);
 }
 
@@ -1361,18 +1094,23 @@ function renderRanking(){
   const rows = roster.map(pl => ({p: pl.p, name: pl.name, res: rankResults[pl.p] || null}))
     .sort((a, b) => (b.res ? b.res.result.pnl : -Infinity) - (a.res ? a.res.result.pnl : -Infinity));
   const done = rows.filter(r => r.res).length;
-  $("resSub").textContent = done >= roster.length
+  $("resSub").textContent = (submitFail
+      ? "⚠️ Dein Ergebnis wurde vom Server NICHT bestätigt (Replay-Prüfung) und zählt nicht. "
+      : "") + (done >= roster.length
     ? "Alle Ergebnisse da – identischer Markt für alle." +
       (expert ? " Bewertung per Schlussauktion zum fairen Kurs." : "")
-    : done + " von " + roster.length + " Ergebnissen da – der Rest erscheint automatisch …";
+    : done + " von " + roster.length + " Ergebnissen da – der Rest erscheint automatisch …");
   const own = rankResults && room ? rankResults[room.p] : null;
   let html = "";
   rows.forEach((r, i) => {
     const pos = r.res ? (i === 0 ? "👑" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + ".") : "⏳";
     // Expert: abweichender Journal-Hash = anderes Blockorder-Journal gespielt (Sync-Problem)
-    const warn = r.res && own && !r.res.self && r.res.jhash !== undefined &&
+    let warn = r.res && own && !r.res.self && r.res.jhash !== undefined &&
                  own.jhash !== undefined && r.res.jhash !== own.jhash
       ? ' <span title="Abweichendes Blockorder-Journal – Überlagerung war nicht identisch">⚠️</span>' : "";
+    // 🤨: Server-Orakel-Check – Ergebnis verdächtig nah am theoretischen Maximum
+    if(roomSus && roomSus[r.p])
+      warn += ' <span title="Verdächtig nah am theoretisch möglichen Maximum">🤨</span>';
     const pnl = r.res
       ? `<span style="color:${r.res.result.pnl >= 0 ? "var(--up)" : "var(--down)"}">${sgn(r.res.result.pnl)}</span>`
       : '<span style="color:var(--muted);font-weight:400">spielt noch …</span>';
@@ -1568,99 +1306,6 @@ function runPreStart(cb){
    wie News), rampt über ~5 s herein und gibt über ~60 s zwei Drittel zurück. Alles ist
    eine reine Funktion des Journals – kein rnd()-Verbrauch, identisch auf allen Geräten.
    Details/Entscheidungen: IMPACT-PLAN.md. */
-function tradeTick(at, anchor){ return Math.floor((at - (anchor === undefined ? roundAnchor : anchor)) / TICK_MS); }
-
-/* Ein Journal-Eintrag wirkt ab `hit` (Server-Stempel + REACT_TICKS). Synthetische
-   Einträge (Squeeze) bringen ihre Wirkstärke/-zeit direkt mit (_mag/_hit). */
-function impactFactorAt(tr, t, anchor){
-  const hit = tr._hit !== undefined ? tr._hit : tradeTick(tr.at, anchor) + REACT_TICKS;
-  if(t < hit) return 1;
-  const mag = tr._mag !== undefined ? tr._mag : IMPACT_BASE * tr.vol / liqOf(tr.sym);
-  const full = tr.side === "buy" ? 1 + mag : 1 / (1 + mag);
-  const ramp = Math.min(1, (t - hit + 1) / IMPACT_RAMP_TICKS);
-  if(ramp < 1) return Math.pow(full, ramp);
-  const fade = Math.min(1, (t - hit - IMPACT_RAMP_TICKS + 1) / IMPACT_FADE_TICKS);
-  return Math.pow(full, 1 - (1 - IMPACT_KEEP) * fade);
-}
-
-/* Gesamt-Overlay einer Aktie zum Tick t (gedeckelt auf ±IMPACT_CAP) */
-function overlayAt(trs, t, anchor){
-  let f = 1;
-  for(const tr of trs) f *= impactFactorAt(tr, t, anchor);
-  return Math.max(1 - IMPACT_CAP, Math.min(1 + IMPACT_CAP, f));
-}
-
-/* Schieflage der Herde in einer Aktie zum Tick t: Summe der wirksamen Blockorder-
-   Volumina (Kauf +, Verkauf −), normiert auf −1…+1. Nur echte Einträge zählen. */
-function skewAt(trs, t, anchor){
-  let s = 0;
-  for(const tr of trs){
-    if(tr._mag !== undefined) continue;
-    if(tradeTick(tr.at, anchor) + REACT_TICKS > t) continue;
-    s += tr.side === "buy" ? tr.vol : -tr.vol;
-  }
-  return Math.max(-1, Math.min(1, s / SKEW_FULL));
-}
-
-/* Squeeze-Suche: eine News, die GEGEN eine deutliche Schieflage läuft, zwingt die
-   Herde durch dieselbe Tür (Shorts decken ein / Blasen-Longs fliehen) – als
-   synthetischer Zusatz-Impact in Sprungrichtung, deterministisch aus Journal+Markt. */
-function findSqueezes(mkt, bySym, anchor, ticks){
-  const out = [];
-  for(const e of mkt.events){
-    const sym = e.ev.t;
-    if(sym === "ALL" || !bySym[sym]) continue;
-    const jump = e.ev.jump || 0;
-    if(!jump) continue;
-    const hit = e.tick + (e.mega ? MEGA_REACT_TICKS : REACT_TICKS);
-    if(hit > ticks) continue;
-    const s = skewAt(bySym[sym], hit, anchor);
-    if(Math.abs(s) < SKEW_MIN || (jump > 0) === (s > 0)) continue;
-    out.push({sym, hitTick: hit, side: jump > 0 ? "buy" : "sell",
-              _hit: hit, _mag: Math.abs(jump) * SQUEEZE_K * Math.abs(s),
-              short: s < 0}); // short=true → Short-Squeeze, sonst platzt eine Long-Blase
-  }
-  return out;
-}
-
-/* Effektiv-Pfade aus Basis-Markt + Journal bauen (Spieler UND Leinwand nutzen das):
-   Blockorder-Overlay × Herden-Dämpfung, plus Squeeze-Zusätze. Unberührte Werte
-   teilen sich das Basis-Array – nur betroffene werden kopiert. */
-function buildEffPaths(mkt, jr, anchor, ticks){
-  if(!jr.length) return {eff: null, squeezes: []};
-  const bySym = {};
-  for(const tr of jr) (bySym[tr.sym] = bySym[tr.sym] || []).push(tr);
-  const squeezes = findSqueezes(mkt, bySym, anchor, ticks);
-  const sqBySym = {};
-  for(const q of squeezes) (sqBySym[q.sym] = sqBySym[q.sym] || []).push(q);
-  const eff = {};
-  for(const sym in mkt.paths){
-    const base = mkt.paths[sym], trs = bySym[sym], sqs = sqBySym[sym];
-    if(!trs && !sqs){ eff[sym] = base; continue; }
-    const all = (trs || []).concat(sqs || []);
-    const a = new Array(base.length);
-    let damp = 1;
-    a[0] = base[0] * overlayAt(all, 0, anchor);
-    for(let t = 1; t < base.length; t++){
-      if(trs){
-        const s = skewAt(trs, t, anchor);
-        // Bewegungen in Gewinnrichtung der Herde laufen zäher („der Markt bewegt
-        // sich gegen die Masse"): alle short → fällt langsamer, alle long → steigt zäher.
-        if(Math.abs(s) >= 0.15){
-          const r = base[t] / base[t-1];
-          if((s > 0 && r > 1) || (s < 0 && r < 1)){
-            damp *= Math.pow(r, -DAMP_MAX * Math.abs(s));
-            damp = Math.max(1 - DAMP_CAP, Math.min(1 + DAMP_CAP, damp));
-          }
-        }
-      }
-      a[t] = base[t] * damp * overlayAt(all, t, anchor);
-    }
-    eff[sym] = a;
-  }
-  return {eff, squeezes};
-}
-
 /* Spieler-Seite: Effektiv-Pfade + Squeeze-Liste neu aufbauen (bei Journal-Zuwachs) */
 let squeezes = [];
 function rebuildEff(){
@@ -1673,7 +1318,7 @@ function rebuildEff(){
 function skewNow(sym){
   if(!expert || mode !== "room" || !journal.length) return 0;
   const trs = journal.filter(t => t.sym === sym);
-  return trs.length ? skewAt(trs, tickCount) : 0;
+  return trs.length ? skewAt(trs, tickCount, roundAnchor) : 0;
 }
 
 /* ====================== Experten-Modus: lokale Härten ======================
@@ -1684,14 +1329,7 @@ function skewNow(sym){
    einer News, die den Wert (oder den Gesamtmarkt) trifft, ist es ~30 s dreimal
    so dünn – wer in die Panik hineinhandelt, zahlt extra. */
 function spreadOf(sym){
-  if(!expert) return 0;
-  let s = EXPERT_SPREAD_BASE / liqOf(sym);
-  for(const e of market.events){
-    if(e.ev.t !== sym && e.ev.t !== "ALL") continue;
-    const hit = e.tick + (e.mega ? MEGA_REACT_TICKS : REACT_TICKS);
-    if(tickCount >= hit && tickCount < hit + SPREAD_WIDE_TICKS){ s *= 3; break; }
-  }
-  return Math.min(s, 0.02);
+  return expert ? spreadAtTick(market, sym, tickCount) : 0;
 }
 
 /* Volatilitätsunterbrechung: nach einer Mega-Panik ist der betroffene Wert
@@ -1699,29 +1337,35 @@ function spreadOf(sym){
    Breaker. Wer den Crash nicht kommen sah, kommt nicht mehr raus. */
 function haltInfo(sym){
   if(!expert) return null;
-  for(const e of market.events){
-    if(!e.mega || (e.ev.jump || 0) >= 0) continue;
-    if(e.ev.t !== sym && e.ev.t !== "ALL") continue;
-    const hit = e.tick + MEGA_REACT_TICKS;
-    if(tickCount >= hit && tickCount < hit + EXPERT_HALT_TICKS)
-      return {left: Math.ceil((hit + EXPERT_HALT_TICKS - tickCount) * TICK_MS / 1000)};
-  }
-  return null;
+  const left = haltLeftAt(market, sym, tickCount);
+  return left ? {left: Math.ceil(left * TICK_MS / 1000)} : null;
 }
 
 /* Vorgemerkte Limit-/Stop-Order ausführen (Auslöse-Prüfung macht processTick).
-   Bewusst schlicht: Kauf deckt Shorts zuerst ein, Verkauf nur für Longs. */
+   Bewusst schlicht: Kauf deckt Shorts zuerst ein, Verkauf nur für Longs.
+   Gibt die ausgeführte Stückzahl zurück (0 = nicht ausführbar). Blockorder-
+   Regeln (Slippage + anonyme Meldung) gelten auch hier – große vorgemerkte
+   Orders schleichen sich nicht am Market Impact vorbei. */
 function execPending(p, o){
-  if(haltInfo(o.sym)) return false;                    // Handelsstopp gilt auch für Orders
-  const spr = spreadOf(o.sym);
+  if(haltInfo(o.sym)) return 0;                        // Handelsstopp gilt auch für Orders
   let px = price(o.sym);
+  const px0 = px;
   const s = p.stats;
+  // Blockorder? (wie in trade(): Absichtsgröße gegen die Schwelle, halber Eigen-Impact)
+  let blockVol = 0;
+  if(expert && mode === "room" && o.qty * px >= START_CASH * BLOCK_MIN_FRAC){
+    blockVol = Math.min(2, Math.max(0.1, Math.round(o.qty * px / START_CASH * 10) / 10));
+    const slip = IMPACT_BASE * blockVol / liqOf(o.sym) / 2;
+    px = o.side === "buy" ? px * (1 + slip) : px * (1 - slip);
+  }
+  const spr = spreadOf(o.sym);
+  let q = 0;
   if(o.side === "buy"){
     px *= 1 + spr / 2;
     const pos = p.pos[o.sym];
     const afford = Math.floor(p.cash / (px * (1 + feeRate(o.sym))));
-    const q = Math.min(o.qty, pos && pos.qty < 0 ? Math.min(-pos.qty, afford) : afford);
-    if(q < 1) return false;
+    q = Math.min(o.qty, pos && pos.qty < 0 ? Math.min(-pos.qty, afford) : afford);
+    if(q < 1) return 0;
     const cost = q * px, fee = feeOf(cost, o.sym);
     p.cash -= cost + fee; s.feesPaid += fee; s.trades++; s.buys++; s.volume += cost;
     if(pos && pos.qty < 0){
@@ -1736,24 +1380,32 @@ function execPending(p, o){
       p.pos[o.sym] = lp;
       pushNews(o.sym, `📌 Order ausgeführt: ${q} × ${o.sym} gekauft @ ${fmt(px)}`, "up");
     }
-    return true;
+  }else{
+    const pos = p.pos[o.sym];
+    if(!pos || pos.qty <= 0) return 0;
+    px *= 1 - spr / 2;
+    q = Math.min(o.qty, pos.qty);
+    const fee = feeOf(q * px, o.sym);
+    p.cash += q * px - fee; s.feesPaid += fee; s.trades++; s.sells++; s.volume += q * px;
+    noteClose(p, (px - pos.avg) * q, pos.avg * q);
+    pos.qty -= q;
+    if(pos.qty === 0) delete p.pos[o.sym];
+    pushNews(o.sym, `📌 Order ausgeführt: ${q} × ${o.sym} verkauft @ ${fmt(px)}`, "down");
   }
-  const pos = p.pos[o.sym];
-  if(!pos || pos.qty <= 0) return false;
-  px *= 1 - spr / 2;
-  const q = Math.min(o.qty, pos.qty);
-  const fee = feeOf(q * px, o.sym);
-  p.cash += q * px - fee; s.feesPaid += fee; s.trades++; s.sells++; s.volume += q * px;
-  noteClose(p, (px - pos.avg) * q, pos.avg * q);
-  pos.qty -= q;
-  if(pos.qty === 0) delete p.pos[o.sym];
-  pushNews(o.sym, `📌 Order ausgeführt: ${q} × ${o.sym} verkauft @ ${fmt(px)}`, "down");
-  return true;
+  if(expert && px !== px0) s.slip = (s.slip || 0) + Math.abs(px - px0) * q;
+  if(mode === "room"){
+    tradeLog.push([tickCount, o.sym, o.side === "buy" ? "buy" : "sell", q, blockVol ? Math.round(blockVol * 10) : 0]);
+    if(blockVol && room && room.played)
+      api("/room/" + room.code + "/round/" + room.played + "/trade",
+          {method: "POST", body: JSON.stringify({sym: o.sym, side: o.side === "buy" ? "buy" : "sell", vol: blockVol}),
+           headers: {"x-token": room.token}}).catch(() => {});
+  }
+  return q;
 }
 
 /* Frische Blockorder in den News-Feed (anonym – wer war's?!) */
 function announceBlock(tr){
-  const t = Math.min(tradeTick(tr.at), tickCount);
+  const t = Math.min(tradeTick(tr.at, roundAnchor), tickCount);
   pushNews(tr.sym, tr.side === "buy"
     ? "🐘 Blockorder: Jemand kauft im großen Stil – das dürfte den Kurs gleich anschieben …"
     : "🐘 Blockorder: Jemand wirft groß ab – da kommt gleich Druck auf den Kurs …",
@@ -2098,6 +1750,9 @@ function trade(side){
     flash.className = "flash ok";
   }
   // Fehler-Pfade kehren oben mit return zurück – hier war die Order erfolgreich
+  if(mode === "room" && execQ > 0)
+    tradeLog.push([tickCount, selected, side === "buy" ? "buy" : side === "sell" ? "sell" : "short",
+                   execQ, blockVol ? Math.round(blockVol * 10) : 0]);
   if(expert && execQ > 0 && px !== px0)
     p.stats.slip = (p.stats.slip || 0) + Math.abs(px - px0) * execQ; // Spread + Market Impact
   if(blockVol && execQ > 0){

@@ -353,3 +353,20 @@ const TUT_STEPS = {
      text:"🚀 Im <b>Hoch</b>! Megas <b>ebben danach wieder ab</b> – ein echtes Verkaufsfenster. " +
           "Wer den Spike mitnimmt und rechtzeitig verkauft, gewinnt groß. Spiel es zu Ende!"},
 };
+
+/* ===== Publish für den Worker-Pfad (Anti-Cheat-Replay): worker.js lädt data.js
+   per `import` – dort sind Top-Level-Konstanten modul-lokal, deshalb werden alle
+   Symbole, die engine.js braucht, explizit global veröffentlicht. Im Browser
+   (klassisches Script) ist das harmlos-redundant. */
+if(typeof globalThis === "object") Object.assign(globalThis, {
+  TICK_MS, TICK_SCALE, REACT_TICKS, ONLINE_API,
+  STOCK_DEFS, ETF_SYM, ETF_BASE, ETF_DEF, ETF2_SYM, ETF2_BASE, ETF2_DEF,
+  ACTIVE_LEV, ACTIVE_FEE_PCT, ACTIVE_WEIGHTS, defOf, DISPLAY_SYMS,
+  FEE_PCT, feeRate, feeOf, BLOCK_MIN_FRAC, IMPACT_BASE, IMPACT_CAP,
+  IMPACT_RAMP_TICKS, IMPACT_FADE_TICKS, IMPACT_KEEP, CASH_PRESETS,
+  SKEW_FULL, SKEW_MIN, DAMP_MAX, DAMP_CAP, SQUEEZE_K,
+  EXPERT_SPREAD_BASE, SPREAD_WIDE_TICKS, EXPERT_HALT_TICKS, EXPERT_ACT_HOLD,
+  EXPERT_MAX_ORDERS, liqOf, DIV_PCT, DIV_PCT_ETF, DIV_PAYOUT, isDividendSym, divRate,
+  NEWS_POOL, OPENING_EVENT, MEGA_REACT_TICKS, MEGA_PRE_FRAC, MEGA_FADE_FRAC,
+  MEGA_POOL, MOMENTUM_POOL, CHAIN_POOL, GENERIC_NEWS, GENERIC_CHAINS, GENERIC_MEGA,
+});

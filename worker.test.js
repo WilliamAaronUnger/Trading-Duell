@@ -1,8 +1,9 @@
-/* Tests für worker.js v3 (Online-RAUM, D1-Speicher). Ausführen mit:  node worker.test.js
+/* Tests für worker.js v5 (Online-RAUM + Anti-Cheat-Replay, D1-Speicher). Ausführen mit:  node worker.test.js
    Braucht nur Node ≥ 22 (fetch, WebCrypto, node:sqlite), keine Abhängigkeiten.
    D1 wird über einen kleinen Adapter auf echtem SQLite simuliert; getestet wird der
    echte fetch-Handler: Raum-Lebenszyklus, Rollen, Limit, Runden-Serie, Aggregat,
-   Anwesenheit, Abend-Wertung, Verfall. */
+   Anwesenheit, Abend-Wertung, Verfall – und der Anti-Cheat: der Server spielt jedes
+   eingereichte Trade-Log auf dem selbst erzeugten Markt nach (gleiche engine.js). */
 const fs = require("fs"), os = require("os"), path = require("path"), {pathToFileURL} = require("url");
 const {DatabaseSync} = require("node:sqlite");
 
@@ -27,10 +28,11 @@ let passed = 0, failed = 0;
 function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? passed++ : failed++; }
 
 (async () => {
-  const tmp = path.join(os.tmpdir(), "spcx-worker-" + process.pid + ".mjs");
-  fs.copyFileSync(path.join(__dirname, "worker.js"), tmp);
-  const worker = (await import(pathToFileURL(tmp).href)).default;
-  fs.unlinkSync(tmp);
+  // worker.js importiert data.js/engine.js (Anti-Cheat-Replay) → alle drei in ein Temp-Verzeichnis
+  const tdir = fs.mkdtempSync(path.join(os.tmpdir(), "spcx-worker-"));
+  for(const f of ["data.js", "engine.js"]) fs.copyFileSync(path.join(__dirname, f), path.join(tdir, f));
+  fs.copyFileSync(path.join(__dirname, "worker.js"), path.join(tdir, "worker.mjs"));
+  const worker = (await import(pathToFileURL(path.join(tdir, "worker.mjs")).href)).default;
 
   const db = d1Stub(), env = {DB: db};
   const call = (method, p, body, headers) =>
@@ -89,16 +91,39 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   st = await agg(R.code);
   ok(st.pnls["1"] === 12.35, "P&L im Aggregat (gerundet)");
 
-  // ---- Ergebnisse + Abend-Wertung, Runde 1 ----
-  const res = s => "SPCX5." + Buffer.from(s).toString("base64");
-  ok((await call("PUT", `/room/${R.code}/round/1/result/1?pnl=120.5`, res("anna1"), {"x-token": R.token})).status === 201, "Ergebnis p1 (Sieger R1)");
-  ok((await call("PUT", `/room/${R.code}/round/1/result/1?pnl=120.5`, res("anna1"), {"x-token": R.token})).status === 409, "write-once → 409");
-  ok((await call("PUT", `/room/${R.code}/round/1/result/2?pnl=-30`, res("ben1"), {"x-token": ben.token})).status === 201, "Ergebnis p2");
-  ok((await call("PUT", `/room/${R.code}/round/1/result/2`, res("x"), {"x-token": ben.token})).status !== 201, "Ergebnis ohne pnl-Angabe abgelehnt");
+  // ---- Ergebnisse + Abend-Wertung, Runde 1 (ANTI-CHEAT: Server spielt das Log nach) ----
+  const res6 = s => "SPCX6." + Buffer.from(s).toString("base64");
+  const rbody = (s, log) => JSON.stringify({res: res6(s), log});
+  const T1 = Math.round(rd1.dur * 60000 / TICK_MS);
+  const mkt1 = genMarket(rd1.seed >>> 0, T1);           // Test rechnet mit derselben Engine
+  const repOpt = {ticks: T1, cash: 25000, expert: false, room: true, journal: [], anchor: 0};
+  const logA = [[2, "SPCX", "buy", 10, 0], [200, "SPCX", "sell", 10, 0]];
+  const pnlA = replayRound(mkt1, logA, repOpt).pnl;
+  const logB = [[5, "RKLB", "short", 20, 0], [150, "RKLB", "buy", 20, 0]];
+  const pnlB = replayRound(mkt1, logB, repOpt).pnl;
+  ok(oracleMaxPnl(mkt1, T1, 25000) > Math.max(pnlA, pnlB, 0), "Orakel-Obergrenze über realen Ergebnissen");
+  ok((await call("PUT", `/room/${R.code}/round/1/result/1?pnl=${pnlA}`, rbody("anna1", logA), {"x-token": R.token})).status === 409,
+     "Einreichung während laufender Runde → 409");
+  db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 11*60000, R.code);
+  ok((await call("PUT", `/room/${R.code}/round/1/result/1?pnl=${pnlA}`, res6("alt"), {"x-token": R.token})).status === 400,
+     "Alt-Client ohne Trade-Log → 400 (Update-Pflicht)");
+  ok((await call("PUT", `/room/${R.code}/round/1/result/1?pnl=${(pnlA + 500).toFixed(2)}`, rbody("anna1", logA), {"x-token": R.token})).status === 422,
+     "erfundenes P&L → 422 (Replay widerspricht)");
+  ok((await call("PUT", `/room/${R.code}/round/1/result/1?pnl=0`, rbody("anna1", [[3, "SPCX", "sell", 5, 0]]), {"x-token": R.token})).status === 422,
+     "unmögliche Order (Verkauf ohne Stücke) → 422");
+  r = await call("PUT", `/room/${R.code}/round/1/result/1?pnl=${pnlA}`, rbody("anna1", logA), {"x-token": R.token});
+  const conf = await r.json();
+  ok(r.status === 201 && conf.pnl === pnlA && conf.sus === 0, "Ergebnis p1: Replay bestätigt Server-Zahl (kein 🤨)");
+  ok((await call("PUT", `/room/${R.code}/round/1/result/1?pnl=${pnlA}`, rbody("anna1", logA), {"x-token": R.token})).status === 409, "write-once → 409");
+  ok((await call("PUT", `/room/${R.code}/round/1/result/2?pnl=${pnlB}`, rbody("ben1", logB), {"x-token": ben.token})).status === 201, "Ergebnis p2 (Short-Log repliziert)");
+  ok((await call("PUT", `/room/${R.code}/round/1/result/2`, rbody("x", logB), {"x-token": ben.token})).status !== 201, "Ergebnis ohne pnl-Angabe abgelehnt");
   st = await agg(R.code);
-  ok(st.results["1"] === res("anna1") && st.results["2"] === res("ben1"), "Ergebnisse im Aggregat");
+  ok(st.results["1"] === res6("anna1") && st.results["2"] === res6("ben1"), "Ergebnisse im Aggregat");
+  ok(st.sus && !st.sus["1"] && !st.sus["2"], "keine Verdachts-Flags für ehrliche Logs");
   let sb = Object.fromEntries(st.scoreboard.map(s => [s.p, s]));
-  ok(sb[1].wins === 1 && sb[1].total === 120.5 && sb[2].wins === 0 && sb[2].total === -30, "Wertung nach Runde 1");
+  const w1 = pnlA >= pnlB ? 1 : 2;
+  ok(sb[w1].wins === 1 && sb[w1 === 1 ? 2 : 1].wins === 0 &&
+     sb[1].total === pnlA && sb[2].total === pnlB, "Wertung nach Runde 1 = SERVER-Zahlen");
 
   // ---- Runde 2: Dauer wechseln, neue Seeds, Wertung summiert ----
   db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 11*60000, R.code);
@@ -109,11 +134,22 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   st = await agg(R.code);
   ok(st.dur === 5, "gewählte Dauer wird neuer Raum-Standard");
   ok(Object.keys(st.results).length === 0 && Object.keys(st.pnls).length === 0, "Aggregat zeigt nur die AKTUELLE Runde (leer)");
-  await call("PUT", `/room/${R.code}/round/2/result/1?pnl=-10`, res("anna2"), {"x-token": R.token});
-  await call("PUT", `/room/${R.code}/round/2/result/2?pnl=55`,  res("ben2"),  {"x-token": ben.token});
+  db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 6*60000, R.code);
+  const T2 = Math.round(rd2.dur * 60000 / TICK_MS);
+  const mkt2 = genMarket(rd2.seed >>> 0, T2);
+  const repOpt2 = {ticks: T2, cash: 25000, expert: false, room: true, journal: [], anchor: 0};
+  const logA2 = [[4, "MKT", "buy", 30, 0]];                       // hält bis zur Schlussauktion (+ Dividende)
+  const pnlA2 = replayRound(mkt2, logA2, repOpt2).pnl;
+  const logB2 = [[4, "TSLA", "buy", 8, 0], [250, "TSLA", "sell", 8, 0]];
+  const pnlB2 = replayRound(mkt2, logB2, repOpt2).pnl;
+  ok((await call("PUT", `/room/${R.code}/round/2/result/1?pnl=${pnlA2}`, rbody("anna2", logA2), {"x-token": R.token})).status === 201, "Runde 2: Buy-and-Hold repliziert (inkl. Dividende)");
+  ok((await call("PUT", `/room/${R.code}/round/2/result/2?pnl=${pnlB2}`, rbody("ben2", logB2), {"x-token": ben.token})).status === 201, "Runde 2: Ergebnis p2");
   sb = Object.fromEntries((await agg(R.code)).scoreboard.map(s => [s.p, s]));
-  ok(sb[1].wins === 1 && sb[2].wins === 1, "je ein Rundensieg nach Runde 2");
-  ok(sb[1].total === 110.5 && sb[2].total === 25, "Gesamt-P&L über den Abend summiert");
+  const w2 = pnlA2 >= pnlB2 ? 1 : 2;
+  ok(sb[1].wins === (w1 === 1 ? 1 : 0) + (w2 === 1 ? 1 : 0) &&
+     sb[2].wins === (w1 === 2 ? 1 : 0) + (w2 === 2 ? 1 : 0), "Rundensiege korrekt gezählt");
+  ok(Math.abs(sb[1].total - (pnlA + pnlA2)) < 0.011 && Math.abs(sb[2].total - (pnlB + pnlB2)) < 0.011,
+     "Gesamt-P&L über den Abend = Summe der Server-Zahlen");
 
   // ---- Zuspätkommer während laufender Runde ----
   const dana = await call("POST", `/room/${R.code}/join`, jbody({name: "Dana"}));

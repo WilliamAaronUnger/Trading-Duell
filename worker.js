@@ -35,7 +35,9 @@ const CORS = {
 };
 const TTL_MS = 24 * 3600 * 1000;  // Raum verfällt 24 h nach letzter Aktivität
 const ONLINE_MS = 15000;          // "gerade da" = Herzschlag jünger als 15 s
-const DURS = [5, 10, 15];         // erlaubte Rundendauern (Minuten)
+const DURS = [5, 10, 15, 20, 30, 60]; // erlaubte Rundendauern (Minuten) – die langen gibt es
+                                      // nur im Raum: Offline-Codes kodieren die Dauer als
+                                      // code % 3 und bleiben deshalb bei 5/10/15
 const START_DELAY_MS = 10000;     // Puffer zwischen Start-Befehl und Rundenbeginn
 const MAX_PLAYERS = 20;           // Spieler-Rollen je Raum (Leinwände zählen nicht)
 

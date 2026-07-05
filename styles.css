@@ -38,6 +38,9 @@
   .field input.pl1:focus{border-color:var(--p1)}
   .field input.pl2:focus{border-color:var(--p2)}
   .dur-row{display:flex;gap:8px;margin-top:6px}
+  /* Raum: sechs Dauer-Knöpfe → sauber als 2×3-Raster umbrechen */
+  #roomDurRow{flex-wrap:wrap}
+  #roomDurRow .dur{flex:1 1 30%}
   .dur{flex:1;height:46px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
        color:var(--muted);font-family:var(--mono);font-size:14px;cursor:pointer;
        padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

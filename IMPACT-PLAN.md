@@ -11,9 +11,12 @@ A4 „Experten-Modus"), `ROADMAP.md`.
    eine reine Raum-Schicht ÜBER dem Basismarkt. Begründung: erst mit 2–20 Spielern sieht
    man, „dass wirklich was passiert" — solo wäre es ein einsamer Gimmick.
 2. **Teil des zuschaltbaren Experten-Modus (A4).** Der Ersteller schaltet ihn pro Runde
-   beim Start zu (🎓-Toggle neben der Dauer-Wahl). Das Flag ist Teil der Runden-Ressource
-   vom Server (wie `dur`/`seed`) → alle Geräte inkl. Leinwand und Nachzügler spielen
-   garantiert dieselben Regeln. Standard bleibt AUS (einsteigerfreundlich).
+   zu — der 🎓-Toggle sitzt in einem EIGENEN Block weiter unten im Raum-Screen (bewusst
+   getrennt von der Dauer-Zeile, z. B. „Runden-Optionen" unterhalb des Start-Bereichs)
+   und ist NUR für den Ersteller sichtbar/bedienbar; alle anderen sehen höchstens einen
+   Hinweis „🎓 Experten-Runde". Das Flag ist Teil der Runden-Ressource vom Server (wie
+   `dur`/`seed`) → alle Geräte inkl. Leinwand und Nachzügler spielen garantiert dieselben
+   Regeln. Standard bleibt AUS (einsteigerfreundlich).
    Die übrigen A4-Härten (Short-Dividende, ACT-Haltekosten) hängen am selben Flag,
    sind aber eigene kleine Bausteine (lokal deterministisch, kein Server nötig).
 3. **Trades werden zu News-Events (die zentrale Fairness-Idee).** Große Orders

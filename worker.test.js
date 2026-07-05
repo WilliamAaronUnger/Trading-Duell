@@ -133,6 +133,13 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   ok((await call("POST", `/room/${L.code}/role`, jbody({token: (await wallJoin.json()).token, role: "player"}))).status === 409,
      "Leinwand → Spieler scheitert am Limit");
 
+  // ---- Längere Rundendauern (nur Raum; Offline-Codes bleiben bei 5/10/15) ----
+  r = await call("POST", `/room/${L.code}/start`, jbody({token: L.token, dur: 7}));
+  ok(r.status === 201 && (await r.json()).dur === 10, "unbekannte Dauer → Raum-Standard");
+  db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 11*60000, L.code);
+  r = await call("POST", `/room/${L.code}/start`, jbody({token: L.token, dur: 60}));
+  ok(r.status === 201 && (await r.json()).dur === 60, "lange Dauer 60 Min erlaubt");
+
   // ---- Verfall ----
   db._db.prepare("UPDATE rooms SET lastActive = ? WHERE code = ?").run(Date.now() - 25*3600*1000, solo.code);
   ok((await call("GET", "/room/" + solo.code)).status === 404, "verfallener Raum → 404");

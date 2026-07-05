@@ -31,8 +31,6 @@
       <div class="rec" id="recLine" style="display:none"></div>
     </div>
     <button class="start-btn" id="resumeBtn" style="display:none">▶️ Spiel fortsetzen</button>
-    <button class="lobby-cancel" id="statsBtn" style="margin-top:0">📊 Meine Statistik</button>
-    <button class="lobby-cancel" id="scanBtn" style="margin-top:10px">📷 Einladung scannen</button>
     <div class="field">
       <label>Modus</label>
       <div class="dur-row">
@@ -40,9 +38,9 @@
         <button class="dur mtop" data-top="multi">👥 Mehrspieler</button>
       </div>
       <div class="dur-row" id="modeSub" style="display:none">
-        <button class="dur mode active" data-mode="local">📱 Gleiches Gerät</button>
+        <button class="dur mode active" data-mode="local">📱 1 Gerät</button>
         <button class="dur mode" data-mode="remote">📱📱 Offline</button>
-        <button class="dur mode" data-mode="room">🌐 Online-Raum</button>
+        <button class="dur mode" data-mode="room">🌐 Raum</button>
       </div>
       <div class="mode-hint" id="modeHint"></div>
       <div class="dur-row" id="soloSub">
@@ -83,8 +81,16 @@
       <div class="code-err" id="codeErr"></div>
     </div>
     <button class="start-btn" id="startBtn">Duell starten 🔔</button>
-    <button class="lobby-cancel" id="tutBtn" style="margin-top:10px">🎓 Tutorial – das Spiel in 2 Minuten</button>
-    <div class="rules">
+    <div class="sec-actions">
+      <div class="sec-row">
+        <button class="sec-btn" id="statsBtn">📊 Statistik</button>
+        <button class="sec-btn" id="scanBtn">📷 Scannen</button>
+      </div>
+      <button class="sec-btn full" id="tutBtn">🎓 Tutorial – das Spiel in 2 Minuten</button>
+    </div>
+    <details class="rules-box">
+      <summary>So funktioniert's</summary>
+      <div class="rules">
       Beide Spieler erleben <b style="color:var(--text)">denselben Kursverlauf und dieselben News</b> –
       nur so ist der Vergleich fair.
       Jeder startet mit dem gewählten Startkapital, SPCX beginnt beim Ausgabepreis von 135 $.
@@ -104,7 +110,8 @@
       Countdown), während der Runde läuft das Live-Rennen, am Ende füllt sich die Rangliste von
       selbst und der Raum führt die Abend-Wertung. Jedes Gerät kann statt zu spielen auch als
       🖥️ Leinwand dienen (TV/Beamer/Discord).
-    </div>
+      </div>
+    </details>
     <button class="lobby-cancel" id="clearBtn" style="margin-top:10px;display:none">🗑 Gespeicherte Daten löschen</button>
   </div>
 </div>

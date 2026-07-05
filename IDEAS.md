@@ -127,6 +127,16 @@ speichert dann den vollen Seed statt nur des Codes. Optional: „Zufälliger Geg
   Wichtig: neue Datei → `sw.js`-FILES + CACHE-Bump; Fairness unberührt (reine Anzeige).
 - *Einstieg:* Stufe 1 = Anlegen + QR + Roster + Countdown + Chart-Wand; Rangliste kommt
   mit A1 dazu.
+- *Entschieden (Juli 2026, mit Betreiber durchdacht):*
+  - Die Leinwand spielt **nie selbst mit** — wer moderiert und mitspielen will, tritt
+    zusätzlich per Handy bei. Worker braucht nur eine „Host ohne Spieler-Slot"-Rolle
+    (zählt nicht in die 8, hält den Start-Token).
+  - Zielkontext: **Party & Discord-Screenshare** („kann alles, muss nicht"). Konsequenzen:
+    16:9-Layout, das auch in Stream-Kompression lesbar bleibt (große Schrift, hoher
+    Kontrast); neben dem QR immer Code + Link prominent (Discord-Chat statt Kamera);
+    Sound (Gong bei Mega-Events, Countdown) und Konfetti als **zuschaltbare** Extras.
+  - Anzeige-Konzept: EIN großes Auto-Fokus-Chart (heißester Wert), Mini-Chart-Wand,
+    News als Vollbild-Einblendung, Live-Rangliste (nur P&L, nie Positionen).
 
 ## ⚠️ Dynamischer Online-Markt (Kurse reagieren auf Spielerverhalten) — A10
 
@@ -149,3 +159,13 @@ speichert dann den vollen Seed statt nur des Codes. Optional: „Zufälliger Geg
   „komplett", was Snapshot/Replay/Analyse-Benchmark berührt.
 - *Empfehlung:* Nach A1 evaluieren — A1 baut genau die Trade-/Poll-Pfade, auf denen das
   aufsetzt. Erst als Prototyp im Privatkreis, Impact anfangs sehr klein tunen.
+- *Entschieden (Juli 2026, mit Betreiber durchdacht):*
+  - Ziel ist der **echte Preis-Impact**, nicht nur Anzeige — der Spielspaß-Moment ist:
+    „einer hat die Idee, alle machen mit, und es passiert wirklich etwas."
+    Das Stimmungsband bleibt trotzdem Stufe A (gleiche Trade-Meldungen, macht den
+    Herden-Moment sichtbar) und wird danach zum UI-Begleiter des Impacts
+    („🔥 4 kaufen TSLA → +0,6 %").
+  - Feste Leitplanken: nur private Online-Spiele (nie Tages-Challenge), Ersteller-Schalter
+    in der Lobby („🌊 Lebendiger Markt", für alle sichtbar), Impact gedeckelt & abklingend,
+    **Schlussphasen-Fadeout** (~letzte 60 s Überlagerung → 0, angekündigt) gegen den
+    Schlusskurs-Pump — realisierte Gewinne zählen, gepumpte Buchwerte entweichen.

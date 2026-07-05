@@ -49,10 +49,13 @@ ein Startknopf „🌍 Tages-Challenge". Braucht: Namens-Moderation (Wortfilter)
 grenzen (P&L-Deckel je Dauer), Ergebnis erst nach Rundenende einreichbar (Zeitfenster-Check).
 *Aufwand: 1–2 Sessions. Vorstufe für alles Kompetitive.*
 
-### A4. Experten-Modus (liegt fertig evaluiert in IDEAS.md)
+### A4. Experten-Modus (liegt fertig evaluiert in IDEAS.md) — geplant
 Zuschaltbare realistische Härten: Short-Dividende (Leerverkäufer zahlt), ACT-Haltekosten.
 Für Remote-Duelle muss der Modus in die Spiel-Ressource (alle spielen dieselben Regeln).
 *Aufwand: klein–mittel. Bewusst opt-in, Standard bleibt einsteigerfreundlich.*
+**Entschieden (Juli 2026):** Der Experten-Modus wird im Raum zum Träger des dynamischen
+Markts (A10) — Ersteller-Toggle pro Runde, Flag in der Runden-Ressource.
+Umsetzungsplan: `IMPACT-PLAN.md`.
 
 ### A5. Push-Benachrichtigungen
 „Dein Gegner hat sein Ergebnis hochgeladen", „Revanche-Einladung", „Tages-Challenge startet".
@@ -89,6 +92,10 @@ Markt). Machbar als **Online-Sondermodus** über eine server-vermittelte, für A
 erhalten, aber Determinismus/Resume/Ergebnis-Verifikation werden deutlich komplexer.
 Ausführliche Evaluation mit Architektur-Skizze und Risiken: `IDEAS.md`. *Aufwand: groß;
 erst nach A1 sinnvoll (teilt sich die Trade-/Poll-Infrastruktur).*
+**Entschieden (Juli 2026):** Kommt als Teil des zuschaltbaren Experten-Modus (A4), NUR im
+Online-Raum; Kernmechanik „Trades werden zu News-Events" (Server-Stempel + `REACT_TICKS`),
+Blockorders anonym, Schlussauktion zum Basiskurs, Stimmungsband als UI-Begleiter.
+Umsetzungsplan: `IMPACT-PLAN.md`.
 
 ### A8. Reichweite (wenn das Spiel „fertig" wirkt)
 Englische Übersetzung (alle Texte liegen zentral in `data.js`/wenigen UI-Stellen — i18n-Map

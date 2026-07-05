@@ -976,7 +976,15 @@ async function roomTick(){
     const runningW = nw >= rd.startAt - 8000 && nw < rd.startAt + rd.dur * 60000;
     if(runningW) ensureWall(rd);
     else if(wallOn) stopWall();
-    if(wallOn) renderWallBoard(st);
+    if(wallOn){
+      // Expert-Runde: Journal in Effektiv-Pfade + Squeeze-Liste übersetzen
+      if(rd.expert && st.trades && st.trades.length !== wallJournal.length){
+        wallJournal = st.trades;
+        const res = buildEffPaths(wallMarket, wallJournal, wallInfo.startAt, wallTicksTotal());
+        wallEff = res.eff; wallSqueezes = res.squeezes;
+      }
+      renderWallBoard(st);
+    }
   }else if(wallOn) stopWall();
   // Runden-Rangliste offen: eingetroffene Ergebnisse der Mitspieler nachladen
   if(rankRoom && st.results){
@@ -1066,6 +1074,11 @@ function renderRoomScreen(st){
 let wallOn = false, wallRoundN = 0, wallMarket = null, wallInfo = null,
     wallRaf = 0, wallNewsSeen = 0, wallDismissed = 0, wallFlashUntil = 0,
     wallFocus = null, wallFocusUntil = 0, wallChartMode = "line", wallSlowAt = 0;
+/* Expert-Runden auf der Leinwand: eigenes Journal + Effektiv-Pfade (gleiche
+   deterministische Formeln wie beim Spieler, nur mit dem Runden-Anker) */
+let wallJournal = [], wallEff = null, wallSqueezes = [], wallSqSeen = 0,
+    wallBlockSeen = 0, wallBlockUntil = 0;
+const wallPaths = () => wallEff || wallMarket.paths;
 
 function wallTicksTotal(){ return Math.round(wallInfo.dur * 60000 / TICK_MS); }
 function wallTickNow(){
@@ -1087,8 +1100,10 @@ function ensureWall(rd){
   wallRoundN = rd.n;
   wallInfo = {n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed >>> 0};
   wallMarket = genMarket(wallInfo.seed, wallTicksTotal());
-  // beim Einstieg mitten in der Runde: vergangene News nicht als Feuerwerk nachholen
+  wallJournal = []; wallEff = null; wallSqueezes = []; wallBlockSeen = 0; wallBlockUntil = 0;
+  // beim Einstieg mitten in der Runde: Vergangenes nicht als Feuerwerk nachholen
   wallNewsSeen = wallMarket.events.filter(e => e.tick <= wallTickNow()).length;
+  wallSqSeen = -1; // -1 = beim ersten Journal-Empfang auf den Ist-Stand setzen
   buildWallMinis();
   $("wallRoom").textContent = room ? room.code : "";
   $("wallRound").textContent = rd.n;
@@ -1125,7 +1140,7 @@ function wallFocusSym(t){
   const back = Math.min(t, 90);
   if(back < 2) return best;
   for(const s of DISPLAY_SYMS){
-    const p = wallMarket.paths[s];
+    const p = wallPaths()[s];
     const m = Math.abs(p[t] / p[t - back] - 1);
     if(m > bm){ bm = m; best = s; }
   }
@@ -1176,7 +1191,7 @@ const wallMarketSlice = (path, t, back) => path.slice(Math.max(0, t - back), t +
 function buildWallMinis(){
   $("wallMinis").innerHTML = DISPLAY_SYMS.map(s =>
     `<div class="wall-mini"><canvas id="wm-${s}"></canvas>
-     <div class="wm-l"><b>${s}</b><span id="wmc-${s}"></span></div></div>`).join("");
+     <div class="wm-l"><b>${s}</b><span class="wm-skew" id="wmsk-${s}"></span><span id="wmc-${s}"></span></div></div>`).join("");
 }
 /* rAF-Schleife: das Fokus-Chart wird jeden Frame glatt interpoliert (wie der Spieler-
    Chart), die schwereren Teile (Mini-Wand, Rangliste-Text, News, Restzeit) laufen
@@ -1187,10 +1202,11 @@ function wallFrame(){
   const now = Date.now();
   const {t, prog} = wallClockTick();
   const sym = wallPickFocus(t, now);
-  // Fokus-Chart über den echten Spieler-Renderer (Kerzen/Linie, Live-Marker, Fläche)
-  drawChart({canvas: $("wallChart"), sym, market: wallMarket, tick: t, prog,
+  // Fokus-Chart über den echten Spieler-Renderer (Kerzen/Linie, Live-Marker, Fläche);
+  // in Expert-Runden auf den Effektiv-Pfaden (Blockorders/Squeeze sichtbar)
+  drawChart({canvas: $("wallChart"), sym, market: {paths: wallPaths()}, tick: t, prog,
              pos: null, chartMode: wallChartMode, big: true});
-  const p = wallMarket.paths[sym];
+  const p = wallPaths()[sym];
   const live = t >= 1 ? p[t-1] + (p[t] - p[t-1]) * prog : (p[0] || 0);
   const ch = (live / p[0] - 1) * 100;
   $("wallSym").textContent = sym;
@@ -1207,26 +1223,56 @@ function wallSlow(now, t, focus){
     : Math.max(0, wallInfo.startAt + wallInfo.dur * 60000 - now);
   $("wallTime").textContent = (wallInfo.startAt > now ? "Start in " : "") +
     Math.floor(leftMs / 60000) + ":" + String(Math.floor(leftMs % 60000 / 1000)).padStart(2, "0");
-  // Mini-Wand (kompakte Sparklines); der Fokus-Wert wird hervorgehoben
+  // Mini-Wand (kompakte Sparklines); Fokus-Wert hervorgehoben, Herden-Schieflage daneben
   for(const s of DISPLAY_SYMS){
     const cv = $("wm-" + s);
     if(!cv) continue;
     if(cv.parentElement) cv.parentElement.classList.toggle("hot", s === focus);
-    drawWallLine(cv, wallMarket.paths[s], t, 150);
-    const q = wallMarket.paths[s], c2 = (q[t] / q[0] - 1) * 100;
+    drawWallLine(cv, wallPaths()[s], t, 150);
+    const q = wallPaths()[s], c2 = (q[t] / q[0] - 1) * 100;
     const el = $("wmc-" + s);
     el.textContent = (c2 >= 0 ? "+" : "") + c2.toFixed(1) + "%";
     el.style.color = c2 >= 0 ? "var(--up)" : "var(--down)";
+    const sk = $("wmsk-" + s);
+    if(sk){
+      const trs = wallJournal.length ? wallJournal.filter(x => x.sym === s) : null;
+      const v = trs && trs.length ? skewAt(trs, t, wallInfo.startAt) : 0;
+      sk.textContent = Math.abs(v) < 0.1 ? "" :
+        (v > 0 ? "🐂" : "🐻").repeat(Math.min(3, Math.ceil(Math.abs(v) * 3)));
+    }
   }
   // News-Band + Vollbild-Einblendung für frische Meldungen
   const evs = wallMarket.events.filter(e => e.tick <= t);
-  if(evs.length) $("wallNews").textContent = "📰 " + evs[evs.length - 1].ev.txt;
+  let band = evs.length ? "📰 " + evs[evs.length - 1].ev.txt : null;
   if(evs.length > wallNewsSeen){
     const e = evs[evs.length - 1];
     wallNewsSeen = evs.length;
     $("wallFlashText").textContent = (e.mega ? "🚨 " : "📰 ") + e.ev.txt;
     $("wallFlash").style.display = "";
     wallFlashUntil = now + (e.mega ? 8000 : 4500);
+  }
+  // Frische Blockorders übernehmen kurz das News-Band (anonym – wer war's?!)
+  if(wallJournal.length > wallBlockSeen){
+    wallBlockSeen = wallJournal.length;
+    wallBlockUntil = now + 7000;
+  }
+  if(wallBlockUntil > now && wallJournal.length){
+    const tr = wallJournal[wallJournal.length - 1];
+    band = tr.side === "buy"
+      ? `🐘 Blockorder: Jemand kauft groß ${tr.sym} ein!`
+      : `🐘 Blockorder: Jemand wirft ${tr.sym} im großen Stil ab!`;
+  }
+  if(band) $("wallNews").textContent = band;
+  // Squeeze/Blasen-Crash: Vollbild-Flash, sobald die Wirkung zündet
+  const due = wallSqueezes.filter(q => q.hitTick <= t);
+  if(wallSqSeen < 0) wallSqSeen = due.length; // Einstieg mitten in der Runde: nicht nachholen
+  if(due.length > wallSqSeen){
+    const q = due[due.length - 1];
+    wallSqSeen = due.length;
+    $("wallFlashText").textContent = q.short
+      ? `🔥 SHORT SQUEEZE: ${q.sym}!` : `💥 BLASE PLATZT: ${q.sym}!`;
+    $("wallFlash").style.display = "";
+    wallFlashUntil = now + 6000;
   }
   if(wallFlashUntil && now > wallFlashUntil){
     $("wallFlash").style.display = "none";
@@ -1516,10 +1562,12 @@ function runPreStart(cb){
    Details/Entscheidungen: IMPACT-PLAN.md. */
 function tradeTick(at, anchor){ return Math.floor((at - (anchor === undefined ? roundAnchor : anchor)) / TICK_MS); }
 
+/* Ein Journal-Eintrag wirkt ab `hit` (Server-Stempel + REACT_TICKS). Synthetische
+   Einträge (Squeeze) bringen ihre Wirkstärke/-zeit direkt mit (_mag/_hit). */
 function impactFactorAt(tr, t, anchor){
-  const hit = tradeTick(tr.at, anchor) + REACT_TICKS;
+  const hit = tr._hit !== undefined ? tr._hit : tradeTick(tr.at, anchor) + REACT_TICKS;
   if(t < hit) return 1;
-  const mag = IMPACT_BASE * tr.vol / liqOf(tr.sym);
+  const mag = tr._mag !== undefined ? tr._mag : IMPACT_BASE * tr.vol / liqOf(tr.sym);
   const full = tr.side === "buy" ? 1 + mag : 1 / (1 + mag);
   const ramp = Math.min(1, (t - hit + 1) / IMPACT_RAMP_TICKS);
   if(ramp < 1) return Math.pow(full, ramp);
@@ -1534,21 +1582,90 @@ function overlayAt(trs, t, anchor){
   return Math.max(1 - IMPACT_CAP, Math.min(1 + IMPACT_CAP, f));
 }
 
-/* Effektiv-Pfade neu aufbauen (bei jedem Journal-Zuwachs, ~alle 2,5 s maximal).
-   Unberührte Werte teilen sich das Basis-Array – nur betroffene werden kopiert. */
-function rebuildEff(){
-  if(!expert || mode !== "room" || !market){ effPaths = null; return; }
+/* Schieflage der Herde in einer Aktie zum Tick t: Summe der wirksamen Blockorder-
+   Volumina (Kauf +, Verkauf −), normiert auf −1…+1. Nur echte Einträge zählen. */
+function skewAt(trs, t, anchor){
+  let s = 0;
+  for(const tr of trs){
+    if(tr._mag !== undefined) continue;
+    if(tradeTick(tr.at, anchor) + REACT_TICKS > t) continue;
+    s += tr.side === "buy" ? tr.vol : -tr.vol;
+  }
+  return Math.max(-1, Math.min(1, s / SKEW_FULL));
+}
+
+/* Squeeze-Suche: eine News, die GEGEN eine deutliche Schieflage läuft, zwingt die
+   Herde durch dieselbe Tür (Shorts decken ein / Blasen-Longs fliehen) – als
+   synthetischer Zusatz-Impact in Sprungrichtung, deterministisch aus Journal+Markt. */
+function findSqueezes(mkt, bySym, anchor, ticks){
+  const out = [];
+  for(const e of mkt.events){
+    const sym = e.ev.t;
+    if(sym === "ALL" || !bySym[sym]) continue;
+    const jump = e.ev.jump || 0;
+    if(!jump) continue;
+    const hit = e.tick + (e.mega ? MEGA_REACT_TICKS : REACT_TICKS);
+    if(hit > ticks) continue;
+    const s = skewAt(bySym[sym], hit, anchor);
+    if(Math.abs(s) < SKEW_MIN || (jump > 0) === (s > 0)) continue;
+    out.push({sym, hitTick: hit, side: jump > 0 ? "buy" : "sell",
+              _hit: hit, _mag: Math.abs(jump) * SQUEEZE_K * Math.abs(s),
+              short: s < 0}); // short=true → Short-Squeeze, sonst platzt eine Long-Blase
+  }
+  return out;
+}
+
+/* Effektiv-Pfade aus Basis-Markt + Journal bauen (Spieler UND Leinwand nutzen das):
+   Blockorder-Overlay × Herden-Dämpfung, plus Squeeze-Zusätze. Unberührte Werte
+   teilen sich das Basis-Array – nur betroffene werden kopiert. */
+function buildEffPaths(mkt, jr, anchor, ticks){
+  if(!jr.length) return {eff: null, squeezes: []};
   const bySym = {};
-  for(const tr of journal) (bySym[tr.sym] = bySym[tr.sym] || []).push(tr);
+  for(const tr of jr) (bySym[tr.sym] = bySym[tr.sym] || []).push(tr);
+  const squeezes = findSqueezes(mkt, bySym, anchor, ticks);
+  const sqBySym = {};
+  for(const q of squeezes) (sqBySym[q.sym] = sqBySym[q.sym] || []).push(q);
   const eff = {};
-  for(const sym in market.paths){
-    const base = market.paths[sym], trs = bySym[sym];
-    if(!trs){ eff[sym] = base; continue; }
+  for(const sym in mkt.paths){
+    const base = mkt.paths[sym], trs = bySym[sym], sqs = sqBySym[sym];
+    if(!trs && !sqs){ eff[sym] = base; continue; }
+    const all = (trs || []).concat(sqs || []);
     const a = new Array(base.length);
-    for(let t = 0; t < base.length; t++) a[t] = base[t] * overlayAt(trs, t);
+    let damp = 1;
+    a[0] = base[0] * overlayAt(all, 0, anchor);
+    for(let t = 1; t < base.length; t++){
+      if(trs){
+        const s = skewAt(trs, t, anchor);
+        // Bewegungen in Gewinnrichtung der Herde laufen zäher („der Markt bewegt
+        // sich gegen die Masse"): alle short → fällt langsamer, alle long → steigt zäher.
+        if(Math.abs(s) >= 0.15){
+          const r = base[t] / base[t-1];
+          if((s > 0 && r > 1) || (s < 0 && r < 1)){
+            damp *= Math.pow(r, -DAMP_MAX * Math.abs(s));
+            damp = Math.max(1 - DAMP_CAP, Math.min(1 + DAMP_CAP, damp));
+          }
+        }
+      }
+      a[t] = base[t] * damp * overlayAt(all, t, anchor);
+    }
     eff[sym] = a;
   }
-  effPaths = eff;
+  return {eff, squeezes};
+}
+
+/* Spieler-Seite: Effektiv-Pfade + Squeeze-Liste neu aufbauen (bei Journal-Zuwachs) */
+let squeezes = [];
+function rebuildEff(){
+  if(!expert || mode !== "room" || !market){ effPaths = null; squeezes = []; return; }
+  const res = buildEffPaths(market, journal, roundAnchor, matchTicks);
+  effPaths = res.eff; squeezes = res.squeezes;
+}
+
+/* Aktuelle Schieflage fürs Stimmungsband (0 = neutral) */
+function skewNow(sym){
+  if(!expert || mode !== "room" || !journal.length) return 0;
+  const trs = journal.filter(t => t.sym === sym);
+  return trs.length ? skewAt(trs, tickCount) : 0;
 }
 
 /* Frische Blockorder in den News-Feed (anonym – wer war's?!) */
@@ -1613,6 +1730,17 @@ function processTick(showPopup){
       pushNews(t.sym, insiderText(t), "insider");
       lastNewsTick = tickCount;
       if(showPopup) showNewsPop({ev:{t:t.sym, txt:"🤫 " + insiderText(t)}, tag:t.dir > 0 ? "up" : "down", insider:true});
+    }
+  }
+  // Expert-Raum: Squeeze/Blasen-Crash zündet – die Herde muss durch dieselbe Tür
+  if(expert && mode === "room") for(const q of squeezes){
+    if(q.hitTick === tickCount){
+      const txt = q.short
+        ? "🔥 SHORT SQUEEZE: Eindeckungswelle verstärkt den Kurssprung!"
+        : "💥 Die Blase platzt: Alle wollen gleichzeitig raus!";
+      pushNews(q.sym, txt, q.side === "buy" ? "up" : "down");
+      lastNewsTick = tickCount;
+      if(showPopup) showNewsPop({ev:{t:q.sym, txt}, tag:q.side === "buy" ? "up" : "down"});
     }
   }
   const p = players[round], s = p.stats;
@@ -2003,6 +2131,22 @@ function renderAll(){
   const chg = $("qChg");
   chg.textContent = (ch>=0?"+":"") + ch.toFixed(2) + "%";
   chg.className = "chg " + (ch >= 0 ? "up" : "down");
+
+  // Stimmungsband (nur Expert-Raum): wo steht die Herde in diesem Wert?
+  const senti = $("senti");
+  if(senti){
+    const sk = skewNow(selected);
+    if(Math.abs(sk) < 0.1){ senti.style.display = "none"; }
+    else{
+      const n = Math.min(4, Math.ceil(Math.abs(sk) * 4));
+      senti.style.display = "";
+      senti.innerHTML = sk > 0
+        ? `Raum-Stimmung: <b class="s-long">${"🐂".repeat(n)} long</b>` +
+          (sk >= SKEW_MIN ? ' <span class="s-warn">– anfällig für schlechte News!</span>' : "")
+        : `Raum-Stimmung: <b class="s-short">${"🐻".repeat(n)} short</b>` +
+          (-sk >= SKEW_MIN ? ' <span class="s-warn">– Squeeze-Gefahr bei guten News!</span>' : "");
+    }
+  }
 
   // %-Entwicklung zum eigenen Einstand (Vorzeichen bei Short gedreht: fallender Kurs = Gewinn)
   const myPos = p.pos[selected];

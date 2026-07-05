@@ -55,6 +55,12 @@ const IMPACT_RAMP_TICKS = Math.round(5000 / TICK_MS);   // Wirkung rampt über ~
 const IMPACT_FADE_TICKS = Math.round(60000 / TICK_MS);  // ~60 s Rückgabe des Großteils
 const IMPACT_KEEP       = 1/3;    // Anteil, der dauerhaft bleibt
 const CASH_PRESETS      = [10000, 25000, 50000, 100000]; // Startkapital-Wahl (Expert)
+/* Herden-Schicht: Positionsdruck + Squeeze (Phase 3 des IMPACT-PLANs) */
+const SKEW_FULL  = 3.0;   // Summe Blockorder-Volumina für „maximale" Schieflage (±1)
+const SKEW_MIN   = 0.3;   // ab dieser Schieflage zünden Squeeze/Blasen-Crash
+const DAMP_MAX   = 0.3;   // max. Dämpfung der Basisbewegung in Herden-Gewinnrichtung
+const DAMP_CAP   = 0.04;  // Deckel der kumulierten Dämpfungs-Abweichung (±4 %)
+const SQUEEZE_K  = 0.5;   // Squeeze-Extra relativ zum News-Sprung (× Schieflage)
 const liqOf = sym => defOf(sym).liq || 1;
 const DIV_PCT = 0.00006;                                 // ~2,5 % Brutto-Dividende übers 10-Min-Spiel (Einzelwerte; je Wert via divMult gespreizt)
 const DIV_PCT_ETF = 0.00010;                             // ~4,2 % – Sparplan-Bonus, macht den Index-Stil gegen aktives Traden konkurrenzfähig

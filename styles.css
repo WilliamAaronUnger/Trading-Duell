@@ -50,6 +50,11 @@
   .opt-row.on .opt-check{color:var(--accent)}
   .opt-row .opt-body{display:block}
   .opt-row .opt-sub{display:block;color:var(--muted);font-size:12px;margin-top:3px;line-height:1.45}
+  /* Stimmungsband (Expert-Raum): Herden-Schieflage des gewählten Werts */
+  .senti{font-size:12px;color:var(--muted);margin:-4px 0 6px;font-family:var(--mono)}
+  .senti .s-long{color:var(--up)} .senti .s-short{color:var(--down)}
+  .senti .s-warn{color:#FFB454}
+  .wm-skew{font-size:11px}
   .dur{flex:1;height:46px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
        color:var(--muted);font-family:var(--mono);font-size:14px;cursor:pointer;
        padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

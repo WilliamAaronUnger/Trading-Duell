@@ -51,6 +51,13 @@
   .opt-row .opt-body{display:block}
   .opt-row .opt-sub{display:block;color:var(--muted);font-size:12px;margin-top:3px;line-height:1.45}
   /* 🎓 Limit-/Stop-Orders im Order-Panel */
+  /* Einklapp-Umschalter (Progressive Disclosure): fortgeschrittene Ordertypen bleiben
+     standardmäßig zu, damit die Grundfläche ruhig ist; offene Orders zeigen ihre Anzahl. */
+  .ord-toggle{display:block;width:100%;margin-top:10px;padding:9px 12px;text-align:left;
+              background:var(--panel-2);color:var(--muted);border:1px solid var(--line);
+              border-radius:10px;font-family:var(--mono);font-size:12px;cursor:pointer}
+  .ord-toggle:hover{color:var(--text)}
+  .ord-toggle .ord-count{color:var(--accent);font-weight:700}
   .ord-new{display:flex;gap:8px;margin-top:10px}
   .ord-new input{flex:1;min-width:0;height:42px;border-radius:10px;border:1px solid var(--line);
                  background:var(--panel-2);color:var(--text);padding:0 12px;font-family:var(--mono);font-size:15px}

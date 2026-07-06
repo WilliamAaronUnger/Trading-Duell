@@ -1230,6 +1230,7 @@ function startRound(r){
   clearInterval(preTimer); preTimer = null; $("preStart").classList.remove("show");
   $("newsPop").classList.remove("show");
   selected = "SPCX"; qtyMode = "5";
+  ordPanelOpen = false;                 // Limit-/Stop-Panel startet eingeklappt (ruhige Grundfläche)
   favorites = DEFAULT_FAVS.slice(); // Favoriten je Spiel auf Standard zurücksetzen
   document.querySelectorAll(".chip").forEach(x => x.classList.toggle("active", x.dataset.q === "5"));
   $("news").innerHTML = '<div class="empty">Gleich geht\'s los …</div>';
@@ -1823,6 +1824,21 @@ function placeOrder(side){
   saveSnapshot("play");
 }
 
+/* Progressive Disclosure: Die fortgeschrittenen Limit-/Stop-Orders sind
+   standardmäßig eingeklappt, damit die Grundfläche (Kaufen/Verkaufen/Short) ruhig
+   bleibt. Offene Orders zeigen ihre Anzahl am Umschalter, damit sie im
+   eingeklappten Zustand nicht in Vergessenheit geraten. */
+let ordPanelOpen = false;
+function applyOrdPanel(){
+  const body = $("ordBody"), tog = $("ordToggle");
+  if(!body || !tog) return;
+  body.style.display = ordPanelOpen ? "" : "none";
+  const n = (players && players[round] && players[round].orders || []).length;
+  const count = n ? ` <span class="ord-count">(${n})</span>` : "";
+  tog.innerHTML = (ordPanelOpen ? "📌 Limit- &amp; Stop-Orders ▾" : "📌 Limit- &amp; Stop-Orders ▸") + count;
+}
+$("ordToggle").onclick = () => { ordPanelOpen = !ordPanelOpen; applyOrdPanel(); };
+
 function renderOrders(){
   const box = $("expertOrders");
   if(!box) return;
@@ -1840,6 +1856,7 @@ function renderOrders(){
     renderOrders();
     saveSnapshot("play");
   });
+  applyOrdPanel();
 }
 
 /* Schlussauktion (Expert-Raum): Endbewertung zum fairen BASIS-Kurs, damit sich

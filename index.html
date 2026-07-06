@@ -298,14 +298,18 @@
         <button class="btn short" id="shortBtn">Short 🐻</button>
       </div>
       <div class="order-info" id="orderInfo"></div>
-      <!-- 🎓 Experten-Modus: Limit-/Stop-Orders (Stückzahl kommt aus den Chips oben) -->
+      <!-- 🎓 Experten-Modus: Limit-/Stop-Orders (Stückzahl kommt aus den Chips oben).
+           Standardmäßig eingeklappt, damit die Grundfläche ruhig bleibt (Progressive Disclosure). -->
       <div id="expertOrders" style="display:none">
-        <div class="ord-new">
-          <input id="ordPx" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Zielkurs">
-          <button class="btn buy ord-btn" id="ordBuyBtn">📌 Kauf</button>
-          <button class="btn sell ord-btn" id="ordSellBtn">📌 Verkauf</button>
+        <button type="button" class="ord-toggle" id="ordToggle">📌 Limit- &amp; Stop-Orders</button>
+        <div id="ordBody" style="display:none">
+          <div class="ord-new">
+            <input id="ordPx" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Zielkurs">
+            <button class="btn buy ord-btn" id="ordBuyBtn">📌 Kauf</button>
+            <button class="btn sell ord-btn" id="ordSellBtn">📌 Verkauf</button>
+          </div>
+          <div id="ordList"></div>
         </div>
-        <div id="ordList"></div>
       </div>
       <div class="flash" id="flash"></div>
     </div>

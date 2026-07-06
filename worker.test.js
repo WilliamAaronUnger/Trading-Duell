@@ -297,6 +297,16 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
     const onlyMkt = [{at: 0, sym: "MKT", side: "buy", vol: 2}, {at: 1000, sym: "MKT", side: "buy", vol: 2}];
     const effM = buildEffPaths(mktI, onlyMkt, 0, TI).eff;
     ok(Math.abs(effM.MKT[hit] - baseMKT[hit]) < 1e-6, "Direkter MKT-Handel schiebt den Index nicht");
+    // (3) Große MKT-Order ohne block10 wird NICHT als 'unblocked' abgelehnt (Index zahlt keinen Eigen-Impact),
+    //     eine gleich große Aktien-Order dagegen schon – die Ausnahme ist gezielt.
+    const repOptE = {ticks: TI, cash: 25000, expert: true, room: true, journal: [], anchor: 0};
+    const qMkt = Math.ceil(25000 * BLOCK_MIN_FRAC * 1.05 / mktI.paths.MKT[5]) + 5;
+    ok(replayRound(mktI, [[5, "MKT", "buy", qMkt, 0]], repOptE).ok,
+       "große MKT-Order ohne block10 → akzeptiert (Index ohne Eigen-Impact)");
+    const qSpcx = Math.ceil(25000 * BLOCK_MIN_FRAC * 1.05 / mktI.paths.SPCX[5]) + 5;
+    const spcxRej = replayRound(mktI, [[5, "SPCX", "buy", qSpcx, 0]], repOptE);
+    ok(!spcxRej.ok && spcxRej.error === "unblocked",
+       "gleich große SPCX-Order ohne block10 → weiterhin 'unblocked'");
   }
 
   // ---- Verfall ----

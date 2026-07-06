@@ -1358,7 +1358,7 @@ function execPending(p, o){
   const s = p.stats;
   // Blockorder? (wie in trade(): Absichtsgröße gegen die Schwelle, halber Eigen-Impact)
   let blockVol = 0;
-  if(expert && mode === "room" && o.qty * px >= START_CASH * BLOCK_MIN_FRAC){
+  if(expert && mode === "room" && !isIndexSym(o.sym) && o.qty * px >= START_CASH * BLOCK_MIN_FRAC){
     blockVol = Math.min(2, Math.max(0.1, Math.round(o.qty * px / START_CASH * 10) / 10));
     const slip = IMPACT_BASE * blockVol / liqOf(o.sym) / 2;
     px = o.side === "buy" ? px * (1 + slip) : px * (1 - slip);
@@ -1682,7 +1682,7 @@ function trade(side){
   let blockVol = 0;
   if(expert && mode === "room"){
     const est = qty * px;
-    if(est >= START_CASH * BLOCK_MIN_FRAC){
+    if(!isIndexSym(selected) && est >= START_CASH * BLOCK_MIN_FRAC){
       blockVol = Math.min(2, Math.max(0.1, Math.round(est / START_CASH * 10) / 10));
       const slip = IMPACT_BASE * blockVol / liqOf(selected) / 2;
       px = side === "buy" ? px * (1 + slip) : px * (1 - slip);

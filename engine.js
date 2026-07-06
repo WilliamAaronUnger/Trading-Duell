@@ -481,8 +481,9 @@ function replayRound(mkt, log, opt){
         if(o.b){
           const slip = IMPACT_BASE * (o.b / 10) / liqOf(o.sym) / 2;
           px = o.a === "buy" ? px * (1 + slip) : px * (1 - slip);
-        }else if(o.q * px >= opt.cash * BLOCK_MIN_FRAC * 1.05){
+        }else if(!isIndexSym(o.sym) && o.q * px >= opt.cash * BLOCK_MIN_FRAC * 1.05){
           return {ok:false, error:"unblocked"}; // Blockorder-Groesse ohne gemeldete Slippage
+          // (MKT/ACT sind ausgenommen: reine Ableitungen, kein Eigen-Impact/keine Slippage)
         }
       }
       if(expert){

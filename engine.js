@@ -362,6 +362,10 @@ function buildEffPaths(mkt, jr, anchor, ticks){
   for(const q of squeezes) (sqBySym[q.sym] = sqBySym[q.sym] || []).push(q);
   const eff = {};
   for(const sym in mkt.paths){
+    // MKT/ACT sind reine Ableitungen ihrer Bestandteile – sie bekommen KEIN eigenes
+    // Overlay (Direkt-Handel schiebt den Index nicht), sondern werden unten aus den
+    // Effektiv-Kursen der Aktien neu berechnet, damit sie dem Markt folgen.
+    if(sym === ETF_SYM || sym === ETF2_SYM) continue;
     const base = mkt.paths[sym], trs = bySym[sym], sqs = sqBySym[sym];
     if(!trs && !sqs){ eff[sym] = base; continue; }
     const all = (trs || []).concat(sqs || []);
@@ -385,6 +389,12 @@ function buildEffPaths(mkt, jr, anchor, ticks){
     }
     eff[sym] = a;
   }
+  // Index-Werte aus den (beeinflussten) Bestandteilen neu ableiten: addEtfPath/
+  // addActivePath lesen die Aktien-Pfade aus `eff` (für jede Aktie steht dort der
+  // Effektiv- oder – unberührt – der Basis-Pfad) und schreiben ETF_SYM/ETF2_SYM.
+  // So erbt der Index den Impact seiner Aktien, ist selbst aber nicht handel-schiebbar.
+  if(mkt.paths[ETF_SYM])  addEtfPath(eff, ticks);
+  if(mkt.paths[ETF2_SYM]) addActivePath(eff, ticks);
   return {eff, squeezes};
 }
 

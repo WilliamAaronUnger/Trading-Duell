@@ -277,6 +277,28 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   sb = Object.fromEntries(st.scoreboard.map(s => [s.p, s]));
   ok(sb[1].bot === 1 && sb[2].bot === 0, "Wertung zählt 🤖-Runden je Spieler");
 
+  // ---- MKT/ACT: Index leitet sich aus den (beeinflussten) Bestandteilen ab ----
+  {
+    const TI = Math.round(10 * 60000 / TICK_MS);
+    const mktI = genMarket(4242, TI);
+    const baseMKT = mktI.paths.MKT.slice();
+    const hit = REACT_TICKS + IMPACT_RAMP_TICKS + 5;
+    // (1) Blockorders, die SPCX kräftig hochkaufen → MKT muss anteilig mitziehen
+    const pump = [];
+    for(let k = 0; k < 4; k++) pump.push({at: k * 1000, sym: "SPCX", side: "buy", vol: 2});
+    const effP = buildEffPaths(mktI, pump, 0, TI).eff;
+    ok(effP.SPCX[hit] > mktI.paths.SPCX[hit], "SPCX-Pump hebt den Effektivkurs");
+    ok(effP.MKT[hit] > baseMKT[hit], "MKT erbt den Impact seiner Bestandteile (Index folgt den Aktien)");
+    // MKT ist EXAKT die Neu-Ableitung aus den Effektiv-Aktien – keine Eigenbewegung
+    const syms = Object.keys(STOCK_DEFS);
+    const expMKT = syms.reduce((a, s) => a + effP[s][hit] / STOCK_DEFS[s].start, 0) / syms.length * ETF_BASE;
+    ok(Math.abs(effP.MKT[hit] - expMKT) < 1e-6, "MKT = Durchschnitt der Effektiv-Bestandteile (reine Ableitung)");
+    // (2) Direkte Blockorder auf MKT bewegt den Index NICHT (nicht mehr manipulierbar)
+    const onlyMkt = [{at: 0, sym: "MKT", side: "buy", vol: 2}, {at: 1000, sym: "MKT", side: "buy", vol: 2}];
+    const effM = buildEffPaths(mktI, onlyMkt, 0, TI).eff;
+    ok(Math.abs(effM.MKT[hit] - baseMKT[hit]) < 1e-6, "Direkter MKT-Handel schiebt den Index nicht");
+  }
+
   // ---- Verfall ----
   db._db.prepare("UPDATE rooms SET lastActive = ? WHERE code = ?").run(Date.now() - 25*3600*1000, solo.code);
   ok((await call("GET", "/room/" + solo.code)).status === 404, "verfallener Raum → 404");

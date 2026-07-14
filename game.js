@@ -1645,9 +1645,11 @@ function renderCareer(total){
     const id = el.dataset.buy; if(id) el.onclick = () => buyCareerItem(id);
   });
   const owned = CAREER_ITEMS.filter(it => career.owned.includes(it.id));
+  const allDone = owned.length === CAREER_ITEMS.length;
   $("careerCabinetLabel").textContent = `Vitrine · ${owned.length}/${CAREER_ITEMS.length}`;
   $("careerCabinet").innerHTML = owned.length
-    ? owned.map(it => `<span class="badge">${it.icon} ${esc(it.name)}</span>`).join("")
+    ? owned.map(it => `<span class="badge">${it.icon} ${esc(it.name)}</span>`).join("") +
+      (allDone ? `<div class="career-empty" style="margin-top:8px">Alles gekauft. War der Luxus es wert? Der Kurs läuft trotzdem weiter.</div>` : "")
     : `<span class="career-empty">Noch leer – handle dich reich und gönn dir was.</span>`;
 }
 function buyCareerItem(id){

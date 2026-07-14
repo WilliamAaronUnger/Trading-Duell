@@ -58,6 +58,7 @@
   .career-sub b{color:var(--text)}
   .career-note{font-size:12px;margin-top:8px}
   .career-empty{color:var(--muted);font-size:12px}
+  .shop-note{font-size:11px;color:var(--muted);line-height:1.45;margin:2px 0 6px}
   .shop-item{display:flex;align-items:center;gap:12px;padding:10px 12px;margin-top:6px;
              border:1px solid var(--line);border-radius:10px;background:var(--panel-2)}
   .shop-item .si-ic{font-size:20px;flex:0 0 auto;width:26px;text-align:center}

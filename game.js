@@ -1543,7 +1543,7 @@ const CAREER_KEY = "trading-duell-career";
 let careerEpoch = -1;                     // zuletzt aufgebaute Markt-Epoche (Modul-Cache)
 function freshCareer(){
   return {seed: (Math.floor(Math.random() * 0xFFFFFFFF)) >>> 0, anchor: Date.now(),
-          cash: CAREER_START, pos: {}, assets: {}, peakNet: CAREER_START,
+          cash: CAREER_START, pos: {}, assets: {}, debt: 0, peakNet: CAREER_START,
           carry: null, carryEpoch: 0, lastTotal: CAREER_START, lastIncomeAt: Date.now(), busted: false};
 }
 function loadCareer(){
@@ -1556,6 +1556,7 @@ function loadCareer(){
         if(Array.isArray(c.owned)) for(const id of c.owned) c.assets[id] = 1;
       }
       if(typeof c.lastIncomeAt !== "number") c.lastIncomeAt = Date.now();
+      if(typeof c.debt !== "number" || c.debt < 0) c.debt = 0;
       return c;
     }
   }catch(e){}
@@ -1585,24 +1586,44 @@ function careerAssetCost(it){
   const n = (career.assets && career.assets[it.id]) || 0;
   return Math.round(it.baseCost * Math.pow(CAREER_COST_MULT, n));
 }
-/* Seit dem letzten Aufruf aufgelaufenes Einkommen (auch offline); rückt lastIncomeAt vor. */
+/* Seit dem letzten Aufruf: Einkommen (Rückgabe, fürs Bargeld) UND Schuld-Zins
+   (Nebenwirkung – die Schuld wächst). Beides läuft auch offline (Zins immer). */
 function careerAccrue(){
   const now = Date.now(), last = career.lastIncomeAt || now;
   const months = Math.max(0, (now - last) / CAREER_MONTH_MS);
   career.lastIncomeAt = now;
+  if(career.debt > 0) career.debt = Math.round(career.debt * Math.pow(1 + CAREER_LOAN_RATE, months) * 100) / 100;
   return careerMonthlyIncome() * months;
+}
+/* Freier Kreditrahmen = LTV × Netto-Vermögen − bereits aufgenommene Schuld. */
+function careerLoanAvailable(){
+  return Math.max(0, Math.floor(CAREER_LOAN_LTV * careerNetWorth() - (career.debt || 0)));
+}
+function careerBorrow(){
+  const amt = careerLoanAvailable();
+  if(amt < 1) return;
+  career.cash += amt; career.debt = (career.debt || 0) + amt;
+  saveCareer(); renderCareer();
+}
+function careerRepay(){
+  const amt = Math.min(career.cash, career.debt || 0);
+  if(amt < 1) return;
+  career.cash = Math.round((career.cash - amt) * 100) / 100;
+  career.debt = Math.round(((career.debt || 0) - amt) * 100) / 100;
+  saveCareer(); renderCareer();
 }
 /* Tick-Offset in der aktuellen Epoche (ohne Markt-Neuaufbau). */
 function careerOffsetNow(){
   const g = Math.max(0, Math.floor((Date.now() - career.anchor) / TICK_MS));
   return g - Math.floor(g / CAREER_EPOCH_TICKS) * CAREER_EPOCH_TICKS;
 }
-/* Netto-Vermögen = Bargeld + offene Positionen (zum aktuellen Kurs) + Güter-Buchwert. */
+/* Netto-Vermögen = Bargeld + offene Positionen + Güter-Buchwert − Schulden.
+   Geliehenes Geld macht also NICHT auf dem Papier reich (drückt auch den Rang). */
 function careerNetWorth(){
   const off = careerOffsetNow();
   let v = career.cash;
   if(market) for(const s in career.pos){ const q = career.pos[s].qty, p = market.paths[s]; if(q && p) v += q * p[Math.min(off, p.length - 1)]; }
-  return v + careerAssetsValue();
+  return v + careerAssetsValue() - (career.debt || 0);
 }
 /* Aktuelle Epoche + Markt sicherstellen (Carry gecacht → nach Auszeit nur neue
    Epochen simulieren); gibt den Tick-Offset innerhalb der Epoche zurück. */
@@ -1619,10 +1640,13 @@ function careerSyncToNow(force){
   }
   return g - ep * CAREER_EPOCH_TICKS;
 }
-/* Bailout, falls das Netto-Vermögen unter CAREER_MIN fällt (Güter bleiben – das Imperium
-   trägt einen normalerweise sowieso über der Schwelle). */
+/* Pleite-Liquidation, falls das Netto-Vermögen unter CAREER_MIN fällt: ohne Kredit tritt
+   das praktisch nie ein (Güter tragen einen drüber). MIT Kredit kann ein geplatzter Hebel
+   das Vermögen ins Minus reißen – dann wird ALLES liquidiert (Güter weg, Schuld erlassen,
+   Bargeld auf CAREER_START). Genau diese Zähne machen Leihen zu echtem Risiko (kein
+   „gewinnst du, behältst du's; verlierst du, wirst du freigekauft"). */
 function careerBustCheck(net){
-  if(net < CAREER_MIN){ career.cash = CAREER_START; career.pos = {}; career.busted = true; }
+  if(net < CAREER_MIN){ career.cash = CAREER_START; career.pos = {}; career.assets = {}; career.debt = 0; career.busted = true; }
   else career.busted = false;
 }
 /* Live-Portfolio des aktiven Spielers zurück in die Karriere schreiben. */
@@ -1672,8 +1696,20 @@ function renderCareer(){
   $("careerIncome").textContent = "+" + fmt(income) + " / Monat";
   $("careerWorth").innerHTML = `Vermögen <b>${fmt(net)}</b> · Rang-Bestwert ${fmt(career.peakNet)}`;
   $("careerNote").innerHTML = career.busted
-    ? `<span style="color:var(--down)">Pleite – ein Investor gibt dir ${fmt(CAREER_START)} frisches Startkapital. Dein Besitz bleibt.</span>`
+    ? `<span style="color:var(--down)">Pleite! Dein Imperium wurde liquidiert, die Schulden erlassen – du startest mit ${fmt(CAREER_START)} neu.</span>`
     : "";
+  // Kredit-Panel: Schulden, freier Rahmen, Zins, Aufnehmen/Tilgen
+  const debt = career.debt || 0, avail = careerLoanAvailable();
+  $("careerLoan").innerHTML =
+    `<div class="loan-row"><span>Schulden</span><b class="${debt > 0 ? "loan-debt" : ""}">${fmt(debt)}</b></div>` +
+    `<div class="loan-row"><span>Kreditrahmen frei</span><b>${fmt(avail)}</b></div>` +
+    `<div class="loan-note">Zins ${(CAREER_LOAN_RATE * 100).toFixed(0)} %/Monat – läuft immer, auch offline. Ein geplatzter Hebel kann in die Pleite-Liquidation führen.</div>` +
+    `<div class="loan-btns">` +
+      `<button class="sec-btn" id="loanBorrow"${avail < 1 ? " disabled" : ""}>Kredit aufnehmen</button>` +
+      `<button class="sec-btn" id="loanRepay"${(debt < 1 || career.cash < 1) ? " disabled" : ""}>Tilgen</button>` +
+    `</div>`;
+  if(avail >= 1) $("loanBorrow").onclick = careerBorrow;
+  if(debt >= 1 && career.cash >= 1) $("loanRepay").onclick = careerRepay;
   // Shop nach Kategorien: jede Zeile Icon · Name (×Anzahl) / Ertrag · nächster Preis
   let html = "";
   for(const cat of CAREER_CATS){

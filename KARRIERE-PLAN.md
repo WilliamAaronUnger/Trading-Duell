@@ -19,7 +19,13 @@ Ein Imperium, das man in Echtzeit aufbaut — die Aktie ist nur noch **Nebenscha
 - **Traden = Kür:** `#careerTradeBtn` betritt den Markt (derselbe Echtzeit-Endlos-Markt); das
   Imperium-Einkommen läuft dabei weiter in die Kasse. Assets und Traden sind bewusst etwa gleichwertige
   Wege zum Reichtum.
-- **Bailout:** fällt das Netto-Vermögen unter `CAREER_MIN`, Bargeld zurück auf `CAREER_START`; Besitz bleibt.
+- **Kredit / Hebel:** man kann bis `CAREER_LOAN_LTV`× des Netto-Vermögens leihen (`careerLoanAvailable`),
+  Zins `CAREER_LOAN_RATE`/Monat läuft immer (auch offline, kompoundierend in `careerAccrue`). Geliehenes
+  Geld zählt NICHT ins Netto-Vermögen (Schuld wird abgezogen), lohnt sich also nur, wenn man den Zins schlägt
+  – der Zins liegt bewusst über der Asset-Rendite, damit „Kredit zum Traden" der gedachte Einsatz ist.
+- **Pleite-Liquidation:** fällt das Netto-Vermögen unter `CAREER_MIN` (praktisch nur durch einen geplatzten
+  Hebel möglich), wird ALLES liquidiert (Güter weg, Schuld erlassen, Bargeld auf `CAREER_START`) – diese Zähne
+  machen Leihen zu echtem Risiko statt zu Gratis-Zockerei.
 - **Ränge** (`CAREER_RANKS`, reine Text-Titel) nach Netto-Vermögen (Bargeld + Positionen + Güter-Buchwert).
 - **Ton:** die Genre-Idle-Spiele veräppelt, aber ernst umgesetzt — kein Ads/IAP/Timer, jeder Cent verdient.
 

@@ -316,6 +316,9 @@ const CAREER_EPOCH_TICKS  = Math.round(60 * 60000 / TICK_MS); // Länge einer Ma
 const CAREER_MONTH_MS     = 5 * 60 * 1000;         // ~1 „Monat" = 5 echte Minuten (Einkommen-Takt)
 const CAREER_BASIC_INCOME = 800;                   // Grundeinkommen je Monat (Sockel, auch ohne Besitz)
 const CAREER_COST_MULT    = 1.13;                  // jedes weitere Stück eines Guts kostet ×1,13
+const CAREER_LOAN_LTV     = 1.0;                   // Kreditrahmen = 1× Netto-Vermögen (max. doppeltes Kapital)
+const CAREER_LOAN_RATE    = 0.08;                  // 8 %/Monat Zins – ÜBER der Asset-Rendite, damit der Hebel
+                                                   // nur mit gutem Traden lohnt (leihen→Assets ist ein Zuschussgeschäft)
 
 /* Kategorien (Reihenfolge = Anzeige-Reihenfolge im Shop). */
 const CAREER_CATS = [

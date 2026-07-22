@@ -53,6 +53,14 @@ let START_CASH = 25000;
 const $ = id => document.getElementById(id);
 const fmt = n => n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2}) + " $";
 const sgn = n => (n>=0?"+":"") + fmt(n);
+/* Kompakte Anzeige für hohe Beträge (Karriere): ab 1 Mio. abgekürzt (Mio./Mrd./Bio.),
+   darunter volle Anzeige wie fmt. Beispiel: 1.500.000 → „1,50 Mio. $". */
+const fmtC = n => {
+  const a = Math.abs(n);
+  if(a < 1e6) return fmt(n);
+  const [v, suf] = a >= 1e12 ? [n/1e12, "Bio."] : a >= 1e9 ? [n/1e9, "Mrd."] : [n/1e6, "Mio."];
+  return v.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2}) + " " + suf + " $";
+};
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 /* ====================== Markt vorab generieren ====================== */
@@ -1714,16 +1722,16 @@ function openCareer(){
 function renderCareer(){
   const income = careerMonthlyIncome(), net = careerNetWorth();
   $("careerRank").textContent = careerRankName(career.peakNet);
-  $("careerCash").textContent = fmt(career.cash);
-  $("careerIncome").textContent = "+" + fmt(income) + " / Monat";
-  $("careerWorth").innerHTML = `Vermögen <b>${fmt(net)}</b> · Rang-Bestwert ${fmt(career.peakNet)}`;
+  $("careerCash").textContent = fmtC(career.cash);
+  $("careerIncome").textContent = "+" + fmtC(income) + " / Monat";
+  $("careerWorth").innerHTML = `Vermögen <b>${fmtC(net)}</b> · Rang-Bestwert ${fmtC(career.peakNet)}`;
   $("careerNote").innerHTML = career.busted
-    ? `<span style="color:var(--down)">Pleite! Dein Imperium wurde liquidiert, die Schulden erlassen – du startest mit ${fmt(CAREER_START)} neu.</span>`
+    ? `<span style="color:var(--down)">Pleite! Dein Imperium wurde liquidiert, die Schulden erlassen – du startest mit ${fmtC(CAREER_START)} neu.</span>`
     : "";
   // Kredit-Knopf (Details auf der eigenen Seite)
   const debt = careerDebt();
   $("careerCreditBtn").textContent = debt > 0
-    ? `Kredit · Restschuld ${fmt(debt)}`
+    ? `Kredit · Restschuld ${fmtC(debt)}`
     : "Kredit aufnehmen";
   // Shop nach Kategorien: jede Zeile Icon · Name (×Anzahl) / Ertrag · nächster Preis
   let html = "";
@@ -1733,12 +1741,12 @@ function renderCareer(){
       const n = (career.assets && career.assets[it.id]) || 0;
       const cost = careerAssetCost(it);
       const cls = career.cash >= cost ? "affordable" : "locked";
-      const inc = it.income ? `<span class="si-inc">+${fmt(it.income)}/Mon</span>` : `<span class="si-inc lux">reiner Luxus</span>`;
+      const inc = it.income ? `<span class="si-inc">+${fmtC(it.income)}/Mon</span>` : `<span class="si-inc lux">reiner Luxus</span>`;
       const cnt = n ? ` <span class="si-cnt">×${n}</span>` : "";
       html += `<div class="shop-item ${cls}" data-buy="${it.id}">` +
         `<span class="si-ic">${it.icon}</span>` +
         `<span class="si-main">${esc(it.name)}${cnt}<br>${inc}</span>` +
-        `<span class="si-price">${fmt(cost)}</span></div>`;
+        `<span class="si-price">${fmtC(cost)}</span></div>`;
     }
   }
   $("careerShop").innerHTML = html;
@@ -1791,13 +1799,13 @@ function openCredit(){
   renderCredit();
 }
 function renderCredit(){
-  $("creditWorth").innerHTML = `Netto-Vermögen <b>${fmt(careerNetWorth())}</b>`;
+  $("creditWorth").innerHTML = `Netto-Vermögen <b>${fmtC(careerNetWorth())}</b>`;
   const body = $("creditBody");
   if(career.loan){
     const L = career.loan, restM = Math.max(1, Math.ceil(L.principal / L.payment));
     body.innerHTML =
-      `<div class="loan-row"><span>Restschuld</span><b class="loan-debt">${fmt(L.principal)}</b></div>` +
-      `<div class="loan-row"><span>Monatsrate</span><b>${fmt(L.payment)}</b></div>` +
+      `<div class="loan-row"><span>Restschuld</span><b class="loan-debt">${fmtC(L.principal)}</b></div>` +
+      `<div class="loan-row"><span>Monatsrate</span><b>${fmtC(L.payment)}</b></div>` +
       `<div class="loan-row"><span>Zins</span><b>${(L.rate * 100).toFixed(1)} %/Monat</b></div>` +
       `<div class="loan-row"><span>Voraussichtlich noch</span><b>${restM} Monate</b></div>` +
       `<div class="loan-note">Die Monatsrate wird automatisch vom Bargeld abgebucht – dein Einkommen bedient sie. Solange ein Kredit läuft, kein zweiter.</div>` +
@@ -1806,7 +1814,7 @@ function renderCredit(){
   }else{
     const avail = careerLoanAvailable();
     body.innerHTML =
-      `<div class="loan-row"><span>Maximaler Kredit</span><b>${fmt(avail)}</b></div>` +
+      `<div class="loan-row"><span>Maximaler Kredit</span><b>${fmtC(avail)}</b></div>` +
       `<label class="credit-lbl">Betrag</label>` +
       `<input id="creditAmount" class="credit-input" type="number" min="0" max="${avail}" value="${Math.floor(avail)}" inputmode="numeric">` +
       `<label class="credit-lbl">Laufzeit</label>` +
@@ -1826,9 +1834,9 @@ function renderCreditPreview(){
   if(amt < 1){ el.innerHTML = `<div class="loan-note">Betrag wählen …</div>`; return; }
   const pay = loanPayment(amt, CAREER_LOAN_RATE, creditTerm), total = pay * creditTerm;
   el.innerHTML =
-    `<div class="loan-row"><span>Monatsrate</span><b>${fmt(pay)}</b></div>` +
-    `<div class="loan-row"><span>Gesamtkosten (${creditTerm} Mon.)</span><b>${fmt(total)}</b></div>` +
-    `<div class="loan-row"><span>davon Zinsen</span><b class="loan-debt">${fmt(total - amt)}</b></div>`;
+    `<div class="loan-row"><span>Monatsrate</span><b>${fmtC(pay)}</b></div>` +
+    `<div class="loan-row"><span>Gesamtkosten (${creditTerm} Mon.)</span><b>${fmtC(total)}</b></div>` +
+    `<div class="loan-row"><span>davon Zinsen</span><b class="loan-debt">${fmtC(total - amt)}</b></div>`;
 }
 
 $("careerBtn").onclick = openCareer;

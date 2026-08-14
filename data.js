@@ -49,15 +49,17 @@ const ACTIVE_WEIGHTS = {SPCX:3, TSLA:2.5, RKLB:2, AMD:2, META:2, GOOGL:1.5, NVDA
    Markt (Kurse + Events) → KEIN rnd()-Verbrauch, faire Parität; sie reagiert nur auf ANGEKÜNDIGTE
    Infos (kein Blick in die Zukunft). NUR am Aktions-Wochenende handelbar (Client-Zeitfenster). */
 const ETF3_SYM = "TRB", ETF3_BASE = 100.00;
-const ETF3_DEF = {name:"Wochenend-Turbo", type:"active", start:ETF3_BASE, liq:1.0,
-                  char:"🔥 Wochenend-Turbo: Fonds eines aggressiven Star-Traders (1 Mio. Kapital) – jagt jede News gehebelt, riesige Chance & Risiko"};
+const ETF3_DEF = {name:"Star-Trader-Fonds", type:"active", start:ETF3_BASE, liq:1.0,
+                  char:"🔥 Nur am Wochenende: Anteil am gehebelten Fonds eines aggressiven Star-Traders – riesige Chance & Risiko (er behält 15 % vom Gewinn)"};
 const TURBO_CAPITAL   = 1000000;  // Startkapital des Star-Traders (Flavor + NAV-Basis)
-const TURBO_BASE_LEV  = 3.0;      // Dauer-Long im Wachstumskorb (immer investiert, hoch gehebelt)
-const TURBO_EVENT_LEV = 2.2;      // gerichteter Zusatz-Einsatz je aktiver News (Aufstocken/Abbauen)
-const TURBO_LEV_CAP   = 7.0;      // Brutto-Hebel-Deckel (risikofreudig)
+const TURBO_BASE_LEV  = 4.3;      // Dauer-Long im Wachstumskorb (immer investiert, hoch gehebelt)
+const TURBO_EVENT_LEV = 2.8;      // gerichteter Zusatz-Einsatz je aktiver News (Aufstocken/Abbauen)
+const TURBO_LEV_CAP   = 11.0;     // Brutto-Hebel-Deckel (risikofreudig)
 const TURBO_ENTRY     = 8;        // steigt erst ein, wenn der News-Sprung schon läuft (jagt die Bewegung
                                   // = REACT_TICKS) → oft am Hoch dabei, echtes zweiseitiges Risiko
 const TURBO_TAIL      = 10;       // hält ~10 Ticks über das Effekt-Ende hinaus → gibt im Fade wieder ab
+const TURBO_PERF_FEE  = 0.15;     // Gewinnbeteiligung des Star-Traders auf neue NAV-Hochs (High-Water-Mark);
+                                  // dafür ist der Hebel höher, damit die Gewinn-Oberkante trotzdem steigt
 const TURBO_FROM = new Date(2026, 7, 14, 0, 0, 0).getTime();         // Fr 14.08.2026 00:00 (Monat 0-basiert: 7 = August)
 const TURBO_TO   = new Date(2026, 7, 16, 23, 59, 59, 999).getTime(); // So 16.08.2026 23:59:59 (Ende des Wochenendes)
 const isTurboActive = () => { const t = Date.now(); return t >= TURBO_FROM && t <= TURBO_TO; };
@@ -459,7 +461,7 @@ if(typeof globalThis === "object") Object.assign(globalThis, {
   TICK_MS, TICK_SCALE, REACT_TICKS, ONLINE_API,
   STOCK_DEFS, ETF_SYM, ETF_BASE, ETF_DEF, ETF2_SYM, ETF2_BASE, ETF2_DEF,
   ETF3_SYM, ETF3_BASE, ETF3_DEF, isTurboActive,
-  TURBO_CAPITAL, TURBO_BASE_LEV, TURBO_EVENT_LEV, TURBO_LEV_CAP, TURBO_ENTRY, TURBO_TAIL,
+  TURBO_CAPITAL, TURBO_BASE_LEV, TURBO_EVENT_LEV, TURBO_LEV_CAP, TURBO_ENTRY, TURBO_TAIL, TURBO_PERF_FEE,
   ACTIVE_LEV, ACTIVE_FEE_PCT, ACTIVE_WEIGHTS, defOf, DISPLAY_SYMS,
   FEE_PCT, feeRate, feeOf, BLOCK_MIN_FRAC, IMPACT_BASE, IMPACT_CAP,
   IMPACT_RAMP_TICKS, IMPACT_FADE_TICKS, IMPACT_KEEP, CASH_PRESETS,

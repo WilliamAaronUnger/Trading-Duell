@@ -305,13 +305,15 @@ function addActivePath(paths, ticks){
      gerichtet aufstocken (gute News → mehr long) bzw. abbauen (schlechte → runter);
      „ALL"-Events (Markt) wirken auf den ganzen Korb. Long only (shortet nicht).
    • Brutto-Hebel auf TURBO_LEV_CAP gedeckelt; Umschichtungen kosten ACT-Gebühr.
+   • Gewinnbeteiligung: auf jedem neuen NAV-Hoch behält der Trader TURBO_PERF_FEE
+     des Zuwachses (High-Water-Mark) → drückt die Oberkante realistisch.
    NAV startet bei ETF3_BASE; ein geplatzter Hebel kann den Kurs stark drücken. */
 function addTurboPath(paths, ticks, events){
   let wsum = 0; for(const s in ACTIVE_WEIGHTS) wsum += ACTIVE_WEIGHTS[s];
   const baseFrac = {}; for(const s in ACTIVE_WEIGHTS) baseFrac[s] = ACTIVE_WEIGHTS[s] / wsum; // Summe 1
   const evs = (events || []).filter(e => e && e.ev && e.ev.t);
   const nav = [ETF3_BASE];
-  let equity = TURBO_CAPITAL, prevW = {};
+  let equity = TURBO_CAPITAL, prevW = {}, hwm = ETF3_BASE; // hwm = bisheriges NAV-Hoch (für Gewinnbeteiligung)
   for(let t = 1; t <= ticks; t++){
     const w = {};
     for(const s in baseFrac) w[s] = baseFrac[s] * TURBO_BASE_LEV;      // Dauer-Long
@@ -333,7 +335,13 @@ function addTurboPath(paths, ticks, events){
     for(const s in w){ if(!w[s]) continue; const p = paths[s]; if(p) ret += w[s] * (p[t] / p[t-1] - 1); }
     equity *= Math.max(0.02, 1 + ret - turnover * ACTIVE_FEE_PCT);
     prevW = w;
-    nav.push(Math.max(1, equity / TURBO_CAPITAL * ETF3_BASE));
+    let navT = equity / TURBO_CAPITAL * ETF3_BASE;
+    if(navT > hwm){                                    // neues Hoch → Trader behält TURBO_PERF_FEE des Zuwachses
+      navT -= (navT - hwm) * TURBO_PERF_FEE;
+      equity = navT / ETF3_BASE * TURBO_CAPITAL;
+      hwm = navT;
+    }
+    nav.push(Math.max(1, navT));
   }
   paths[ETF3_SYM] = nav;
 }

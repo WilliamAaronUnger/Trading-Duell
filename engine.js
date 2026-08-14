@@ -261,6 +261,7 @@ function genMarket(seed, ticks){
 
   addEtfPath(paths, ticks);
   addActivePath(paths, ticks);
+  addTurboPath(paths, ticks, events);   // Wochenend-Turbo (Trader-Fonds) immer ableiten (Sichtbarkeit gated der Client)
   return {paths, events, tips};
 }
 
@@ -293,6 +294,48 @@ function addActivePath(paths, ticks){
     act.push(Math.max(1, lev * ETF2_BASE));
   }
   paths[ETF2_SYM] = act;
+}
+
+/* Wochenend-Turbo-Pfad = NAV des Star-Trader-Fonds. Simuliert einen aggressiven,
+   dauer-investierten Wachstums-Trader, der regelbasiert & deterministisch aus dem
+   fertigen Markt (Kurse `paths` + `events`) handelt – KEIN rnd(), fairness-neutral.
+   Strategie (nur angekündigte Infos, kein Zukunftsblick):
+   • Basis: immer TURBO_BASE_LEV× long im gewichteten Wachstumskorb (ACTIVE_WEIGHTS).
+   • News: ab ~TURBO_ENTRY Ticks nach der Meldung bis Effekt-Ende auf die Ziel-Aktie
+     gerichtet aufstocken (gute News → mehr long) bzw. abbauen (schlechte → runter);
+     „ALL"-Events (Markt) wirken auf den ganzen Korb. Long only (shortet nicht).
+   • Brutto-Hebel auf TURBO_LEV_CAP gedeckelt; Umschichtungen kosten ACT-Gebühr.
+   NAV startet bei ETF3_BASE; ein geplatzter Hebel kann den Kurs stark drücken. */
+function addTurboPath(paths, ticks, events){
+  let wsum = 0; for(const s in ACTIVE_WEIGHTS) wsum += ACTIVE_WEIGHTS[s];
+  const baseFrac = {}; for(const s in ACTIVE_WEIGHTS) baseFrac[s] = ACTIVE_WEIGHTS[s] / wsum; // Summe 1
+  const evs = (events || []).filter(e => e && e.ev && e.ev.t);
+  const nav = [ETF3_BASE];
+  let equity = TURBO_CAPITAL, prevW = {};
+  for(let t = 1; t <= ticks; t++){
+    const w = {};
+    for(const s in baseFrac) w[s] = baseFrac[s] * TURBO_BASE_LEV;      // Dauer-Long
+    for(const e of evs){                                              // aktive News (Entscheidung mit Info bis t-1)
+      const reactT = e.mega ? MEGA_REACT_TICKS : REACT_TICKS;
+      const start = e.tick + TURBO_ENTRY, end = e.tick + reactT + (e.ev.dur || 0) + TURBO_TAIL;
+      if(t - 1 < start || t - 1 >= end) continue;
+      const d = Math.sign(e.ev.jump || e.ev.drift || 0) || 1, S = e.ev.t;
+      if(S === "ALL"){ for(const s in baseFrac) w[s] += d * TURBO_EVENT_LEV * baseFrac[s]; }
+      else if(STOCK_DEFS[S]) w[S] = (w[S] || 0) + d * TURBO_EVENT_LEV;
+    }
+    for(const s in w) if(w[s] < 0) w[s] = 0;                          // long only
+    let gross = 0; for(const s in w) gross += w[s];
+    if(gross > TURBO_LEV_CAP){ const k = TURBO_LEV_CAP / gross; for(const s in w) w[s] *= k; }
+    let turnover = 0; const keys = {};                                // Umschichtungskosten
+    for(const s in w) keys[s] = 1; for(const s in prevW) keys[s] = 1;
+    for(const s in keys) turnover += Math.abs((w[s] || 0) - (prevW[s] || 0));
+    let ret = 0;                                                      // Tick-Rendite des Buchs
+    for(const s in w){ if(!w[s]) continue; const p = paths[s]; if(p) ret += w[s] * (p[t] / p[t-1] - 1); }
+    equity *= Math.max(0.02, 1 + ret - turnover * ACTIVE_FEE_PCT);
+    prevW = w;
+    nav.push(Math.max(1, equity / TURBO_CAPITAL * ETF3_BASE));
+  }
+  paths[ETF3_SYM] = nav;
 }
 
 function tradeTick(at, anchor){ return Math.floor((at - anchor) / TICK_MS); }
@@ -365,7 +408,7 @@ function buildEffPaths(mkt, jr, anchor, ticks){
     // MKT/ACT sind reine Ableitungen ihrer Bestandteile – sie bekommen KEIN eigenes
     // Overlay (Direkt-Handel schiebt den Index nicht), sondern werden unten aus den
     // Effektiv-Kursen der Aktien neu berechnet, damit sie dem Markt folgen.
-    if(sym === ETF_SYM || sym === ETF2_SYM) continue;
+    if(isIndexSym(sym)) continue;
     const base = mkt.paths[sym], trs = bySym[sym], sqs = sqBySym[sym];
     if(!trs && !sqs){ eff[sym] = base; continue; }
     const all = (trs || []).concat(sqs || []);
@@ -395,6 +438,7 @@ function buildEffPaths(mkt, jr, anchor, ticks){
   // So erbt der Index den Impact seiner Aktien, ist selbst aber nicht handel-schiebbar.
   if(mkt.paths[ETF_SYM])  addEtfPath(eff, ticks);
   if(mkt.paths[ETF2_SYM]) addActivePath(eff, ticks);
+  if(mkt.paths[ETF3_SYM]) addTurboPath(eff, ticks, mkt.events);
   return {eff, squeezes};
 }
 
@@ -465,7 +509,7 @@ function replayRound(mkt, log, opt){
       for(const s in pos){
         const q = pos[s].qty;
         if(isDividendSym(s) && (q > 0 || expert)) pendingDiv += q * P(s, t) * divRate(s) * TICK_SCALE;
-        if(expert && s === ETF2_SYM && q > 0)     pendingDiv -= q * P(s, t) * EXPERT_ACT_HOLD * TICK_SCALE;
+        if(expert && (s === ETF2_SYM || s === ETF3_SYM) && q > 0) pendingDiv -= q * P(s, t) * EXPERT_ACT_HOLD * TICK_SCALE;
       }
       if(pendingDiv && t % DIV_PAYOUT === 0){
         if(Math.abs(pendingDiv) >= 0.005) cash += pendingDiv;
@@ -673,12 +717,13 @@ function careerMarket(careerSeed, e, carry, epochTicks){
   }
   addEtfPath(m.paths, epochTicks);      // Index aus den uebertragenen Aktien neu ableiten
   addActivePath(m.paths, epochTicks);
+  addTurboPath(m.paths, epochTicks, m.events);
   return m;
 }
 
 /* ===== Publish fuer den Worker-Pfad (im Browser harmlos-redundant) ===== */
 if(typeof globalThis === "object") Object.assign(globalThis, {
-  mulberry32, genMarket, addEtfPath, addActivePath,
+  mulberry32, genMarket, addEtfPath, addActivePath, addTurboPath,
   tradeTick, impactFactorAt, overlayAt, skewAt, findSqueezes, buildEffPaths,
   spreadAtTick, haltLeftAt, replayRound, oracleMaxPnl, botSuspicion,
   epochSeed, careerCarry, careerMarket,

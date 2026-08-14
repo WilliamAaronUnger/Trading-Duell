@@ -40,10 +40,31 @@ const ACTIVE_LEV = 3.0;            // Hebel auf die %-Abweichung des Korbs (~Vol
 const ACTIVE_FEE_PCT = 0.005;      // 0,5 % Ordergebühr (≈3× normal)
 // Korbgewichte: Wachstums-/Risiko-Werte stark über-, Dividendenwerte untergewichtet
 const ACTIVE_WEIGHTS = {SPCX:3, TSLA:2.5, RKLB:2, AMD:2, META:2, GOOGL:1.5, NVDA:1, AMZN:0.5, AAPL:0.5, MSFT:0.5};
-const defOf = sym => STOCK_DEFS[sym] || (sym === ETF_SYM ? ETF_DEF : sym === ETF2_SYM ? ETF2_DEF : undefined);
-const DISPLAY_SYMS = [...Object.keys(STOCK_DEFS), ETF_SYM, ETF2_SYM];
+/* ===== Wochenend-Aktion: „Wochenend-Turbo" (TRB) =====
+   Dritter, rein abgeleiteter Index – aber KEIN starrer Hebel, sondern der FONDS eines simulierten
+   aggressiven Star-Traders: er handelt mit `TURBO_CAPITAL` (1 Mio.) auf alle Aktien, ist dauerhaft
+   gehebelt long im Wachstumskorb und stockt auf jede angekündigte News gerichtet auf (Gier bei guten,
+   Abbau bei schlechten – long only, er shortet nicht). Der TRB-Kurs IST der Wert seines Fonds (NAV,
+   auf ETF3_BASE normiert). Die Simulation ist rein regelbasiert & deterministisch aus dem fertigen
+   Markt (Kurse + Events) → KEIN rnd()-Verbrauch, faire Parität; sie reagiert nur auf ANGEKÜNDIGTE
+   Infos (kein Blick in die Zukunft). NUR am Aktions-Wochenende handelbar (Client-Zeitfenster). */
+const ETF3_SYM = "TRB", ETF3_BASE = 100.00;
+const ETF3_DEF = {name:"Wochenend-Turbo", type:"active", start:ETF3_BASE, liq:1.0,
+                  char:"🔥 Wochenend-Turbo: Fonds eines aggressiven Star-Traders (1 Mio. Kapital) – jagt jede News gehebelt, riesige Chance & Risiko"};
+const TURBO_CAPITAL   = 1000000;  // Startkapital des Star-Traders (Flavor + NAV-Basis)
+const TURBO_BASE_LEV  = 3.0;      // Dauer-Long im Wachstumskorb (immer investiert, hoch gehebelt)
+const TURBO_EVENT_LEV = 2.2;      // gerichteter Zusatz-Einsatz je aktiver News (Aufstocken/Abbauen)
+const TURBO_LEV_CAP   = 7.0;      // Brutto-Hebel-Deckel (risikofreudig)
+const TURBO_ENTRY     = 8;        // steigt erst ein, wenn der News-Sprung schon läuft (jagt die Bewegung
+                                  // = REACT_TICKS) → oft am Hoch dabei, echtes zweiseitiges Risiko
+const TURBO_TAIL      = 10;       // hält ~10 Ticks über das Effekt-Ende hinaus → gibt im Fade wieder ab
+const TURBO_FROM = new Date(2026, 7, 14, 0, 0, 0).getTime();         // Fr 14.08.2026 00:00 (Monat 0-basiert: 7 = August)
+const TURBO_TO   = new Date(2026, 7, 16, 23, 59, 59, 999).getTime(); // So 16.08.2026 23:59:59 (Ende des Wochenendes)
+const isTurboActive = () => { const t = Date.now(); return t >= TURBO_FROM && t <= TURBO_TO; };
+const defOf = sym => STOCK_DEFS[sym] || (sym === ETF_SYM ? ETF_DEF : sym === ETF2_SYM ? ETF2_DEF : sym === ETF3_SYM ? ETF3_DEF : undefined);
+const DISPLAY_SYMS = [...Object.keys(STOCK_DEFS), ETF_SYM, ETF2_SYM, ...(isTurboActive() ? [ETF3_SYM] : [])];
 const FEE_PCT = 0.0015;                                  // 0,15 % Gebühr je Order (Normalfall)
-const feeRate = sym => sym === ETF2_SYM ? ACTIVE_FEE_PCT : FEE_PCT;   // Aktiv-Fonds teurer
+const feeRate = sym => (sym === ETF2_SYM || sym === ETF3_SYM) ? ACTIVE_FEE_PCT : FEE_PCT;   // Aktiv-Fonds/Turbo teurer
 const feeOf = (v, sym) => Math.round(v * feeRate(sym) * 100) / 100;   // auf Cent gerundet (keine Float-Drift)
 /* ===== Experten-Modus (IMPACT-PLAN.md): Tuning-Konstanten =====
    liq = Markttiefe je Wert (höher = träger; siehe liq-Trait in STOCK_DEFS). Alle
@@ -74,7 +95,7 @@ const DIV_PAYOUT = Math.max(1, Math.round(20000 / TICK_MS)); // Dividende wird a
 const isDividendSym = sym => { const d = defOf(sym); return !!d && (d.type === "dividend" || sym === ETF_SYM); };
 /* Index-Werte (MKT/ACT): reine Ableitungen ihrer Bestandteile – kein eigener
    Market-Impact (nicht handel-schiebbar, keine Blockorder-Slippage). */
-const isIndexSym = sym => sym === ETF_SYM || sym === ETF2_SYM;
+const isIndexSym = sym => sym === ETF_SYM || sym === ETF2_SYM || sym === ETF3_SYM;
 // Per-Tick-Dividendensatz eines Symbols (0 = zahlt nichts) – EINE Quelle für Accrual UND Anzeige
 const divRate = sym => { if(sym === ETF_SYM) return DIV_PCT_ETF;
   const d = defOf(sym); return d && d.type === "dividend" ? DIV_PCT * (d.divMult || 1) : 0; };
@@ -258,7 +279,8 @@ const GENERIC_MEGA = [
   {txt:"💥 MEGA: %NAME% schließt Jahrhundert-Partnerschaft – die Märkte rasten aus.", jump:+0.28, drift:+0.0008, dur:40},
   {txt:"💥 MEGA: Schock bei %NAME% – Großanleger steigt schlagartig aus.", jump:-0.13, drift:-0.0004, dur:40},
 ];
-const DEFAULT_FAVS = ["SPCX","MKT","NVDA","RKLB"]; // Standard-Favoriten der Watchlist (inkl. Markt-ETF)
+// Standard-Favoriten der Watchlist (inkl. Markt-ETF); am Aktions-Wochenende wird der Turbo prominent eingeblendet
+const DEFAULT_FAVS = isTurboActive() ? ["SPCX","TRB","MKT","RKLB"] : ["SPCX","MKT","NVDA","RKLB"];
 const DURATIONS = [5, 10, 15];
 const MODE_HINTS = {
   solo:   "Du spielst allein und misst dich an deinem eigenen Rekord.",
@@ -436,6 +458,8 @@ const TUT_STEPS = {
 if(typeof globalThis === "object") Object.assign(globalThis, {
   TICK_MS, TICK_SCALE, REACT_TICKS, ONLINE_API,
   STOCK_DEFS, ETF_SYM, ETF_BASE, ETF_DEF, ETF2_SYM, ETF2_BASE, ETF2_DEF,
+  ETF3_SYM, ETF3_BASE, ETF3_DEF, isTurboActive,
+  TURBO_CAPITAL, TURBO_BASE_LEV, TURBO_EVENT_LEV, TURBO_LEV_CAP, TURBO_ENTRY, TURBO_TAIL,
   ACTIVE_LEV, ACTIVE_FEE_PCT, ACTIVE_WEIGHTS, defOf, DISPLAY_SYMS,
   FEE_PCT, feeRate, feeOf, BLOCK_MIN_FRAC, IMPACT_BASE, IMPACT_CAP,
   IMPACT_RAMP_TICKS, IMPACT_FADE_TICKS, IMPACT_KEEP, CASH_PRESETS,

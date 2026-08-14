@@ -3266,7 +3266,7 @@ function genTutorialMarket(){
   const tips = [{tick:48, eventTick:64, sym:"RKLB", dir:1}];
   addEtfPath(paths, TUT_TICKS);    // damit price("MKT") auch im Tutorial existiert
   addActivePath(paths, TUT_TICKS); // ebenso price("ACT")
-  addTurboPath(paths, TUT_TICKS);  // und price("TRB"), falls das Aktions-Wochenende läuft
+  addTurboPath(paths, TUT_TICKS, events);  // und price("TRB"), falls das Aktions-Wochenende läuft
   return {paths, events, tips};
 }
 

@@ -1,5 +1,5 @@
 /* Trading Duell – Service Worker (offline-fähig) */
-const CACHE = "trading-duell-v81";
+const CACHE = "trading-duell-v82";
 const FILES = [
   "./",
   "./index.html",

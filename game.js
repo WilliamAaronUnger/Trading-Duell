@@ -1528,7 +1528,7 @@ function processTick(showPopup){
   for(const [sym, pos] of Object.entries(p.pos)){
     if(isDividendSym(sym) && (pos.qty > 0 || expert))
       p.pendingDiv = (p.pendingDiv || 0) + pos.qty * price(sym) * divRate(sym) * TICK_SCALE;
-    if(expert && (sym === ETF2_SYM || sym === ETF3_SYM) && pos.qty > 0)
+    if(expert && hasHoldCost(sym) && pos.qty > 0)
       p.pendingDiv = (p.pendingDiv || 0) - pos.qty * price(sym) * EXPERT_ACT_HOLD * TICK_SCALE;
   }
   if(p.pendingDiv && tickCount % DIV_PAYOUT === 0) payDividend(p, showPopup);
@@ -3266,7 +3266,7 @@ function genTutorialMarket(){
   const tips = [{tick:48, eventTick:64, sym:"RKLB", dir:1}];
   addEtfPath(paths, TUT_TICKS);    // damit price("MKT") auch im Tutorial existiert
   addActivePath(paths, TUT_TICKS); // ebenso price("ACT")
-  addTurboPath(paths, TUT_TICKS, events);  // und price("TRB"), falls das Aktions-Wochenende läuft
+  for(const sp of SPECIALS) deriveSpecial(sp, paths, TUT_TICKS, events);  // und price() der Specials, falls ein Aktions-Wochenende läuft
   return {paths, events, tips};
 }
 

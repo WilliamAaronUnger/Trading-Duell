@@ -226,9 +226,12 @@ function buildMarket(){
   if(mode === "room"){
     // Server streamt den Markt progressiv (verborgene Zukunft). Wir starten mit den
     // BEKANNTEN Eröffnungskursen (Tick 0 = defOf(sym).start, identisch zu genMarket)
-    // und hängen ab Tick 1 die Server-Scheiben an → kein Startloch.
+    // und hängen ab Tick 1 die Server-Scheiben an → kein Startloch. WICHTIG: ALLE
+    // Symbole vorinitialisieren, die genMarket liefert (auch inaktive Specials), damit
+    // keine Scheibe ein Symbol ohne Tick 0 anlegt (sonst um 1 Tick verschoben).
     market = {paths: {}, events: [], tips: []};
-    for(const s of DISPLAY_SYMS){ const d = defOf(s); market.paths[s] = [d ? d.start : 100]; }
+    const allSyms = [...Object.keys(STOCK_DEFS), ETF_SYM, ETF2_SYM, ...SPECIALS.map(sp => sp.sym)];
+    for(const s of allSyms){ const d = defOf(s); market.paths[s] = [d ? d.start : SPECIAL_BASE]; }
     revealedLen = 1; roomOver = false;
     return;
   }

@@ -180,8 +180,10 @@ async function marketSlice(db, code, rd, now, mt){
   const from = Math.max(0, (Number.isFinite(mt) ? mt : -1) + 1);
   const out = {from, to, paths: {}, events: [], tips: [], over: to >= ticks};
   if(to >= from){
+    // EXAKTE Werte streamen (nicht runden!) – sonst weicht das Client-P&L vom Server-Replay
+    // ab (Anti-Cheat-Parität) und ruhige Werte wie der Markt-ETF sehen treppig aus.
     for(const s in mkt.paths)
-      out.paths[s] = mkt.paths[s].slice(from, to + 1).map(v => Math.round(v * 100) / 100);
+      out.paths[s] = mkt.paths[s].slice(from, to + 1);
     out.events = (mkt.events || []).filter(e => e.tick >= from && e.tick <= to);
     out.tips   = (mkt.tips   || []).filter(t => t.tick >= from && t.tick <= to);
   }

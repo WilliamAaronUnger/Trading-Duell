@@ -21,8 +21,10 @@
    Design-Notizen:
    - EIN Aggregat-GET liefert alles (Mitglieder, Runde, Live-P&L, Ergebnisse, Wertung)
      → der Datenverkehr pro Gerät bleibt konstant, egal ob 2 oder 20 mitspielen.
-   - Seed-Geheimnis: der Seed einer Runde entsteht erst beim Start-Befehl und wird mit
-     bereits fixiertem startAt (+10 s) veröffentlicht – kein Vorspiel-Fenster.
+   - Seed-Geheimnis (v6): der Seed einer Runde bleibt AUSSCHLIESSLICH serverseitig. Statt den
+     Seed zu veröffentlichen (früher), rechnet der Server den Markt vorab (genMarket), cached ihn
+     und gibt den Kurs pro Poll nur bis zur Front (= jetzt) frei (marketSlice). So kennt kein
+     Gerät die Zukunft; alle Clients rendern dieselbe Front und laufen automatisch synchron.
    - Räume verfallen 24 h nach der letzten Aktivität (lastActive); Aufräumen beim Eröffnen.
    - v3 ersetzt die alte /game-API vollständig; deren Tabellen werden entsorgt. Alte
      App-Versionen fallen dadurch sauber auf ihren Offline-Modus zurück.
@@ -40,11 +42,15 @@
                                                    role "wall" umgeht das Spielerlimit)
      POST /room/{code}/role {token, role}       → {ok, role}        (player|wall; Limit-geprüft)
      POST /room/{code}/start {token, dur?, expert?, cash?}
-                                                → {n, startAt, seed, expert, cash} (nur Ersteller,
+                                                → {n, startAt, expert, cash} (nur Ersteller,
                                                    ≥2 Spieler, nicht während laufender Runde;
-                                                   dur wird neuer Standard; cash nur mit expert)
-     GET  /room/{code}?me={token}               → Aggregat {dur, curRound, members, round, pnls,
-                                                   results, scoreboard, trades?}; me = Herzschlag
+                                                   dur wird neuer Standard; cash nur mit expert;
+                                                   der Seed bleibt GEHEIM – kein Client bekommt ihn)
+     GET  /room/{code}?me={token}&mt={tick}     → Aggregat {dur, curRound, members, round, pnls,
+                                                   results, scoreboard, trades?, market?}; me = Herzschlag,
+                                                   mt = höchster Tick den der Client schon hat.
+                                                   market = progressive Kurs-Scheibe NUR bis „jetzt"
+                                                   {from, to, paths, events, tips, over} (verborgene Zukunft)
      PUT  /room/{code}/round/{n}/result/{p}?pnl=X → 201 {pnl, sus, bot}
                                                   (x-token, write-once, Body = JSON {res, log};
                                                    nur nach Rundenende; Server-Replay entscheidet)
@@ -111,6 +117,10 @@ async function ensureSchema(db){
     try{ await db.prepare(alter).run(); }catch(e){}
   await db.prepare(`CREATE TABLE IF NOT EXISTS roundPnl(
     code TEXT, n INTEGER, p INTEGER, v REAL, t INTEGER, PRIMARY KEY(code, n, p))`).run();
+  // Server-Kurs-Cache: der vorab gerechnete Markt einer Runde (JSON), einmal beim
+  // ersten Poll gefüllt, danach nur noch scheibenweise ausgeliefert (verborgene Zukunft).
+  await db.prepare(`CREATE TABLE IF NOT EXISTS roundMarket(
+    code TEXT, n INTEGER, market TEXT, PRIMARY KEY(code, n))`).run();
   schemaReady = true;
 }
 
@@ -147,6 +157,37 @@ async function scoreboard(db, code){
   return Object.values(sb);
 }
 
+/* Vorab gerechneter Markt einer Runde (aus dem geheimen Seed) – einmal berechnet und
+   in D1 gecached, danach nur noch geparst & gescheibt. Gibt {mkt, ticks} zurück. */
+async function roundMarket(db, code, rd){
+  const ticks = Math.round(rd.dur * 60000 / TICK_MS);
+  const row = await db.prepare("SELECT market FROM roundMarket WHERE code = ? AND n = ?")
+                      .bind(code, rd.n).first();
+  if(row && row.market) return {mkt: JSON.parse(row.market), ticks};
+  const mkt = genMarket(rd.seed >>> 0, ticks);           // dieselbe Engine wie Replay & App
+  try{
+    await db.prepare("INSERT INTO roundMarket(code, n, market) VALUES(?,?,?) ON CONFLICT(code, n) DO NOTHING")
+            .bind(code, rd.n, JSON.stringify(mkt)).run();
+  }catch(e){}                                            // Cache ist best-effort
+  return {mkt, ticks};
+}
+
+/* Kurs-Scheibe: gibt Preise/News NUR bis zur Enthüllungs-Front frei (= jetzt), nie die
+   Zukunft. `mt` = höchster Tick, den der Client schon hat (-1 = noch keiner). */
+async function marketSlice(db, code, rd, now, mt){
+  const {mkt, ticks} = await roundMarket(db, code, rd);
+  const to = Math.min(ticks, Math.floor((now - rd.startAt) / TICK_MS)); // Front (Tick-Index); <0 = noch nicht gestartet
+  const from = Math.max(0, (Number.isFinite(mt) ? mt : -1) + 1);
+  const out = {from, to, paths: {}, events: [], tips: [], over: to >= ticks};
+  if(to >= from){
+    for(const s in mkt.paths)
+      out.paths[s] = mkt.paths[s].slice(from, to + 1).map(v => Math.round(v * 100) / 100);
+    out.events = (mkt.events || []).filter(e => e.tick >= from && e.tick <= to);
+    out.tips   = (mkt.tips   || []).filter(t => t.tick >= from && t.tick <= to);
+  }
+  return out;
+}
+
 async function route(req, db){
   const url = new URL(req.url);
   const parts = url.pathname.split("/").filter(Boolean);
@@ -159,7 +200,7 @@ async function route(req, db){
     const body = await readJson(req);
     // verfallene Räume samt Anhang aufräumen
     const cut = now - TTL_MS;
-    for(const t of ["trades", "roundPnl", "roundResults", "rounds", "members"])
+    for(const t of ["trades", "roundPnl", "roundResults", "roundMarket", "rounds", "members"])
       await db.prepare(`DELETE FROM ${t} WHERE code IN (SELECT code FROM rooms WHERE lastActive < ?)`)
               .bind(cut).run();
     await db.prepare("DELETE FROM rooms WHERE lastActive < ?").bind(cut).run();
@@ -208,7 +249,11 @@ async function route(req, db){
       const rd = await db.prepare("SELECT n, dur, startAt, seed, expert, cash FROM rounds WHERE code = ? AND n = ?")
                          .bind(code, room.curRound).first();
       if(rd){
-        out.round = {n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed, expert: rd.expert, cash: rd.cash};
+        // Seed bleibt GEHEIM (nur serverseitig fürs Replay) – der Client bekommt keinen Seed mehr.
+        out.round = {n: rd.n, dur: rd.dur, startAt: rd.startAt, expert: rd.expert, cash: rd.cash};
+        // Progressive Kurs-Scheibe bis zur Front (verborgene Zukunft): der Client sendet `mt` = sein höchster Tick.
+        const mt = parseInt(url.searchParams.get("mt"), 10);
+        out.market = await marketSlice(db, code, rd, now, Number.isNaN(mt) ? -1 : mt);
         for(const r of (await db.prepare("SELECT p, v FROM roundPnl WHERE code = ? AND n = ?")
                                 .bind(code, rd.n).all()).results) out.pnls[r.p] = r.v;
         out.sus = {}; out.bot = {};
@@ -287,9 +332,9 @@ async function route(req, db){
     if(r.meta.changes !== 1) return err(409, "running"); // Doppel-Start im Rennen
     await db.prepare("UPDATE rooms SET curRound = ?, dur = ?, lastActive = ? WHERE code = ?")
             .bind(n, dur, now, code).run();
-    const rd = await db.prepare("SELECT n, dur, startAt, seed, expert, cash FROM rounds WHERE code = ? AND n = ?")
+    const rd = await db.prepare("SELECT n, dur, startAt, expert, cash FROM rounds WHERE code = ? AND n = ?")
                        .bind(code, n).first();
-    return json({n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed, expert: rd.expert, cash: rd.cash}, 201);
+    return json({n: rd.n, dur: rd.dur, startAt: rd.startAt, expert: rd.expert, cash: rd.cash}, 201);
   }
 
   // Blockorder melden: nur Spieler, nur während einer LAUFENDEN Expert-Runde.

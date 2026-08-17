@@ -78,6 +78,10 @@ let chartRaf = null, lastTickAt = 0; // für flüssige Chart-Animation (rAF-Loop
 /* Zeitanker der laufenden Runde: remote = gemeinsamer Lobby-Start (startAt),
    local = Rundenbeginn. Nur im Remote-Modus spielbestimmend. */
 let roundAnchor = 0;
+/* Room-Modus (v6): der Markt kommt PROGRESSIV vom Server (Kurse nur bis „jetzt",
+   verborgene Zukunft). revealedLen = Zahl der bisher enthüllten Ticks (Front = revealedLen-1);
+   roomOver = der Server hat die Runde als beendet gemeldet. */
+let revealedLen = 1, roomOver = false;
 
 /* Spielmodus: "solo" = Einzelspieler (eine Runde, nur für sich),
    "local" = Mehrspieler am gleichen Gerät (Pass & Play, beide nacheinander),
@@ -219,6 +223,15 @@ function buildMarket(){
   matchTicks = sandbox
     ? Math.round(60 * 60000 / TICK_MS)
     : Math.round(durationMin * 60000 / TICK_MS);
+  if(mode === "room"){
+    // Server streamt den Markt progressiv (verborgene Zukunft). Wir starten mit den
+    // BEKANNTEN Eröffnungskursen (Tick 0 = defOf(sym).start, identisch zu genMarket)
+    // und hängen ab Tick 1 die Server-Scheiben an → kein Startloch.
+    market = {paths: {}, events: [], tips: []};
+    for(const s of DISPLAY_SYMS){ const d = defOf(s); market.paths[s] = [d ? d.start : 100]; }
+    revealedLen = 1; roomOver = false;
+    return;
+  }
   market = genMarket(marketSeed == null ? gameCode : marketSeed, matchTicks);
 }
 
@@ -347,8 +360,7 @@ $("resumeBtn").onclick = () => {
   journal = []; effPaths = null;          // Journal kommt frisch über den Raum-Puls
   tradeLog = Array.isArray(snap.tradeLog) ? snap.tradeLog : [];
   if(snap.room){ room = snap.room; roomPhase = 'playing'; saveRoomState(); startRoomTimer(); }
-  matchTicks = Math.round(durationMin * 60000 / TICK_MS);
-  market = genMarket(marketSeed == null ? gameCode : marketSeed, matchTicks);
+  buildMarket();   // Room: leerer Progressiv-Markt (wird per Puls neu gestreamt); sonst aus Seed/Code
   players = snap.players;
   round = snap.round;
   if(wallClock()) startAt = snap.startAt;
@@ -600,9 +612,9 @@ function showRoomScreen(){
   startRoomTimer();
   roomTick();
 }
-function startRoomTimer(){
+function startRoomTimer(ms){
   clearInterval(roomTimer);
-  roomTimer = setInterval(roomTick, 2500);
+  roomTimer = setInterval(roomTick, ms || 2500); // Lobby ~2,5 s; laufende Runde ~1 s (feine Kurs-Scheiben)
 }
 function leaveRoom(msg){
   clearInterval(roomTimer); roomTimer = null;
@@ -669,10 +681,28 @@ $("roomStartBtn").onclick = async function(){
 
 /* Der eine Puls des Raums (~2,5 s): Herzschlag + Aggregat. Verteilt die Daten je nach
    Phase: Raum-Ansicht, Runden-Erkennung, Live-Rennen, Ranglisten-Nachzügler. */
+/* Progressive Kurs-Scheibe vom Server anhängen (verborgene Zukunft). Die Scheibe ist
+   kontinuierlich (from = revealedLen); eine evtl. Überlappung durch überholende Polls
+   wird übersprungen. Events/Tips werden nur einmalig (tick >= revealedLen) eingemischt. */
+function applyMarketSlice(ms){
+  if(!ms || !market || !market.paths || ms.to == null || ms.to < revealedLen) return;
+  const skip = Math.max(0, revealedLen - ms.from);          // schon vorhandene Ticks überspringen
+  for(const s in ms.paths){
+    const arr = market.paths[s] || (market.paths[s] = []);
+    const src = ms.paths[s];
+    for(let i = skip; i < src.length; i++) arr.push(src[i]);
+  }
+  for(const e of (ms.events || [])) if(e.tick >= revealedLen) market.events.push(e);
+  for(const t of (ms.tips   || [])) if(t.tick >= revealedLen) market.tips.push(t);
+  revealedLen = ms.to + 1;
+  if(ms.over) roomOver = true;
+}
+
 async function roomTick(){
   if(!room) return;
   let st;
-  try{ st = await apiJson("/room/" + room.code + "?me=" + room.token); }
+  const mtq = (mode === "room" && roomPhase === "playing") ? "&mt=" + (revealedLen - 1) : "";
+  try{ st = await apiJson("/room/" + room.code + "?me=" + room.token + mtq); }
   catch(e){
     if(String(e && e.message).includes("404")) leaveRoom("Der Raum ist abgelaufen – bitte einen neuen eröffnen.");
     return; // kurzer Aussetzer: nächster Puls
@@ -681,6 +711,9 @@ async function roomTick(){
   roomState = st;
   roomSus = st.sus || {};   // 🤨-Verdachts-Flags der laufenden Runde (Server-Orakel-Check)
   roomBot = st.bot || {};   // 🤖-Verdachts-Flags (Server-Timing-Heuristik)
+  // Progressive Kurs-Scheibe anhängen (nur als aktiver Spieler in laufender Runde) –
+  // VOR dem Expert-Journal, das die Effektiv-Pfade aus dem Basis-Kurs neu ableitet.
+  if(mode === "room" && roomPhase === "playing" && !over) applyMarketSlice(st.market);
   const rd = st.round;
   /* Expert-Runde: Blockorder-Journal übernehmen. Neue Einträge landen als Meldung im
      Feed; die Effektiv-Pfade werden neu aufgebaut (Wirkung erst REACT_TICKS nach dem
@@ -701,7 +734,7 @@ async function roomTick(){
   if(roomPhase === "playing"){
     if(room.role === "player" && rd && !over && players[round]){
       roomTickN++;
-      if(roomTickN % 2 === 0){ // ~alle 5 s den eigenen Stand melden
+      if(roomTickN % 5 === 0){ // ~alle 5 s den eigenen Stand melden (Poll läuft in der Runde ~1 s)
         const own = totalOf(players[round]) - START_CASH;
         await api("/room/" + room.code + "/round/" + (room.played || rd.n) + "/pnl/" + room.p,
             {method: "PUT", body: JSON.stringify({pnl: Math.round(own * 100) / 100}),
@@ -710,29 +743,17 @@ async function roomTick(){
     }
     renderRace(st);
   }
-  // Leinwand-Rolle: Großbild an, solange eine Runde läuft (inkl. Countdown-Fenster)
-  if(room.role === "wall" && rd){
-    const nw = Date.now();
-    const runningW = nw >= rd.startAt - 8000 && nw < rd.startAt + rd.dur * 60000;
-    if(runningW) ensureWall(rd);
-    else if(wallOn) stopWall();
-    if(wallOn){
-      // Expert-Runde: Journal in Effektiv-Pfade + Squeeze-Liste übersetzen
-      if(rd.expert && st.trades && st.trades.length !== wallJournal.length){
-        wallJournal = st.trades;
-        const res = buildEffPaths(wallMarket, wallJournal, wallInfo.startAt, wallTicksTotal());
-        wallEff = res.eff; wallSqueezes = res.squeezes;
-      }
-      renderWallBoard(st);
-    }
-  }else if(wallOn) stopWall();
+  // Leinwand-Rolle: im Live-Modus (v6) kommt der Markt gestreamt und die Leinwand kann
+  // ihn (noch) nicht selbst aufbauen (Seed ist geheim) → Phase 2. Vorerst deaktiviert;
+  // die Leinwand-Rolle bleibt auf dem Raum-Screen (Mitglieder + Abend-Wertung).
+  if(wallOn) stopWall();
   // Runden-Rangliste offen: eingetroffene Ergebnisse der Mitspieler nachladen
   if(rankRoom && st.results){
     let added = false;
     for(const p in st.results){
       if(rankResults[p]) continue;
       const o = unpackResult(st.results[p]);
-      if(o && !o.wrongGame && (o.seed === undefined || o.seed === (marketSeed >>> 0))){
+      if(o && !o.wrongGame && (o.seed === undefined || o.seed === ((marketSeed == null ? gameCode : marketSeed) >>> 0))){
         rankResults[p] = o; added = true;
       }
     }
@@ -1049,8 +1070,8 @@ function startRoomRound(rd){
   tradeLog = []; submitFail = false;                     // frisches Anti-Cheat-Log je Runde
   durationMin = rd.dur;
   gameCode = +room.code;          // Anzeige + Payload-Prüfung laufen über den Raum-Code
-  marketSeed = rd.seed >>> 0;     // der geheime Seed der Runde
-  buildMarket();
+  marketSeed = null;              // der Seed bleibt GEHEIM auf dem Server – der Markt kommt gestreamt
+  buildMarket();                  // legt den leeren Progressiv-Markt an (revealedLen = 1)
   players = [newPlayer(room.name || ("Spieler " + room.p),
                        room.p === 1 ? "var(--p1)" : "var(--p2)")];
   startAt = rd.startAt;
@@ -1232,7 +1253,7 @@ $("rematchBtn").onclick = () => {
 
 function startRound(r){
   $("roomScreen").classList.remove("show");
-  if(mode === "room") roomPhase = "playing";
+  if(mode === "room"){ roomPhase = "playing"; startRoomTimer(1000); roomTick(); } // schneller pollen + sofort erste Kurs-Scheibe holen
   round = r;
   tickCount = 0; paused = false; over = false; newsPaused = false; lastNewsTick = -999;
   clearInterval(preTimer); preTimer = null; $("preStart").classList.remove("show");
@@ -1865,14 +1886,19 @@ function tick(){
 
   if(wallClock()){
     /* Weltzeit-Anker: Spielzeit hängt nur an der Uhr, nie an Pausen oder
-       Render-Aussetzern. Beide Geräte (gleicher startAt aus der Lobby)
-       bleiben dadurch dauerhaft synchron; nach Tab-Schlaf wird aufgeholt. */
-    const target = Math.min(matchTicks, Math.floor((Date.now() - roundAnchor) / TICK_MS));
+       Render-Aussetzern; nach Tab-Schlaf wird aufgeholt.
+       ROOM (v6): der Kurs kommt gestreamt – die Spielzeit folgt der vom Server
+       enthüllten Front (revealedLen-1), NICHT der lokalen Uhr. So laufen alle
+       Geräte automatisch synchron und niemand kennt die Zukunft. remote (offline)
+       bleibt bei der gemeinsamen Lobby-Uhr. */
+    const target = mode === "room"
+      ? Math.min(matchTicks, revealedLen - 1)
+      : Math.min(matchTicks, Math.floor((Date.now() - roundAnchor) / TICK_MS));
     while(tickCount < target){
       tickCount++;
       processTick(tickCount === target);
     }
-    if(tickCount >= matchTicks){ endRound(); return; }
+    if(tickCount >= matchTicks || (mode === "room" && roomOver && tickCount >= revealedLen - 1)){ endRound(); return; }
     saveSnapshot("play");
     renderAll();
     return;
@@ -2722,7 +2748,7 @@ function endRound(){
   clearInterval(timer);
   stopChartLoop();
   stopRace();
-  if(mode === "room") roomPhase = "idle";
+  if(mode === "room"){ roomPhase = "idle"; startRoomTimer(2500); } // zurück auf den ruhigen Lobby-Takt
   if(sandbox) matchTicks = tickCount; else tickCount = matchTicks;
   const p = players[round];
   payDividend(p, false); // letzte aufgelaufene Dividende noch auszahlen

@@ -38,7 +38,14 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   const call = (method, p, body, headers) =>
     worker.fetch(new Request("https://api.test" + p, {method, body, headers}), env);
   const jbody = o => JSON.stringify(o);
-  const agg = async (code, me) => (await call("GET", "/room/" + code + (me ? "?me=" + me : ""))).json();
+  const agg = async (code, me, mt) => {
+    const q = [];
+    if(me) q.push("me=" + me);
+    if(mt !== undefined) q.push("mt=" + mt);
+    return (await call("GET", "/room/" + code + (q.length ? "?" + q.join("&") : ""))).json();
+  };
+  // Der Seed ist jetzt GEHEIM (nicht mehr in der Antwort) – der Test liest ihn zum Nachrechnen aus D1.
+  const seedOf = (code, n) => db._db.prepare("SELECT seed FROM rounds WHERE code = ? AND n = ?").get(code, n).seed;
 
   // ---- Raum eröffnen ----
   let r = await call("POST", "/room", jbody({name: "Anna"}));
@@ -77,10 +84,25 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   ok(r.status === 201, "Runde 1 startet");
   const rd1 = await r.json();
   ok(rd1.n === 1 && rd1.dur === 10 && rd1.startAt >= t0 + 9000 && rd1.startAt <= t0 + 11500, "Runde 1: Standard-Dauer, ~10 s Puffer");
-  ok(Number.isInteger(rd1.seed) && rd1.seed >= 0 && rd1.seed <= 0xFFFFFFFF, "frischer uint32-Seed");
+  ok(rd1.seed === undefined && Number.isInteger(seedOf(R.code, 1)) && seedOf(R.code, 1) <= 0xFFFFFFFF,
+     "frischer uint32-Seed – serverseitig gespeichert, NICHT in der Antwort");
   st = await agg(R.code);
-  ok(st.curRound === 1 && st.round.n === 1 && st.round.seed === rd1.seed, "Aggregat zeigt die laufende Runde samt Seed");
+  ok(st.curRound === 1 && st.round.n === 1 && st.round.seed === undefined, "Aggregat zeigt die laufende Runde OHNE Seed");
   ok((await call("POST", `/room/${R.code}/start`, jbody({token: R.token}))).status === 409, "Start während laufender Runde → 409");
+
+  // ---- Kurs-Streaming: der Server gibt Kurse NUR bis zur Front frei (verborgene Zukunft) ----
+  st = await agg(R.code);
+  ok(st.market && st.market.to < 0 && Object.keys(st.market.paths).length === 0,
+     "vor Rundenstart (startAt in Zukunft): noch keine Kurse enthüllt");
+  db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 30000, R.code); // 30 s laufen
+  st = await agg(R.code);
+  const mFront = st.market;
+  ok(mFront.to >= 28 && mFront.to <= 32, "Front ~30 Ticks nach ~30 s");
+  ok(mFront.paths.SPCX.length === mFront.to + 1, "Pfad-Slice reicht genau bis zur Front (Tick 0..to)");
+  ok(mFront.paths.SPCX.length < Math.round(rd1.dur * 60000 / TICK_MS) && !mFront.over,
+     "Zukunft NICHT enthalten (Slice kürzer als die volle Runde)");
+  const stDelta = await agg(R.code, undefined, mFront.to);
+  ok(stDelta.market.from === mFront.to + 1, "mt-Delta: liefert nur neue Ticks ab Front+1");
 
   // ---- Live-P&L je Runde ----
   ok((await call("PUT", `/room/${R.code}/round/1/pnl/1`, jbody({pnl: 12.345}), {"x-token": R.token})).status === 200, "eigenen P&L melden");
@@ -95,7 +117,7 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   const res6 = s => "SPCX6." + Buffer.from(s).toString("base64");
   const rbody = (s, log) => JSON.stringify({res: res6(s), log});
   const T1 = Math.round(rd1.dur * 60000 / TICK_MS);
-  const mkt1 = genMarket(rd1.seed >>> 0, T1);           // Test rechnet mit derselben Engine
+  const mkt1 = genMarket(seedOf(R.code, 1) >>> 0, T1);  // Test rechnet mit derselben Engine (Seed aus D1)
   const repOpt = {ticks: T1, cash: 25000, expert: false, room: true, journal: [], anchor: 0};
   const logA = [[2, "SPCX", "buy", 10, 0], [200, "SPCX", "sell", 10, 0]];
   const pnlA = replayRound(mkt1, logA, repOpt).pnl;
@@ -132,13 +154,13 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   r = await call("POST", `/room/${R.code}/start`, jbody({token: R.token, dur: 5}));
   const rd2 = await r.json();
   ok(r.status === 201 && rd2.n === 2 && rd2.dur === 5, "Runde 2 mit neuer Dauer 5");
-  ok(rd2.seed !== rd1.seed, "Runde 2 hat eigenen Seed");
+  ok(seedOf(R.code, 2) !== seedOf(R.code, 1), "Runde 2 hat eigenen Seed");
   st = await agg(R.code);
   ok(st.dur === 5, "gewählte Dauer wird neuer Raum-Standard");
   ok(Object.keys(st.results).length === 0 && Object.keys(st.pnls).length === 0, "Aggregat zeigt nur die AKTUELLE Runde (leer)");
   db._db.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 6*60000, R.code);
   const T2 = Math.round(rd2.dur * 60000 / TICK_MS);
-  const mkt2 = genMarket(rd2.seed >>> 0, T2);
+  const mkt2 = genMarket(seedOf(R.code, 2) >>> 0, T2);
   const repOpt2 = {ticks: T2, cash: 25000, expert: false, room: true, journal: [], anchor: 0};
   const logA2 = [[4, "MKT", "buy", 30, 0]];                       // hält bis zur Schlussauktion (+ Dividende)
   const pnlA2 = replayRound(mkt2, logA2, repOpt2).pnl;

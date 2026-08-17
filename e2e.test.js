@@ -80,13 +80,14 @@ const noop = () => {};
     // ================= RAUM: Geräte-Simulation =================
     const stash = () => ({mode, room: room && Object.assign({}, room), roomState, roomPhase, roomTickN, roomDurPick,
                           marketSeed, gameCode, durationMin, market, startAt, players, soloP,
-                          rankResults, rankRoom, over, round, matchTicks,
+                          rankResults, rankRoom, over, round, matchTicks, revealedLen, roomOver,
                           expert, journal, effPaths, cash: START_CASH,
                           _rk: localStorage.getItem("trading-duell-room")});
     const restore = c => { ({mode, roomState, roomPhase, roomTickN, roomDurPick,
                              marketSeed, gameCode, durationMin, market, startAt, players, soloP,
                              rankResults, rankRoom, over, round, matchTicks} = c);
       room = c.room && Object.assign({}, c.room);
+      revealedLen = c.revealedLen == null ? 1 : c.revealedLen; roomOver = !!c.roomOver;
       expert = !!c.expert; journal = c.journal || []; effPaths = c.effPaths || null;
       START_CASH = c.cash === undefined ? 25000 : c.cash;
       if(c._rk == null) localStorage.removeItem("trading-duell-room");
@@ -103,6 +104,10 @@ const noop = () => {};
     out["Raum: allein → kein Start-Bereich, Warte-Hinweis"] =
       $id("roomStartField").style.display === "none" && $id("roomWaitHint").style.display === "";
     const RC = room.code;
+    // v6: der Seed ist GEHEIM (nicht mehr im Client) – der Test liest ihn aus D1 und
+    // rekonstruiert den „wahren" Markt, um Trade-Logs zu bauen & Replays zu prüfen.
+    const roundRow = n => globalThis.__sq.prepare("SELECT seed, dur FROM rounds WHERE code = ? AND n = ?").get(RC, n);
+    const trueMkt = n => { const r = roundRow(n); return genMarket(r.seed >>> 0, Math.round(r.dur * 60000 / TICK_MS)); };
     const A = stash();
 
     // --- Ben tritt bei (eigenes Gerät) ---
@@ -132,18 +137,17 @@ const noop = () => {};
     out["Raum: Start-Bereich da (2 Spieler, Leinwand zählt nicht)"] = $id("roomStartField").style.display === "";
     roomDurPick = 5;
     await $id("roomStartBtn").onclick();
-    out["Runde 1: Countdown, Markt aus geheimem Seed, Dauer 5"] =
+    out["Runde 1: Countdown, KEIN Seed im Client (Markt wird gestreamt), Dauer 5"] =
       roomPhase === "countdown" && room.played === 1 && durationMin === 5 &&
-      marketSeed !== null && market !== null && startAt > Date.now();
-    const seed1 = marketSeed, path1 = JSON.stringify(market.paths.SPCX.slice(0, 40));
-    out["Runde 1: Seed ≠ Raum-Code (Vorspiel-Schutz)"] = marketSeed !== (+RC >>> 0);
+      marketSeed === null && market !== null && revealedLen === 1 && startAt > Date.now();
+    out["Runde 1: Server-Seed ≠ Raum-Code (Vorspiel-Schutz)"] = (roundRow(1).seed >>> 0) !== (+RC >>> 0);
     const A2 = stash();
 
-    // --- Ben erkennt die Runde über den Puls ---
+    // --- Ben erkennt die Runde über den Puls (leerer Progressiv-Markt, Kurse folgen) ---
     restore(B);
     await roomTick();
-    out["Runde 1: Ben automatisch dabei – gleicher Seed, gleicher Markt"] =
-      room.played === 1 && marketSeed === seed1 && JSON.stringify(market.paths.SPCX.slice(0, 40)) === path1;
+    out["Runde 1: Ben automatisch dabei (Progressiv-Markt, noch keine Kurse)"] =
+      room.played === 1 && marketSeed === null && revealedLen === 1;
     const B2 = stash();
 
     // --- Leinwand bleibt draußen; Runde "läuft" → Live-Stand ---
@@ -151,31 +155,27 @@ const noop = () => {};
     await roomTick();
     out["Runde 1: Leinwand bleibt im Raum"] = roomPhase === "idle" && (room.played || 0) === 0;
     globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 20000, RC);
-    restore(A2); roomPhase = "playing"; round = 0; over = false; roomTickN = 1; // (im Browser setzt startRound das)
-    await roomTick(); // roomTickN→2: meldet eigenen P&L und rendert das Rennen
+    restore(A2); roomPhase = "playing"; round = 0; over = false; roomTickN = 4; // (im Browser setzt startRound das)
+    await roomTick(); // streamt die Kurs-Front (~20 Ticks), meldet P&L, rendert das Rennen
+    out["Streaming: Kurse bis zur Front enthüllt (~20 Ticks)"] =
+      revealedLen >= 18 && revealedLen <= 24 && market.paths.SPCX.length === revealedLen;
+    out["Streaming: Zukunft verborgen (Front < ganze Runde)"] = revealedLen < matchTicks;
+    const frontALen = revealedLen, frontA = JSON.stringify(market.paths.SPCX.slice(0, frontALen));
     out["Rennen: Chips gerendert (Anna + Ben)"] = (($id("raceRow").innerHTML || "").match(/race-chip/g) || []).length === 2;
     const A3 = stash();
-    restore(B2); roomPhase = "playing"; round = 0; over = false; roomTickN = 1;
+    restore(B2); roomPhase = "playing"; round = 0; over = false; roomTickN = 4;
     players[0].cash += 150; // Ben liegt vorn
-    await roomTick();
+    await roomTick(); // Ben streamt dieselbe Front vom Server
+    out["Streaming: beide Geräte sehen exakt dieselbe Front (synchron)"] =
+      JSON.stringify(market.paths.SPCX.slice(0, frontALen)) === frontA;
     const B3 = stash();
     restore(C);
     await roomTick();
     const liveHtml = $id("roomLive").innerHTML || "";
     out["Leinwand: Live-Stand sichtbar, Ben vorn"] = $id("roomLiveField").style.display === "" &&
       liveHtml.indexOf("Ben") >= 0 && liveHtml.indexOf("Ben") < liveHtml.indexOf("Anna");
-    // Großbild (Phase 3): eigener Markt aus dem Runden-Seed, Board, News, Exit
-    out["Großbild: an, richtige Runde, Markt aus Seed"] = wallOn === true && wallRoundN === 1 &&
-      !!wallMarket && JSON.stringify(wallMarket.paths.SPCX.slice(0, 40)) === path1;
-    out["Großbild: Rangliste zeigt Ben vorn"] = (($id("wallBoard").innerHTML || "").indexOf("Ben") >= 0) &&
-      ($id("wallBoard").innerHTML || "").indexOf("Ben") < ($id("wallBoard").innerHTML || "").indexOf("Anna");
-    out["Großbild: Zeit + Fokus gerendert"] = ($id("wallTime").textContent || "").indexOf(":") > 0 &&
-      DISPLAY_SYMS.includes($id("wallSym").textContent);
-    $id("wallExit").onclick();
-    out["Großbild: Exit schließt (für diese Runde)"] = wallOn === false;
-    await roomTick();
-    out["Großbild: bleibt nach Exit zu (dismissed)"] = wallOn === false;
-    wallDismissed = 0; // fürs weitere Testgeschehen zurücksetzen
+    // Leinwand v6: im Live-Modus (noch) deaktiviert – der Markt streamt noch nicht auf die Leinwand (Phase 2)
+    out["Leinwand: im Live-Modus (noch) deaktiviert"] = wallOn === false;
 
     // --- Runde 1 endet: Ergebnisse (mit Trade-Log!) → Server-Replay → Rangliste + Wertung ---
     // Gewinnstrecke deterministisch aus dem Pfad: globales Min, danach Max
@@ -199,9 +199,10 @@ const noop = () => {};
     globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 6*60000, RC);
     restore(A3); roomPhase = "idle";
     const T1r = matchTicks;
-    const bt1 = bestTrade(market, T1r);
+    const mkt1 = trueMkt(1);                 // Log/Replay gegen den „wahren" Markt (Client hat nur die Front)
+    const bt1 = bestTrade(mkt1, T1r);
     const logA1 = [[bt1.b, bt1.sym, "buy", bt1.qty, 0], [bt1.s, bt1.sym, "sell", bt1.qty, 0]];
-    const pnlA1 = replayRound(market, logA1, {ticks: T1r, cash: 25000, expert: false, room: true, journal: [], anchor: 0}).pnl;
+    const pnlA1 = replayRound(mkt1, logA1, {ticks: T1r, cash: 25000, expert: false, room: true, journal: [], anchor: 0}).pnl;
     out["Anti-Cheat: konstruierter Gewinn-Log ist positiv"] = pnlA1 > 0;
     // erfundenes Ergebnis (Log passt nicht zur Zahl) → Server lehnt hart ab
     out["Anti-Cheat: erfundenes P&L → 422"] = await api("/room/" + RC + "/round/1/result/1?pnl=99999",
@@ -230,17 +231,19 @@ const noop = () => {};
     globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 1").run(Date.now() - 6*60000, RC);
     roomDurPick = 15;
     await $id("roomStartBtn").onclick();
-    out["Runde 2: Dauer 15, frischer Seed"] = room.played === 2 && durationMin === 15 && marketSeed !== seed1;
+    out["Runde 2: Dauer 15, frischer (geheimer) Seed"] =
+      room.played === 2 && durationMin === 15 && marketSeed === null && (roundRow(2).seed >>> 0) !== (roundRow(1).seed >>> 0);
     const A5 = stash();
     restore(B3); roomPhase = "idle";
     await roomTick();
-    out["Runde 2: Ben wieder automatisch dabei"] = room.played === 2 && marketSeed === A5.marketSeed;
+    out["Runde 2: Ben wieder automatisch dabei"] = room.played === 2 && marketSeed === null;
     // Runde 2 auslaufen lassen; diesmal gewinnt Ben (echtes Log), Anna reicht 0 ein
     globalThis.__sq.prepare("UPDATE rounds SET startAt = ? WHERE code = ? AND n = 2").run(Date.now() - 16*60000, RC);
     const T2r = matchTicks;
-    const bt2 = bestTrade(market, T2r);
+    const mkt2 = trueMkt(2);
+    const bt2 = bestTrade(mkt2, T2r);
     const logB2 = [[bt2.b, bt2.sym, "buy", bt2.qty, 0], [bt2.s, bt2.sym, "sell", bt2.qty, 0]];
-    const pnlB2 = replayRound(market, logB2, {ticks: T2r, cash: 25000, expert: false, room: true, journal: [], anchor: 0}).pnl;
+    const pnlB2 = replayRound(mkt2, logB2, {ticks: T2r, cash: 25000, expert: false, room: true, journal: [], anchor: 0}).pnl;
     players = [newPlayer("Ben", "var(--p2)")]; players[0].result = {pnl: pnlB2, total: 25000 + pnlB2}; soloP = players[0];
     tradeLog = logB2;
     roomPhase = "idle";
@@ -268,6 +271,9 @@ const noop = () => {};
     startAt = rd3.startAt; roundAnchor = startAt;
     roomPhase = "playing"; round = 0; over = false; roomTickN = 1;
     tickCount = 20; matchTicks = Math.round(5 * 60000 / TICK_MS);
+    // Expert-Impact-Mathematik (Slippage/effPaths/Parität) gegen den VOLLEN wahren Markt prüfen –
+    // der Streaming-Transport ist in Runden 1/2 abgedeckt; hier zählt die Impact-Rechnung.
+    market = trueMkt(3); revealedLen = matchTicks + 1; roomOver = true;
     // Anna feuert eine Blockorder (Max-Kauf = volles Kapital ≥ 20 %-Schwelle)
     selected = "SPCX"; qtyMode = "max";
     trade("buy");
@@ -300,9 +306,10 @@ const noop = () => {};
     restore(B3); roomPhase = "idle"; room.played = 2; market = null; effPaths = null; journal = [];
     await roomTick();          // erkennt Runde 3 (startRoomRound)
     roomPhase = "playing"; round = 0; over = false; roomTickN = 1; tickCount = 20;
-    await roomTick();          // holt das Journal
+    market = trueMkt(3); revealedLen = matchTicks + 1; roomOver = true; // gleicher voller Markt wie Anna
+    await roomTick();          // holt das Journal → Effektivkurse
     out["Expert: Ben in Runde 3 – gleiche Regeln, gleicher Effektivkurs"] =
-      expert === true && START_CASH === 50000 && marketSeed === AE.marketSeed &&
+      expert === true && START_CASH === 50000 && marketSeed === null &&
       !!effPaths && JSON.stringify(effPaths.SPCX.slice(0, 120)) === effA;
     restore(AE); roomPhase = "idle"; over = true;
 

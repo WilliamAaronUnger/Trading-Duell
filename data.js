@@ -49,8 +49,8 @@ const ACTIVE_WEIGHTS = {SPCX:3, TSLA:2.5, RKLB:2, AMD:2, META:2, GOOGL:1.5, NVDA
    `kind:"fund"` = simulierter Star-Trader (cfg.dir +1 long / −1 Bär), reagiert auf angekündigte
    News, gehebelt, Gewinnbeteiligung; `kind:"meme"` = Hype-Wert mit Pump-and-Dump. */
 const SPECIAL_BASE = 100.00;
-const SPECIAL_FROM = new Date(2026, 7, 14, 0, 0, 0).getTime();          // Fr 14.08.2026 00:00 (Monat 0-basiert: 7 = August)
-const SPECIAL_TO   = new Date(2026, 7, 16, 23, 59, 59, 999).getTime();  // So 16.08.2026 23:59:59 (Ende des Wochenendes)
+const SPECIAL_FROM = new Date(2026, 8, 11, 0, 0, 0).getTime();          // Fr 11.09.2026 00:00 (Monat 0-basiert: 8 = September)
+const SPECIAL_TO   = new Date(2026, 8, 13, 23, 59, 59, 999).getTime();  // So 13.09.2026 23:59:59 (Ende des Wochenendes)
 const SPECIALS = [
   { id:"turbo", sym:"TRB", kind:"fund", from:SPECIAL_FROM, to:SPECIAL_TO,
     def:{name:"Star-Trader-Fonds", type:"active", start:SPECIAL_BASE, liq:1.0,

@@ -64,6 +64,12 @@ const SPECIALS = [
     def:{name:"Meme-Aktie", type:"active", start:SPECIAL_BASE, liq:1.0,
          char:"🚀 Nur am Wochenende: Hype-Wert mit Pump-and-Dump – explodiert auf Schlagzeilen, stürzt genauso brutal ab. Reines Casino"},
     cfg:{kick:0.03, decay:0.85, megaMult:3, hypeGain:1, mom:0.05, look:15, revert:0.02, beta:1, maxTick:0.06} },
+  { id:"ai", sym:"HAL", kind:"ai", from:SPECIAL_FROM, to:SPECIAL_TO,
+    def:{name:"Halluzinet AI", type:"active", start:SPECIAL_BASE, liq:1.0,
+         char:"🤖 Nur am Wochenende: Die Haus-KI liest jede News in Sekunden und der Kurs springt sofort – aber rund ein Drittel deutet sie völlig falsch. Dann entschuldigt sie sich. Brutal."},
+    cfg:{basket:{NVDA:4, AMD:2.5, GOOGL:2, MSFT:2, META:1.5, TSLA:1},
+         entry:2, ramp:3, kick:0.045, megaMult:2.5, halluP:0.32, shame:0.6, bonus:0.5,
+         beta:1.6, burn:0.00025, maxTick:0.05} },
 ];
 const specialBySym = {}; for(const _s of SPECIALS) specialBySym[_s.sym] = _s;
 const activeSpecials = () => { const t = Date.now(); return SPECIALS.filter(s => t >= s.from && t <= s.to); };

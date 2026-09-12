@@ -370,10 +370,61 @@ function addMemePath(paths, ticks, events, sym, cfg){
   paths[sym] = arr;
 }
 
+/* KI-Special (kind:"ai") = Aktie einer KI-Firma, deren Kurs die hauseigene KI selbst
+   bewegt. Sie liest jede Schlagzeile SOFORT (ab cfg.entry Ticks, also deutlich vor der
+   echten Kursreaktion nach REACT_TICKS) und der Markt preist ihre Einschätzung
+   umgehend ein – die Aktie läuft dem Rest des Marktes voraus.
+   Der Twist: die KI halluziniert. Rund cfg.halluP aller News deutet sie mit FALSCHEM
+   Vorzeichen, völlig überzeugt. Wenn der echte Effekt einschlägt, fliegt das auf: die
+   Fehldeutung wird mit cfg.shame Aufschlag zurückgedreht („Entschuldigung, Sie haben
+   recht"), ein Treffer wird mit cfg.bonus nachgekauft. Dazu frisst das Training
+   laufend Geld (cfg.burn je Tick) – Halten kostet, gehandelt wird die Bewegung.
+   Ob halluziniert wird, entscheidet ein Hash der Event-Daten → deterministisch, KEIN
+   rnd(), faire Parität. Kein Zukunftsblick: früheste Reaktion ist e.tick+cfg.entry,
+   also nach der Meldung. */
+const aiHash01 = n => {                       // deterministischer Hash → [0,1), kein PRNG-Verbrauch
+  let x = Math.imul(n ^ 0x9e3779b9, 2654435761) >>> 0;
+  x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0; x ^= x >>> 13;
+  return (x >>> 0) / 4294967296;
+};
+const aiSymCode = s => { let h = 0; for(let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; };
+function aiImpulse(arr, start, n, total){     // Bewegung über n Ticks verteilen (Kurve statt Spike)
+  const per = total / n;
+  for(let k = 0; k < n; k++){ const t = start + k; if(t >= 0 && t < arr.length) arr[t] += per; }
+}
+function addAiPath(paths, ticks, events, sym, cfg){
+  const W = cfg.basket;
+  let wsum = 0; for(const s in W) if(paths[s]) wsum += W[s];
+  if(!wsum) wsum = 1;
+  const basket = t => { let acc = 0; for(const s in W){ const p = paths[s]; if(p) acc += W[s] * (p[t] / STOCK_DEFS[s].start); } return acc / wsum; };
+  const imp = new Array(Math.max(0, ticks | 0) + 2).fill(0);
+  const evs = (events || []).filter(e => e && e.ev && e.ev.t);
+  for(const e of evs){
+    const d = Math.sign(e.ev.jump || e.ev.drift || 0) || 1;
+    const wrong = aiHash01(Math.imul(e.tick + 1, 1103515245) + aiSymCode(String(e.ev.t))) < cfg.halluP;
+    const view = wrong ? -d : d;                                  // Einschätzung der KI (ggf. halluziniert)
+    const mag = cfg.kick * (e.mega ? cfg.megaMult : 1);
+    aiImpulse(imp, e.tick + cfg.entry, cfg.ramp, view * mag);      // sofortige Überzeugung, vor der echten Reaktion
+    const reactT = e.mega ? MEGA_REACT_TICKS : REACT_TICKS;
+    aiImpulse(imp, e.tick + reactT, cfg.ramp,                      // Realitätscheck beim echten Effekt
+      wrong ? -view * mag * (1 + cfg.shame) : view * mag * cfg.bonus);
+  }
+  const arr = [SPECIAL_BASE];
+  let price = SPECIAL_BASE;
+  for(let t = 1; t <= ticks; t++){
+    let ret = cfg.beta * (basket(t) / basket(t - 1) - 1) + imp[t] - cfg.burn;
+    ret = Math.max(-cfg.maxTick, Math.min(cfg.maxTick, ret));
+    price = Math.max(1, price * (1 + ret));
+    arr.push(price);
+  }
+  paths[sym] = arr;
+}
+
 /* Ein Special deterministisch ableiten (Dispatch nach kind). */
 function deriveSpecial(sp, paths, ticks, events){
   if(sp.kind === "fund") addFundPath(paths, ticks, events, sp.sym, sp.cfg);
   else if(sp.kind === "meme") addMemePath(paths, ticks, events, sp.sym, sp.cfg);
+  else if(sp.kind === "ai") addAiPath(paths, ticks, events, sp.sym, sp.cfg);
 }
 
 function tradeTick(at, anchor){ return Math.floor((at - anchor) / TICK_MS); }
@@ -761,7 +812,7 @@ function careerMarket(careerSeed, e, carry, epochTicks){
 
 /* ===== Publish fuer den Worker-Pfad (im Browser harmlos-redundant) ===== */
 if(typeof globalThis === "object") Object.assign(globalThis, {
-  mulberry32, genMarket, addEtfPath, addActivePath, addFundPath, addMemePath, deriveSpecial,
+  mulberry32, genMarket, addEtfPath, addActivePath, addFundPath, addMemePath, addAiPath, deriveSpecial,
   tradeTick, impactFactorAt, overlayAt, skewAt, findSqueezes, buildEffPaths,
   spreadAtTick, haltLeftAt, replayRound, oracleMaxPnl, botSuspicion,
   epochSeed, careerCarry, careerMarket,

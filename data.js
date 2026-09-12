@@ -49,8 +49,8 @@ const ACTIVE_WEIGHTS = {SPCX:3, TSLA:2.5, RKLB:2, AMD:2, META:2, GOOGL:1.5, NVDA
    `kind:"fund"` = simulierter Star-Trader (cfg.dir +1 long / −1 Bär), reagiert auf angekündigte
    News, gehebelt, Gewinnbeteiligung; `kind:"meme"` = Hype-Wert mit Pump-and-Dump. */
 const SPECIAL_BASE = 100.00;
-const SPECIAL_FROM = new Date(2026, 7, 14, 0, 0, 0).getTime();          // Fr 14.08.2026 00:00 (Monat 0-basiert: 7 = August)
-const SPECIAL_TO   = new Date(2026, 7, 16, 23, 59, 59, 999).getTime();  // So 16.08.2026 23:59:59 (Ende des Wochenendes)
+const SPECIAL_FROM = new Date(2026, 8, 11, 0, 0, 0).getTime();          // Fr 11.09.2026 00:00 (Monat 0-basiert: 8 = September)
+const SPECIAL_TO   = new Date(2026, 8, 13, 23, 59, 59, 999).getTime();  // So 13.09.2026 23:59:59 (Ende des Wochenendes)
 const SPECIALS = [
   { id:"turbo", sym:"TRB", kind:"fund", from:SPECIAL_FROM, to:SPECIAL_TO,
     def:{name:"Star-Trader-Fonds", type:"active", start:SPECIAL_BASE, liq:1.0,
@@ -64,6 +64,12 @@ const SPECIALS = [
     def:{name:"Meme-Aktie", type:"active", start:SPECIAL_BASE, liq:1.0,
          char:"🚀 Nur am Wochenende: Hype-Wert mit Pump-and-Dump – explodiert auf Schlagzeilen, stürzt genauso brutal ab. Reines Casino"},
     cfg:{kick:0.03, decay:0.85, megaMult:3, hypeGain:1, mom:0.05, look:15, revert:0.02, beta:1, maxTick:0.06} },
+  { id:"ai", sym:"HAL", kind:"ai", from:SPECIAL_FROM, to:SPECIAL_TO,
+    def:{name:"Halluzinet AI", type:"active", start:SPECIAL_BASE, liq:1.0,
+         char:"🤖 Nur am Wochenende: Die Haus-KI liest jede News in Sekunden und der Kurs springt sofort – aber rund ein Drittel deutet sie völlig falsch. Dann entschuldigt sie sich. Brutal."},
+    cfg:{basket:{NVDA:4, AMD:2.5, GOOGL:2, MSFT:2, META:1.5, TSLA:1},
+         entry:2, ramp:3, kick:0.045, megaMult:2.5, halluP:0.32, shame:0.6, bonus:0.5,
+         beta:1.6, burn:0.00025, maxTick:0.05} },
 ];
 const specialBySym = {}; for(const _s of SPECIALS) specialBySym[_s.sym] = _s;
 const activeSpecials = () => { const t = Date.now(); return SPECIALS.filter(s => t >= s.from && t <= s.to); };

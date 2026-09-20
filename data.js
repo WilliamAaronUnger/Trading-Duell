@@ -51,6 +51,11 @@ const ACTIVE_WEIGHTS = {SPCX:3, TSLA:2.5, RKLB:2, AMD:2, META:2, GOOGL:1.5, NVDA
 const SPECIAL_BASE = 100.00;
 const SPECIAL_FROM = new Date(2026, 8, 20, 0, 0, 0).getTime();          // So 20.09.2026 00:00 (Monat 0-basiert: 8 = September)
 const SPECIAL_TO   = new Date(2026, 8, 20, 23, 59, 59, 999).getTime();  // So 20.09.2026 23:59:59 (nur dieser eine Tag)
+/* Leeres Zeitfenster = Special abgeschaltet. Der Eintrag bleibt in SPECIALS stehen und sein
+   Pfad wird weiterhin abgeleitet (deterministisch, kein rnd()) – nur Sichtbarkeit/Handel
+   entfallen. So bleiben Markt-Ableitung und Anti-Cheat-Replay auf Client und Server identisch,
+   auch wenn die Geräte unterschiedliche Stände haben. */
+const SPECIAL_OFF  = -1;
 const SPECIALS = [
   { id:"turbo", sym:"TRB", kind:"fund", from:SPECIAL_FROM, to:SPECIAL_TO,
     def:{name:"Star-Trader-Fonds", type:"active", start:SPECIAL_BASE, liq:1.0,
@@ -60,7 +65,8 @@ const SPECIALS = [
     def:{name:"Bären-Fonds", type:"active", start:SPECIAL_BASE, liq:1.0,
          char:"🐻 Nur am Wochenende: Fonds eines Bären-Traders – wettet gehebelt auf FALLENDE Kurse. Blutet im Aufschwung, glänzt beim Crash"},
     cfg:{dir:-1, baseLev:3.2, eventLev:2.2, cap:9.0, entry:8, tail:10, perfFee:0.15} },
-  { id:"meme", sym:"MEM", kind:"meme", from:SPECIAL_FROM, to:SPECIAL_TO,
+  // Meme-Aktie deaktiviert: nicht mehr sichtbar/handelbar (Fenster leer, siehe SPECIAL_OFF)
+  { id:"meme", sym:"MEM", kind:"meme", from:SPECIAL_OFF, to:SPECIAL_OFF,
     def:{name:"Meme-Aktie", type:"active", start:SPECIAL_BASE, liq:1.0,
          char:"🚀 Nur am Wochenende: Hype-Wert mit Pump-and-Dump – explodiert auf Schlagzeilen, stürzt genauso brutal ab. Reines Casino"},
     cfg:{kick:0.03, decay:0.85, megaMult:3, hypeGain:1, mom:0.05, look:15, revert:0.02, beta:1, maxTick:0.06} },
@@ -486,7 +492,7 @@ const TUT_STEPS = {
 if(typeof globalThis === "object") Object.assign(globalThis, {
   TICK_MS, TICK_SCALE, REACT_TICKS, ONLINE_API, QUICK_MSGS,
   STOCK_DEFS, ETF_SYM, ETF_BASE, ETF_DEF, ETF2_SYM, ETF2_BASE, ETF2_DEF,
-  SPECIAL_BASE, SPECIALS, specialBySym, activeSpecials, isSpecialSym, hasHoldCost,
+  SPECIAL_BASE, SPECIAL_OFF, SPECIALS, specialBySym, activeSpecials, isSpecialSym, hasHoldCost,
   ACTIVE_LEV, ACTIVE_FEE_PCT, ACTIVE_WEIGHTS, defOf, DISPLAY_SYMS,
   FEE_PCT, feeRate, feeOf, BLOCK_MIN_FRAC, IMPACT_BASE, IMPACT_CAP,
   IMPACT_RAMP_TICKS, IMPACT_FADE_TICKS, IMPACT_KEEP, CASH_PRESETS,

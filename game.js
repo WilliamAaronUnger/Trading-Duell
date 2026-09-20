@@ -648,6 +648,7 @@ $("roomShareBtn").onclick = async function(){
 $("roomRoleBtn").onclick = async function(){
   if(!room) return;
   const target = room.role === "wall" ? "player" : "wall";
+  $("roomHint").textContent = "";
   try{
     await apiJson("/room/" + room.code + "/role",
       {method: "POST", body: JSON.stringify({token: room.token, role: target})});

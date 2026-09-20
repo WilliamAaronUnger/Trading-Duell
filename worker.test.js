@@ -331,6 +331,49 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
        "gleich große SPCX-Order ohne block10 → weiterhin 'unblocked'");
   }
 
+  // ---- Schnellchat (Standardnachrichten-Index, Raum-Schalter) ----
+  st = await agg(R.code);
+  ok(st.chatOn === 1 && Array.isArray(st.chat) && st.chat.length === 0, "Schnellchat: standardmäßig an, leer");
+  r = await call("POST", `/room/${R.code}/chat`, jbody({m: 0}), {"x-token": R.token});
+  ok(r.status === 201, "Standardnachricht senden → 201");
+  const c1 = await r.json();
+  ok(c1.id === 1 && c1.at >= t0, "Nachricht bekommt Id + Server-Zeitstempel");
+  ok((await call("POST", `/room/${R.code}/chat`, jbody({m: 1}), {"x-token": ben.token})).status === 201,
+     "zweites Mitglied darf auch senden");
+  st = await agg(R.code, cleo.token);
+  ok(st.chat.length === 2 && st.chat[0].m === 0 && st.chat[0].p === 1 && st.chat[1].p === 2,
+     "Aggregat liefert den Faden (nur Index m, kein Text)");
+  ok(st.chat.every(c => c.m !== undefined && c.text === undefined),
+     "über den Draht geht NUR der Index – der Server kennt die Texte nicht");
+  st = await agg(R.code, cleo.token);
+  const stCt = await (await call("GET", `/room/${R.code}?me=${cleo.token}&ct=1`)).json();
+  ok(stCt.chat.length === 1 && stCt.chat[0].id === 2, "ct=… liefert nur Neues nach");
+  ok((await call("POST", `/room/${R.code}/chat`, jbody({m: 0}), {"x-token": R.token})).status === 429,
+     "Rate-Limit: zweite Nachricht desselben Mitglieds zu früh → 429");
+  ok((await call("POST", `/room/${R.code}/chat`, jbody({m: 99}), {"x-token": cleo.token})).status === 400,
+     "Index außerhalb von QUICK_MSGS → 400");
+  ok((await call("POST", `/room/${R.code}/chat`, jbody({m: "🤬 frei getippt"}), {"x-token": cleo.token})).status === 400,
+     "freier Text → 400 (es gibt keine Texteingabe)");
+  ok((await call("POST", `/room/${R.code}/chat`, jbody({m: 2}), {"x-token": "fremd"})).status === 403,
+     "fremdes Token → 403");
+  ok((await call("POST", `/room/${R.code}/chat`, jbody({m: 2}), {"x-token": cleo.token})).status === 201,
+     "Leinwand darf mitreden (sitzt mit am Tisch)");
+  // Raum-Schalter: nur der Ersteller, wirkt sofort für alle
+  ok((await call("POST", `/room/${R.code}/settings`, jbody({token: ben.token, chat: false}))).status === 403,
+     "Einstellung durch Nicht-Ersteller → 403");
+  ok((await call("POST", `/room/${R.code}/settings`, jbody({token: R.token, chat: "aus"}))).status === 400,
+     "unsauberer Wert → 400");
+  ok((await call("POST", `/room/${R.code}/settings`, jbody({token: R.token, chat: false}))).status === 200,
+     "Ersteller schaltet den Schnellchat aus");
+  st = await agg(R.code, ben.token);
+  ok(st.chatOn === 0 && st.chat === undefined, "aus: kein chatOn, kein Faden mehr im Aggregat");
+  ok((await call("POST", `/room/${R.code}/chat`, jbody({m: 0}), {"x-token": ben.token})).status === 409,
+     "Senden bei ausgeschaltetem Chat → 409");
+  ok((await call("POST", `/room/${R.code}/settings`, jbody({token: R.token, chat: true}))).status === 200,
+     "wieder einschalten");
+  st = await agg(R.code, ben.token);
+  ok(st.chatOn === 1 && st.chat.length === 0, "wieder an – der alte Faden ist weg (Ausschalten löscht ihn)");
+
   // ---- Verfall ----
   db._db.prepare("UPDATE rooms SET lastActive = ? WHERE code = ?").run(Date.now() - 25*3600*1000, solo.code);
   ok((await call("GET", "/room/" + solo.code)).status === 404, "verfallener Raum → 404");

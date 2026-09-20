@@ -236,6 +236,58 @@
   .race-chip .rc.up{color:var(--up)}
   .race-chip .rc.down{color:var(--down)}
 
+  /* ============ Schnellchat (Online-Raum) ============
+     Überlagerndes Objekt unten rechts: 💬-Knopf, darüber der Fächer mit fünf
+     Standardnachrichten, darüber die eintreffenden Zeilen als Blasen. Die Schicht
+     selbst ist durchlässig (pointer-events:none) – nur die Knöpfe fangen Tipps ab,
+     damit der Chart darunter voll bedienbar bleibt. */
+  /* Solange die Schicht steht, unten etwas Luft lassen – sonst deckt der Knopf
+     die letzte Zeile (z. B. „Raum verlassen") ab. */
+  body.chat-pad{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+  .chat-layer{position:fixed;right:14px;bottom:calc(16px + env(safe-area-inset-bottom));
+              z-index:30;pointer-events:none;display:flex;flex-direction:column;align-items:flex-end}
+  .chat-fab{pointer-events:auto;width:52px;height:52px;border-radius:50%;border:1px solid var(--line);
+            background:var(--panel);color:var(--text);font-size:23px;line-height:1;cursor:pointer;
+            box-shadow:0 8px 22px rgba(0,0,0,.45);transition:transform .18s,border-color .18s}
+  .chat-fab:active{transform:scale(.92)}
+  .chat-fab.open{border-color:var(--accent);transform:rotate(45deg)}
+  .chat-fab.cool{opacity:.45}
+  /* Fächer: die Blätter liegen geschlossen hinter dem Knopf und klappen versetzt auf */
+  .chat-fan{position:absolute;right:0;bottom:60px;display:flex;flex-direction:column-reverse;
+            align-items:flex-end;gap:8px;pointer-events:none}
+  .chat-opt{pointer-events:none;opacity:0;transform:translateY(30px) scale(.7);transform-origin:right bottom;
+            display:flex;align-items:center;gap:8px;white-space:nowrap;cursor:pointer;
+            border:1px solid var(--line);border-radius:99px;background:var(--panel);color:var(--text);
+            padding:9px 15px;font-size:14px;font-family:var(--sans);box-shadow:0 6px 18px rgba(0,0,0,.4);
+            transition:transform .2s cubic-bezier(.2,.9,.3,1.25),opacity .16s}
+  .chat-opt .ce{font-size:18px;line-height:1}
+  .chat-msg .ce{font-size:15px}
+  .chat-fan.open .chat-opt{pointer-events:auto;opacity:1;
+            transform:rotate(calc(var(--i) * -1.6deg));transition-delay:calc(var(--i) * 34ms)}
+  .chat-opt:active{border-color:var(--accent)}
+  /* Blasen: die letzten Zeilen, sie verblassen von selbst wieder */
+  .chat-stream{display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-bottom:10px;
+               max-width:min(76vw,320px)}
+  .chat-msg{pointer-events:none;border:1px solid var(--line);border-radius:14px;background:rgba(19,27,50,.94);
+            padding:7px 12px;font-size:13px;line-height:1.35;box-shadow:0 6px 16px rgba(0,0,0,.4);
+            animation:chatIn .22s ease-out;transition:opacity .5s}
+  .chat-msg.me{border-color:var(--accent)}
+  .chat-msg.fade{opacity:0}
+  .chat-msg .cm-name{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+                     color:var(--muted);display:block}
+  .chat-msg.me .cm-name{color:var(--accent)}
+  @keyframes chatIn{from{opacity:0;transform:translateY(8px) scale(.94)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion: reduce){
+    .chat-msg{animation:none}
+    .chat-opt{transition:opacity .16s}
+    .chat-fan.open .chat-opt{transform:none}
+  }
+  /* Phone: der Fächer darf die Order-Knöpfe nicht verdecken → etwas kleiner */
+  @media (max-width:420px){
+    .chat-opt{font-size:13px;padding:8px 13px}
+    .chat-fab{width:48px;height:48px;font-size:21px}
+  }
+
   /* ============ Ticker-Band ============ */
   .tape{overflow:hidden;border-bottom:1px solid var(--line);background:var(--panel-2);white-space:nowrap}
   .tape-inner{display:inline-block;padding:7px 0;font-family:var(--mono);font-size:12px;

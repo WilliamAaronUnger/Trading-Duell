@@ -25,6 +25,10 @@
      Seed zu veröffentlichen (früher), rechnet der Server den Markt vorab (genMarket), cached ihn
      und gibt den Kurs pro Poll nur bis zur Front (= jetzt) frei (marketSlice). So kennt kein
      Gerät die Zukunft; alle Clients rendern dieselbe Front und laufen automatisch synchron.
+   - Schnellchat: nur der INDEX einer Standardnachricht (QUICK_MSGS in data.js) wandert über
+     den Draht – der Server kennt die Texte nicht und muss deshalb nichts moderieren. Der
+     Faden reist im Aggregat mit (kein eigener Kanal); der Ersteller kann ihn pro Raum
+     abschalten (rooms.chat), was den Faden sofort löscht.
    - Räume verfallen 24 h nach der letzten Aktivität (lastActive); Aufräumen beim Eröffnen.
    - v3 ersetzt die alte /game-API vollständig; deren Tabellen werden entsorgt. Alte
      App-Versionen fallen dadurch sauber auf ihren Offline-Modus zurück.
@@ -57,7 +61,10 @@
      PUT  /room/{code}/round/{n}/pnl/{p} {pnl}  → 200   (x-token, überschreibbar)
      POST /room/{code}/round/{n}/trade {sym, side, vol}
                                                 → 201 {id, at} (x-token, nur Spieler, nur laufende
-                                                   Expert-Runde, Rate-Limit; anonym im Aggregat) */
+                                                   Expert-Runde, Rate-Limit; anonym im Aggregat)
+     POST /room/{code}/settings {token, chat}   → {ok, chat}        (nur Ersteller; Raum-Einstellung)
+     POST /room/{code}/chat {m}                 → 201 {id, at}      (x-token, Rate-Limit; m = INDEX
+                                                   in QUICK_MSGS – freier Text ist nicht vorgesehen) */
 import "./data.js";   // Konstanten/Pools (publiziert via globalThis, siehe Datei-Ende)
 import "./engine.js"; // genMarket + replayRound + oracleMaxPnl – DIESELBE Engine wie die App
 
@@ -78,6 +85,9 @@ const CASH_DEFAULT = 25000;
 const TRADE_RATE_MS = 15000;      // höchstens eine Blockorder je Spieler je 15 s
 const SUBMIT_GRACE_MS = 5000;     // Ergebnis frühestens ~Rundenende (kleine Uhren-Toleranz)
 const SUS_FRAC = 0.85;            // 🤨 ab diesem Anteil der Orakel-Obergrenze
+const CHAT_RATE_MS = 3000;        // höchstens eine Schnellchat-Nachricht je Mitglied je 3 s
+const CHAT_KEEP = 60;             // so viele Nachrichten je Raum bleiben liegen (Ringpuffer)
+const CHAT_TAIL = 6;              // Nachzügler bekommen beim ersten Poll die letzten N
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {status, headers: {...CORS, "content-type": "application/json"}});
@@ -96,7 +106,10 @@ async function ensureSchema(db){
   for(const t of ["games", "players", "results", "pnl"]) // v2-Tabellen (inkompatible Form)
     await db.prepare("DROP TABLE IF EXISTS " + t).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS rooms(
-    code TEXT PRIMARY KEY, created INTEGER, lastActive INTEGER, dur INTEGER, curRound INTEGER DEFAULT 0)`).run();
+    code TEXT PRIMARY KEY, created INTEGER, lastActive INTEGER, dur INTEGER, curRound INTEGER DEFAULT 0,
+    chat INTEGER DEFAULT 1)`).run();
+  // Bestandsräume um die Schnellchat-Einstellung ergänzen – scheitert still, wenn schon da
+  try{ await db.prepare("ALTER TABLE rooms ADD COLUMN chat INTEGER DEFAULT 1").run(); }catch(e){}
   await db.prepare(`CREATE TABLE IF NOT EXISTS members(
     code TEXT, p INTEGER, token TEXT, name TEXT, role TEXT, lastSeen INTEGER, PRIMARY KEY(code, p))`).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS rounds(
@@ -121,6 +134,10 @@ async function ensureSchema(db){
   // ersten Poll gefüllt, danach nur noch scheibenweise ausgeliefert (verborgene Zukunft).
   await db.prepare(`CREATE TABLE IF NOT EXISTS roundMarket(
     code TEXT, n INTEGER, market TEXT, PRIMARY KEY(code, n))`).run();
+  // Schnellchat: nur der INDEX der Standardnachricht (m) wandert über den Draht,
+  // nie Text – der Server kennt die Formulierungen nicht und kann sie nicht moderieren müssen.
+  await db.prepare(`CREATE TABLE IF NOT EXISTS chatMsgs(
+    code TEXT, id INTEGER, p INTEGER, at INTEGER, m INTEGER, PRIMARY KEY(code, id))`).run();
   schemaReady = true;
 }
 
@@ -202,7 +219,7 @@ async function route(req, db){
     const body = await readJson(req);
     // verfallene Räume samt Anhang aufräumen
     const cut = now - TTL_MS;
-    for(const t of ["trades", "roundPnl", "roundResults", "roundMarket", "rounds", "members"])
+    for(const t of ["trades", "roundPnl", "roundResults", "roundMarket", "rounds", "members", "chatMsgs"])
       await db.prepare(`DELETE FROM ${t} WHERE code IN (SELECT code FROM rooms WHERE lastActive < ?)`)
               .bind(cut).run();
     await db.prepare("DELETE FROM rooms WHERE lastActive < ?").bind(cut).run();
@@ -245,8 +262,20 @@ async function route(req, db){
     const members = (await db.prepare("SELECT p, name, role, lastSeen FROM members WHERE code = ? ORDER BY p")
                              .bind(code).all()).results
       .map(m => ({p: m.p, name: m.name, role: m.role, online: now - m.lastSeen < ONLINE_MS}));
+    const chatOn = room.chat == null ? 1 : (room.chat ? 1 : 0);
     const out = {dur: room.dur, curRound: room.curRound, members, round: null, pnls: {}, results: {},
-                 scoreboard: await scoreboard(db, code)};
+                 scoreboard: await scoreboard(db, code), chatOn};
+    /* Schnellchat-Nachschub im selben Aggregat (kein eigener Poll): `ct` = höchste
+       Nachrichten-Id, die der Client schon hat. Ohne `ct` (frisch im Raum) gibt es
+       die letzten paar Zeilen als Gesprächsfaden, danach nur noch Neues. */
+    if(chatOn){
+      const ct = parseInt(url.searchParams.get("ct"), 10);
+      out.chat = Number.isNaN(ct)
+        ? (await db.prepare("SELECT id, p, at, m FROM chatMsgs WHERE code = ? ORDER BY id DESC LIMIT ?")
+                   .bind(code, CHAT_TAIL).all()).results.reverse()
+        : (await db.prepare("SELECT id, p, at, m FROM chatMsgs WHERE code = ? AND id > ? ORDER BY id LIMIT 20")
+                   .bind(code, ct).all()).results;
+    }
     if(room.curRound > 0){
       const rd = await db.prepare("SELECT n, dur, startAt, seed, expert, cash FROM rounds WHERE code = ? AND n = ?")
                          .bind(code, room.curRound).first();
@@ -337,6 +366,52 @@ async function route(req, db){
     const rd = await db.prepare("SELECT n, dur, startAt, expert, cash FROM rounds WHERE code = ? AND n = ?")
                        .bind(code, n).first();
     return json({n: rd.n, dur: rd.dur, startAt: rd.startAt, expert: rd.expert, cash: rd.cash}, 201);
+  }
+
+  // Raum-Einstellungen (nur Ersteller): bislang nur der Schnellchat an/aus.
+  // Die Einstellung liegt am RAUM, gilt also sofort für alle Geräte.
+  if(rest[0] === "settings" && rest.length === 1){
+    if(req.method !== "POST") return err(405, "method");
+    const body = await readJson(req);
+    const m = await memberByToken(body && body.token);
+    if(!m || m.p !== 1) return err(403, "token");
+    if(!body || typeof body.chat !== "boolean") return err(400, "settings");
+    const chat = body.chat ? 1 : 0;
+    await db.prepare("UPDATE rooms SET chat = ? WHERE code = ?").bind(chat, code).run();
+    if(!chat) await db.prepare("DELETE FROM chatMsgs WHERE code = ?").bind(code).run(); // aus ist aus
+    await touch();
+    return json({ok: true, chat});
+  }
+
+  // Schnellchat: eine der vorgegebenen Standardnachrichten senden. Über den Draht
+  // geht NUR ihr Index (0…QUICK_MSGS.length-1) – freier Text existiert nicht, der
+  // Server kennt die Texte nicht einmal. Rate-Limit je Mitglied; Leinwände dürfen
+  // mitreden (sie sitzen ja mit am Tisch), nur der Raum-Schalter kann alles stumm stellen.
+  if(rest[0] === "chat" && rest.length === 1){
+    if(req.method !== "POST") return err(405, "method");
+    if(room.chat != null && !room.chat) return err(409, "chat off");
+    const m = await memberByToken(req.headers.get("x-token"));
+    if(!m) return err(403, "token");
+    const body = await readJson(req);
+    const msg = body && Number(body.m);
+    if(!Number.isInteger(msg) || msg < 0 || msg >= QUICK_MSGS.length) return err(400, "msg");
+    const last = await db.prepare("SELECT MAX(at) AS t FROM chatMsgs WHERE code = ? AND p = ?")
+                         .bind(code, m.p).first();
+    if(last && last.t && now - last.t < CHAT_RATE_MS) return err(429, "rate");
+    for(let i = 0; i < 3; i++){
+      const id = (await db.prepare("SELECT COALESCE(MAX(id),0)+1 AS id FROM chatMsgs WHERE code = ?")
+                          .bind(code).first()).id;
+      const r = await db.prepare(
+        `INSERT INTO chatMsgs(code, id, p, at, m) VALUES(?,?,?,?,?)
+         ON CONFLICT(code, id) DO NOTHING`).bind(code, id, m.p, now, msg).run();
+      if(r.meta.changes === 1){
+        // Ringpuffer: alles jenseits der letzten CHAT_KEEP Zeilen fliegt raus
+        await db.prepare("DELETE FROM chatMsgs WHERE code = ? AND id <= ?").bind(code, id - CHAT_KEEP).run();
+        await touch();
+        return json({id, at: now}, 201);
+      }
+    }
+    return err(409, "busy");
   }
 
   // Blockorder melden: nur Spieler, nur während einer LAUFENDEN Expert-Runde.

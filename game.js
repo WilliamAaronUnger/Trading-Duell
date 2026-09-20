@@ -612,6 +612,7 @@ function showRoomScreen(){
   roomInviteOpen = true; roomInviteTouched = false; applyRoomInvite(); // frisch: Einladung offen
   $("roomBackBtn").style.display = "none";
   window.scrollTo(0, 0);
+  applyChatUI();
   startRoomTimer();
   roomTick();
 }
@@ -623,6 +624,7 @@ function leaveRoom(msg){
   clearInterval(roomTimer); roomTimer = null;
   stopWall();
   room = null; roomState = null; roomPhase = "idle"; roomDurPick = null;
+  clearChat(); chatOn = true; applyChatUI();
   clearRoomState();
   $("roomBackBtn").style.display = "none"; // Mitgliedschaft weg → kein Rückkehr-Knopf
   $("roomScreen").classList.remove("show");
@@ -705,13 +707,15 @@ async function roomTick(){
   if(!room) return;
   let st;
   const mtq = (mode === "room" && roomPhase === "playing") ? "&mt=" + (revealedLen - 1) : "";
-  try{ st = await apiJson("/room/" + room.code + "?me=" + room.token + mtq); }
+  const ctq = chatSeen >= 0 ? "&ct=" + chatSeen : "";   // Schnellchat: nur Neues nachladen
+  try{ st = await apiJson("/room/" + room.code + "?me=" + room.token + mtq + ctq); }
   catch(e){
     if(String(e && e.message).includes("404")) leaveRoom("Der Raum ist abgelaufen – bitte einen neuen eröffnen.");
     return; // kurzer Aussetzer: nächster Puls
   }
   if(!room) return;
   roomState = st;
+  applyChatState(st);       // Schnellchat: Einstellung + neue Zeilen (reist im selben Poll mit)
   roomSus = st.sus || {};   // 🤨-Verdachts-Flags der laufenden Runde (Server-Orakel-Check)
   roomBot = st.bot || {};   // 🤖-Verdachts-Flags (Server-Timing-Heuristik)
   // Progressive Kurs-Scheibe anhängen (nur als aktiver Spieler in laufender Runde) –
@@ -826,12 +830,142 @@ function renderRoomScreen(st){
   if(waiting) $("roomWaitHint").textContent = room.p === 1
     ? "Warte auf Mitspieler – mindestens 2 Spieler nötig …"
     : "Der Ersteller startet die nächste Runde …";
+  // Raum-Einstellungen: nur der Ersteller stellt sie, sie gelten sofort für alle
+  $("roomSetField").style.display = room.p === 1 ? "" : "none";
+  if(room.p === 1){
+    $("roomChatToggle").classList.toggle("on", chatOn);
+    $("roomChatToggle").querySelector(".opt-check").textContent = chatOn ? "☑" : "☐";
+  }
   $("roomRoleBtn").textContent = room.role === "wall" ? "🎮 Wieder mitspielen" : "🖥️ Dieses Gerät als Leinwand";
   // Teilnehmerzahl + Einladung automatisch ein-/ausklappen (offen, solange man allein ist)
   const total = st.members.length;
   $("roomCount").textContent = total + (total === 1 ? " Person" : " Personen");
   if(!roomInviteTouched){ roomInviteOpen = playersN < 2; applyRoomInvite(); }
 }
+
+/* ====================== Schnellchat (Online-Raum) ======================
+   Ein überlagernder 💬-Knopf klappt einen Fächer mit fünf Standardnachrichten auf
+   (QUICK_MSGS). Eine freie Texteingabe gibt es bewusst NICHT: über den Draht wandert
+   nur der Index der Nachricht – der Server kennt die Formulierungen gar nicht. Das
+   hält den Chat moderationsfrei, verhindert Absprachen/Kurs-Tipps und macht ihn
+   nebenbei winzig (er reist im ohnehin laufenden Aggregat-Poll mit, kein Extra-Netz).
+   Der Ersteller kann ihn in den Raum-Einstellungen für alle abschalten. */
+const CHAT_RATE_MS = 3000;   // eigenes Sende-Limit (spiegelt das Limit im Worker)
+const CHAT_SHOW_MS = 9000;   // so lange bleibt eine Blase stehen
+const CHAT_MAX = 4;          // höchstens so viele Blasen gleichzeitig
+let chatOn = true;           // Raum-Einstellung (kommt vom Server)
+let chatSeen = -1;           // höchste bereits angezeigte Nachrichten-Id
+let chatFanOpen = false;
+let chatSentAt = 0;          // letzter eigener Versand (Cooldown)
+let chatSetAt = 0;           // letzte eigene Schalter-Änderung (kurz Vorrang vor dem Server)
+let chatPending = null;      // eigene Nachricht: schon als Blase gezeigt → Echo überspringen
+
+/* Fächer einmalig aus QUICK_MSGS bauen (--i steuert Staffelung + leichte Fächer-Drehung) */
+function buildChatFan(){
+  const fan = $("chatFan");
+  if(fan.childElementCount) return;
+  fan.innerHTML = QUICK_MSGS.map((q, i) =>
+    `<button class="chat-opt" data-m="${i}" style="--i:${i}">` +
+    `<span class="ce">${q.e}</span><span>${esc(q.t)}</span></button>`).join("");
+  fan.querySelectorAll(".chat-opt").forEach(b => b.onclick = () => sendQuick(+b.dataset.m));
+}
+function openChatFan(open){
+  chatFanOpen = open;
+  $("chatFan").classList.toggle("open", open);
+  $("chatFab").classList.toggle("open", open);
+  $("chatFab").setAttribute("aria-expanded", open ? "true" : "false");
+}
+/* Sichtbar im Raum und in der laufenden Raum-Runde – sonst nie (Solo/Lokal/Offline
+   sprechen mit keinem Server und bekommen den Knopf gar nicht erst zu sehen). */
+function applyChatUI(){
+  const show = !!room && chatOn &&
+    ($("roomScreen").classList.contains("show") ||
+     (mode === "room" && $("matchScreen").classList.contains("show")));
+  if(show) buildChatFan();
+  else if(chatFanOpen) openChatFan(false);
+  $("chatLayer").style.display = show ? "" : "none";
+  document.body.classList.toggle("chat-pad", show);
+}
+function clearChat(){
+  openChatFan(false);
+  $("chatStream").innerHTML = "";
+  chatSeen = -1; chatPending = null;
+}
+
+/* Eine Zeile als Blase einblenden; sie verblasst von selbst wieder. */
+function pushChatBubble(p, mi, mine){
+  const q = QUICK_MSGS[mi];
+  if(!q) return;                                   // unbekannter Index (neuerer Client) → still ignorieren
+  const mem = ((roomState && roomState.members) || []).find(m => m.p === p);
+  const el = $("chatStream");
+  const div = document.createElement("div");
+  div.className = "chat-msg" + (mine ? " me" : "");
+  div.innerHTML = `<span class="cm-name">${esc(mem ? mem.name : "Spieler " + p)}${mine ? " (du)" : ""}</span>` +
+                  `<span class="ce">${q.e}</span> ${esc(q.t)}`;
+  el.appendChild(div);
+  while(el.childElementCount > CHAT_MAX) el.removeChild(el.firstChild);
+  setTimeout(() => { div.classList.add("fade"); setTimeout(() => div.remove(), 600); }, CHAT_SHOW_MS);
+}
+
+/* Standardnachricht senden: sofort selbst anzeigen (kein Warten auf den Server),
+   danach abschicken. Das Echo aus dem nächsten Poll wird übersprungen. */
+async function sendQuick(i){
+  if(!room || !chatOn || !QUICK_MSGS[i]) return;
+  const now = Date.now();
+  openChatFan(false);
+  if(now - chatSentAt < CHAT_RATE_MS) return;      // Cooldown: der Knopf zeigt ihn grau an
+  chatSentAt = now;
+  chatPending = {m: i, at: now};
+  pushChatBubble(room.p, i, true);
+  $("chatFab").classList.add("cool");
+  setTimeout(() => $("chatFab").classList.remove("cool"), CHAT_RATE_MS);
+  try{
+    await apiJson("/room/" + room.code + "/chat",
+      {method: "POST", body: JSON.stringify({m: i}), headers: {"x-token": room.token}});
+  }catch(e){ /* kurzer Aussetzer: die Blase stand schon – nichts weiter zu tun */ }
+}
+
+/* Nachschub aus dem Aggregat übernehmen (läuft im normalen Raum-Puls mit). */
+function applyChatState(st){
+  if(Date.now() - chatSetAt > 3000){               // eigene Schalter-Änderung kurz nicht überschreiben
+    const on = st.chatOn === undefined ? true : !!st.chatOn;
+    if(on !== chatOn){ chatOn = on; if(!on) clearChat(); }
+  }
+  applyChatUI();
+  if(!chatOn || !Array.isArray(st.chat)) return;
+  if(chatPending && Date.now() - chatPending.at > 20000) chatPending = null;
+  const primed = chatSeen >= 0;                    // beim Einsteigen den Altbestand still übernehmen
+  for(const c of st.chat){
+    if(!(c.id > chatSeen)) continue;
+    chatSeen = c.id;
+    if(chatPending && c.p === room.p && c.m === chatPending.m){ chatPending = null; continue; }
+    if(!primed && Date.now() - c.at > 20000) continue;
+    pushChatBubble(c.p, c.m, c.p === room.p);
+  }
+}
+
+$("chatFab").onclick = () => openChatFan(!chatFanOpen);
+/* Tipp neben den Fächer schließt ihn wieder (er soll nichts dauerhaft verdecken) */
+document.addEventListener("pointerdown", e => {
+  if(chatFanOpen && !$("chatLayer").contains(e.target)) openChatFan(false);
+}, true);
+
+/* Raum-Einstellung (nur Ersteller): Schnellchat für ALLE an/aus */
+$("roomChatToggle").onclick = async function(){
+  if(!room || room.p !== 1) return;
+  const target = !chatOn;
+  this.disabled = true; $("roomSetErr").textContent = "";
+  try{
+    await apiJson("/room/" + room.code + "/settings",
+      {method: "POST", body: JSON.stringify({token: room.token, chat: target})});
+    chatOn = target; chatSetAt = Date.now();
+    if(!target) clearChat();
+    applyChatUI();
+    if(roomState){ roomState.chatOn = target ? 1 : 0; renderRoomScreen(roomState); }
+  }catch(e){
+    $("roomSetErr").textContent = "Einstellung konnte nicht gespeichert werden.";
+  }finally{ this.disabled = false; }
+};
 
 /* ====================== Leinwand: Großbild während der Runde ======================
    Ein Leinwand-Gerät baut den Markt selbst aus dem Runden-Seed (kein Extra-Datenstrom)
@@ -1256,6 +1390,7 @@ $("rematchBtn").onclick = () => {
 
 function startRound(r){
   $("roomScreen").classList.remove("show");
+  setTimeout(applyChatUI, 0);   // Bildschirmwechsel ist erst am Ende der Funktion fertig
   if(mode === "room"){ roomPhase = "playing"; startRoomTimer(1000); roomTick(); } // schneller pollen + sofort erste Kurs-Scheibe holen
   round = r;
   tickCount = 0; paused = false; over = false; newsPaused = false; lastNewsTick = -999;

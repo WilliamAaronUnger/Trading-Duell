@@ -303,6 +303,19 @@ const MODE_HINTS = {
   remote: "Zwei Geräte, komplett OHNE Internet: gleicher Code = gleicher Markt, Start zur vollen Minute, Ergebnistausch per Code/QR.",
   room:   "2–20 Spieler online im Raum: Runde um Runde, Live-Rennen, Abend-Wertung – und jedes Gerät kann Leinwand sein.",
 };
+/* Schnellchat des Online-Raums (Fächer mit 5 Optionen): AUSSCHLIESSLICH diese
+   Standardnachrichten sind möglich – es gibt keine freie Texteingabe. Über den
+   Draht geht nur der Index (0…4), der Server kennt die Texte gar nicht; damit
+   ist Missbrauch (Beleidigungen, Absprachen, Kurs-Tipps) bauartbedingt aus.
+   Reihenfolge = Reihenfolge im Fächer (von unten nach oben). Anhängen ist
+   erlaubt, UMSORTIEREN nicht – alte Clients würden sonst falsch übersetzen. */
+const QUICK_MSGS = [
+  {e:"🚀", t:"To the moon!"},
+  {e:"😂", t:"Haha, guter Trade!"},
+  {e:"😱", t:"Oh nein, mein Depot!"},
+  {e:"🐻", t:"Ich shorte das!"},
+  {e:"👏", t:"Respekt, stark gespielt!"},
+];
 const TIPS = [
   "📰 News wirken erst ~8 Sekunden nach der Schlagzeile – nutze die Lücke zum Handeln.",
   "🤫 Insider-Tipps kündigen ein Ereignis ~50 Sekunden vorher an – positioniere dich früh.",
@@ -471,7 +484,7 @@ const TUT_STEPS = {
    Symbole, die engine.js braucht, explizit global veröffentlicht. Im Browser
    (klassisches Script) ist das harmlos-redundant. */
 if(typeof globalThis === "object") Object.assign(globalThis, {
-  TICK_MS, TICK_SCALE, REACT_TICKS, ONLINE_API,
+  TICK_MS, TICK_SCALE, REACT_TICKS, ONLINE_API, QUICK_MSGS,
   STOCK_DEFS, ETF_SYM, ETF_BASE, ETF_DEF, ETF2_SYM, ETF2_BASE, ETF2_DEF,
   SPECIAL_BASE, SPECIALS, specialBySym, activeSpecials, isSpecialSym, hasHoldCost,
   ACTIVE_LEV, ACTIVE_FEE_PCT, ACTIVE_WEIGHTS, defOf, DISPLAY_SYMS,

@@ -84,6 +84,28 @@ Restzeit; zwischen Runden: Raum-Ansicht groß (QR, Mitglieder, Abend-Tabelle); n
 Siegerehrung. 16:9-tauglich, in Stream-Kompression lesbar (Discord-Screenshare); Sound/
 Konfetti zuschaltbar. Details: `IDEAS.md` A9.
 
+## Phase 4 — Schnellchat — ✅ umgesetzt
+
+Ein überlagernder 💬-Knopf (unten rechts, `position:fixed`, `z-index:30`) klappt einen
+**Fächer mit 5 Standardnachrichten** auf (`QUICK_MSGS` in `data.js`); die Auswahl erscheint
+sofort als Blase über dem Knopf und verblasst nach ~9 s. **Freie Texteingabe gibt es
+bewusst nicht** — über den Draht wandert nur der *Index* der Nachricht, der Server kennt
+die Formulierungen gar nicht. Damit ist der Chat bauartbedingt moderationsfrei, unfähig
+zu Absprachen/Kurs-Tipps und winzig genug, um im bestehenden Aggregat-Poll mitzureisen
+(kein eigener Kanal, kein zusätzlicher Request).
+
+| Endpunkt | Zweck |
+| --- | --- |
+| `POST /room/{code}/chat {m}` | x-token, `m` = Index in `QUICK_MSGS`, Rate-Limit 3 s je Mitglied |
+| `POST /room/{code}/settings {token, chat}` | nur Ersteller: Schnellchat für den ganzen Raum an/aus |
+| `GET /room/{code}?ct={id}` | `chatOn` + Nachschub ab Id `ct` (ohne `ct`: die letzten 6 als Faden) |
+
+Speicher: `chatMsgs(code, id, p, at, m)` als Ringpuffer (letzte 60 je Raum), `rooms.chat`
+als Schalter. Ausschalten leert den Faden sofort und lehnt neue Nachrichten mit 409 ab.
+Leinwände dürfen mitreden (sie sitzen mit am Tisch). Sichtbar ist der Knopf nur im Raum
+und in der laufenden Raum-Runde — Solo/Lokal/Offline bekommen ihn nie zu Gesicht und
+machen weiterhin null Netz-Requests.
+
 ## Verifikation
 
 Phase 1: `worker.test.js` neu auf Raum-API (Rollen, Limit 20, Zuspätkommer, Runden-Serie,
@@ -91,3 +113,6 @@ Aggregat, Wertung, Herzschlag). Phase 2: `e2e.test.js` neu als Raum-Simulation (
 Geräte: eröffnen → beitreten → 2 Runden spielen → Tabelle prüft Sieger; Leinwand-Rolle
 zählt nicht; Offline-Modus macht null fetch-Aufrufe — Fetch-Stub zählt mit!). Danach
 Gerätetest; CI manuell auslösen.
+Phase 4: `worker.test.js` deckt Senden, Rate-Limit, Index-Prüfung (freier Text → 400),
+fremdes Token, Nachschub per `ct` und den Raum-Schalter ab; die Oberfläche (Fächer,
+Blasen, Sichtbarkeit, Abschalten) wurde im Browser durchgespielt.

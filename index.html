@@ -237,6 +237,15 @@
           </div>
         </div>
       </div>
+      <!-- Raum-Einstellungen: gelten für den ganzen Raum, nur der Ersteller stellt sie -->
+      <div class="field" id="roomSetField" style="display:none">
+        <label>Raum-Einstellungen</label>
+        <button class="opt-row" id="roomChatToggle"><span class="opt-check">☑</span>
+          <span class="opt-body"><b>💬 Schnellchat</b>
+          <span class="opt-sub">Fächer mit fünf Standardnachrichten – kein freier Text. Aus = für alle stumm.</span></span>
+        </button>
+        <div class="code-err" id="roomSetErr"></div>
+      </div>
       <div class="field">
         <label>Im Raum · <span id="roomCount" class="room-count"></span></label>
         <div id="roomMembers"></div>
@@ -504,6 +513,16 @@
       <button class="np-btn np-skip" id="npSkip">Ignorieren</button>
     </div>
   </div>
+</div>
+
+<!-- ================= SCHNELLCHAT (Online-Raum) =================
+     Überlagernd (position:fixed) über Raum- und Match-Bildschirm: der 💬-Knopf
+     öffnet einen Fächer mit fünf Standardnachrichten, darüber laufen die
+     eintreffenden Zeilen als kurz sichtbare Blasen. Freien Text gibt es nicht. -->
+<div class="chat-layer" id="chatLayer" style="display:none">
+  <div class="chat-stream" id="chatStream" aria-live="polite"></div>
+  <div class="chat-fan" id="chatFan"></div>
+  <button class="chat-fab" id="chatFab" aria-label="Schnellchat öffnen" aria-expanded="false">💬</button>
 </div>
 
 <script src="qr.js"></script>

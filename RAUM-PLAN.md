@@ -84,6 +84,15 @@ Restzeit; zwischen Runden: Raum-Ansicht groß (QR, Mitglieder, Abend-Tabelle); n
 Siegerehrung. 16:9-tauglich, in Stream-Kompression lesbar (Discord-Screenshare); Sound/
 Konfetti zuschaltbar. Details: `IDEAS.md` A9.
 
+**v6-Nachtrag (Live-Streaming):** Seit der Seed geheim bleibt, baut die Leinwand den Markt
+nicht mehr selbst, sondern bekommt ihn wie die Spieler als progressive Kurs-Scheibe über
+den Aggregat-Poll (`&mt=` = höchster eigener Tick, `mergeSlice()` teilt sich die Logik mit
+dem Spieler-Pfad). Ablauf: öffnet ~15 s vor dem Start mit großem Countdown (Spieler-Liste,
+🎓-Hinweis), zeigt live Fokus-Chart/Mini-Wand/Rennen (Balken, Führungswechsel-Ansage) samt
+Restzeit-Balken, danach ~60 s Siegerpodest (sobald abgeliefert mit den server-geprüften
+Ergebnissen), dann zurück in den Raum. „← Raum" schließt sie für die Runde, „🖥️ Leinwand
+öffnen" im Raum holt sie zurück; ⛶-Vollbild + Wake-Lock für Beamer/TV.
+
 ## Phase 4 — Schnellchat — ✅ umgesetzt
 
 Ein überlagernder 💬-Knopf (unten rechts, `position:fixed`, `z-index:30`) klappt einen

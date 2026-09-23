@@ -229,13 +229,19 @@ function buildMarket(){
     // und hängen ab Tick 1 die Server-Scheiben an → kein Startloch. WICHTIG: ALLE
     // Symbole vorinitialisieren, die genMarket liefert (auch inaktive Specials), damit
     // keine Scheibe ein Symbol ohne Tick 0 anlegt (sonst um 1 Tick verschoben).
-    market = {paths: {}, events: [], tips: []};
-    const allSyms = [...Object.keys(STOCK_DEFS), ETF_SYM, ETF2_SYM, ...SPECIALS.map(sp => sp.sym)];
-    for(const s of allSyms){ const d = defOf(s); market.paths[s] = [d ? d.start : SPECIAL_BASE]; }
+    market = emptyRoomMarket();
     revealedLen = 1; roomOver = false;
     return;
   }
   market = genMarket(marketSeed == null ? gameCode : marketSeed, matchTicks);
+}
+/* Leerer Progressiv-Markt eines Raums (Spieler UND Leinwand): nur Tick 0 mit den
+   bekannten Eröffnungskursen, alles Weitere hängt mergeSlice() an. */
+function emptyRoomMarket(){
+  const m = {paths: {}, events: [], tips: []};
+  const allSyms = [...Object.keys(STOCK_DEFS), ETF_SYM, ETF2_SYM, ...SPECIALS.map(sp => sp.sym)];
+  for(const s of allSyms){ const d = defOf(s); m.paths[s] = [d ? d.start : SPECIAL_BASE]; }
+  return m;
 }
 
 function newPlayer(name, color){
@@ -690,24 +696,34 @@ $("roomStartBtn").onclick = async function(){
 /* Progressive Kurs-Scheibe vom Server anhängen (verborgene Zukunft). Die Scheibe ist
    kontinuierlich (from = revealedLen); eine evtl. Überlappung durch überholende Polls
    wird übersprungen. Events/Tips werden nur einmalig (tick >= revealedLen) eingemischt. */
-function applyMarketSlice(ms){
-  if(!ms || !market || !market.paths || ms.to == null || ms.to < revealedLen) return;
-  const skip = Math.max(0, revealedLen - ms.from);          // schon vorhandene Ticks überspringen
+function mergeSlice(mkt, have, ms){
+  if(!ms || !mkt || !mkt.paths || ms.to == null || ms.to < have) return have;
+  if(ms.from > have) return have;                           // Lücke (Scheibe einer anderen Runde) → verwerfen
+  const skip = Math.max(0, have - ms.from);                 // schon vorhandene Ticks überspringen
   for(const s in ms.paths){
-    const arr = market.paths[s] || (market.paths[s] = []);
+    const arr = mkt.paths[s] || (mkt.paths[s] = []);
     const src = ms.paths[s];
     for(let i = skip; i < src.length; i++) arr.push(src[i]);
   }
-  for(const e of (ms.events || [])) if(e.tick >= revealedLen) market.events.push(e);
-  for(const t of (ms.tips   || [])) if(t.tick >= revealedLen) market.tips.push(t);
-  revealedLen = ms.to + 1;
+  for(const e of (ms.events || [])) if(e.tick >= have) mkt.events.push(e);
+  for(const t of (ms.tips   || [])) if(t.tick >= have) mkt.tips.push(t);
+  return ms.to + 1;
+}
+function applyMarketSlice(ms){
+  const n = mergeSlice(market, revealedLen, ms);
+  if(n === revealedLen) return;
+  revealedLen = n;
   if(ms.over) roomOver = true;
+  // Expert: die Effektiv-Pfade haben die Länge vom letzten Aufbau – mit der neuen
+  // Front neu ableiten, sonst fehlen ab hier die Kurse beeinflusster Werte/Indizes.
+  if(expert && journal.length) rebuildEff();
 }
 
 async function roomTick(){
   if(!room) return;
   let st;
-  const mtq = (mode === "room" && roomPhase === "playing") ? "&mt=" + (revealedLen - 1) : "";
+  const mtq = (mode === "room" && roomPhase === "playing") ? "&mt=" + (revealedLen - 1)
+            : (wallOn && room.role === "wall") ? "&mt=" + (wallLen - 1) : "";   // Leinwand: nur Neues
   const ctq = chatSeen >= 0 ? "&ct=" + chatSeen : "";   // Schnellchat: nur Neues nachladen
   try{ st = await apiJson("/room/" + room.code + "?me=" + room.token + mtq + ctq); }
   catch(e){
@@ -751,10 +767,14 @@ async function roomTick(){
     }
     renderRace(st);
   }
-  // Leinwand-Rolle: im Live-Modus (v6) kommt der Markt gestreamt und die Leinwand kann
-  // ihn (noch) nicht selbst aufbauen (Seed ist geheim) → Phase 2. Vorerst deaktiviert;
-  // die Leinwand-Rolle bleibt auf dem Raum-Screen (Mitglieder + Abend-Wertung).
-  if(wallOn) stopWall();
+  // Leinwand-Rolle: Großbild vom Countdown bis kurz nach Rundenende. Der Markt kommt
+  // wie beim Spieler als gestreamte Kurs-Scheibe (Seed bleibt geheim).
+  if(room.role === "wall" && rd && roomPhase === "idle"){
+    const nw = Date.now();
+    if(nw >= rd.startAt - WALL_PRE_MS && nw < rd.startAt + rd.dur * 60000 + WALL_HOLD_MS) ensureWall(rd);
+    else if(wallOn) stopWall();
+    if(wallOn && wallRoundN === rd.n) wallFeed(st);
+  }else if(wallOn) stopWall();
   // Runden-Rangliste offen: eingetroffene Ergebnisse der Mitspieler nachladen
   if(rankRoom && st.results){
     let added = false;
@@ -810,6 +830,8 @@ function renderRoomScreen(st){
       : '<div class="mode-hint">Gleich kommen die ersten Meldungen …</div>';
     $("roomLiveField").style.display = "";
   }else $("roomLiveField").style.display = "none";
+  // Leinwand bewusst geschlossen? → hier wieder öffnen
+  $("wallOpenBtn").style.display = running && roomPhase === "idle" && room.role === "wall" && !wallOn ? "" : "none";
   // Start-Bereich: nur Ersteller, ≥2 Spieler, keine laufende Runde
   const playersN = st.members.filter(m => m.role === "player").length;
   const canStart = room.p === 1 && playersN >= 2 && !running && roomPhase === "idle";
@@ -880,7 +902,7 @@ function openChatFan(open){
    sprechen mit keinem Server und bekommen den Knopf gar nicht erst zu sehen). */
 function applyChatUI(){
   const show = !!room && chatOn &&
-    ($("roomScreen").classList.contains("show") ||
+    ($("roomScreen").classList.contains("show") || wallOn ||
      (mode === "room" && $("matchScreen").classList.contains("show")));
   if(show) buildChatFan();
   else if(chatFanOpen) openChatFan(false);
@@ -969,50 +991,69 @@ $("roomChatToggle").onclick = async function(){
 };
 
 /* ====================== Leinwand: Großbild während der Runde ======================
-   Ein Leinwand-Gerät baut den Markt selbst aus dem Runden-Seed (kein Extra-Datenstrom)
-   und rendert: Auto-Fokus-Chart (heißester Wert), Mini-Chart-Wand, Live-Rangliste,
-   Restzeit und News – Breaking News als Vollbild-Einblendung. Rein lesend. */
-let wallOn = false, wallRoundN = 0, wallMarket = null, wallInfo = null,
-    wallRaf = 0, wallNewsSeen = 0, wallDismissed = 0, wallFlashUntil = 0,
-    wallFocus = null, wallFocusUntil = 0, wallChartMode = "line", wallSlowAt = 0;
+   Ein Leinwand-Gerät spielt nicht mit, sondern zeigt die Runde für alle im Raum:
+   Auto-Fokus-Chart (heißester Wert), Mini-Chart-Wand, Live-Rennen, Restzeit, News
+   (Breaking News als Vollbild-Einblendung), vorher ein großer Countdown und danach
+   ein Siegerpodest. Den Markt bekommt die Leinwand – genau wie die Spieler – als
+   progressive Kurs-Scheibe vom Server gestreamt (der Seed bleibt geheim, niemand
+   sieht die Zukunft). Rein lesend: keine Trades, kein Ergebnis, kein Snapshot. */
+const WALL_PRE_MS  = 15000;  // so früh vor dem Start öffnet die Leinwand (Countdown)
+const WALL_HOLD_MS = 60000;  // so lange bleibt der Endstand nach Rundenende stehen
+let wallOn = false, wallRoundN = 0, wallMarket = null, wallLen = 1, wallInfo = null,
+    wallRaf = 0, wallNewsSeen = 0, wallPrimed = false, wallDismissed = 0, wallFlashUntil = 0,
+    wallFocus = null, wallFocusUntil = 0, wallChartMode = "line", wallSlowAt = 0,
+    wallTickAt = 0, wallLeader = null, wallBandUntil = 0, wallBandTxt = "", wallLock = null;
 /* Expert-Runden auf der Leinwand: eigenes Journal + Effektiv-Pfade (gleiche
    deterministische Formeln wie beim Spieler, nur mit dem Runden-Anker) */
-let wallJournal = [], wallEff = null, wallSqueezes = [], wallSqSeen = 0,
-    wallBlockSeen = 0, wallBlockUntil = 0;
+let wallJournal = [], wallEff = null, wallSqueezes = [], wallSqSeen = -1,
+    wallBlockSeen = -1, wallBlockUntil = 0;
 const wallPaths = () => wallEff || wallMarket.paths;
 
 function wallTicksTotal(){ return Math.round(wallInfo.dur * 60000 / TICK_MS); }
-function wallTickNow(){
-  return Math.max(0, Math.min(wallTicksTotal(), Math.floor((Date.now() - wallInfo.startAt) / TICK_MS)));
-}
-/* Weltzeit-genaue Tick-Position samt Sub-Tick-Fortschritt (0..1) für die glatte
-   Interpolation des Fokus-Charts – analog zum Spieler-Chart, nur wall-clock statt lastTickAt. */
+const wallEndAt = () => wallInfo.startAt + wallInfo.dur * 60000;
+/* Anzeige-Tick = die vom Server enthüllte Front (wie beim Spieler); der Sub-Tick-
+   Fortschritt läuft ab dem Eintreffen des jüngsten Ticks – so wächst die Kurve glatt,
+   statt einmal pro Poll zu springen. Kein Blick über die Front hinaus. */
 function wallClockTick(){
-  const total = wallTicksTotal();
-  const el = (Date.now() - wallInfo.startAt) / TICK_MS;
-  if(el <= 0) return {t: 0, prog: 0};
-  if(el >= total) return {t: total, prog: 1};
-  const t = Math.floor(el);
-  return {t, prog: el - t};
+  const t = Math.min(wallTicksTotal(), wallLen - 1);
+  if(t < 1 || Date.now() >= wallEndAt()) return {t, prog: 1};
+  return {t, prog: wallTickAt ? Math.min(1, (performance.now() - wallTickAt) / TICK_MS) : 1};
 }
+
 function ensureWall(rd){
   if(wallDismissed === rd.n) return;                 // für diese Runde bewusst geschlossen
   if(wallOn && wallRoundN === rd.n) return;
+  const now = Date.now();
   wallRoundN = rd.n;
-  wallInfo = {n: rd.n, dur: rd.dur, startAt: rd.startAt, seed: rd.seed >>> 0};
-  wallMarket = genMarket(wallInfo.seed, wallTicksTotal());
-  wallJournal = []; wallEff = null; wallSqueezes = []; wallBlockSeen = 0; wallBlockUntil = 0;
-  // beim Einstieg mitten in der Runde: Vergangenes nicht als Feuerwerk nachholen
-  wallNewsSeen = wallMarket.events.filter(e => e.tick <= wallTickNow()).length;
-  wallSqSeen = -1; // -1 = beim ersten Journal-Empfang auf den Ist-Stand setzen
+  wallInfo = {n: rd.n, dur: rd.dur, startAt: rd.startAt, expert: !!rd.expert};
+  wallMarket = emptyRoomMarket(); wallLen = 1; wallTickAt = 0;
+  wallJournal = []; wallEff = null; wallSqueezes = []; wallBlockUntil = 0;
+  // Frisch vor dem Start geöffnet → jede Meldung zählt. Mitten in der Runde → das
+  // Vergangene beim ersten Empfang still übernehmen (kein Feuerwerk alter News).
+  wallPrimed = now < rd.startAt;
+  wallNewsSeen = 0;
+  wallSqSeen = wallPrimed ? 0 : -1;
+  wallBlockSeen = wallPrimed ? 0 : -1;
+  wallLeader = null; wallBandUntil = 0;
   buildWallMinis();
   $("wallRoom").textContent = room ? room.code : "";
   $("wallRound").textContent = rd.n;
+  $("wallTag").style.display = wallInfo.expert ? "" : "none";
+  $("wallBoardTitle").textContent = "🏁 Live-Rennen";
+  $("wallNews").textContent = "Gleich geht's los …";
+  $("wallBoard").innerHTML = "";
+  $("wallSym").textContent = ""; $("wallName").textContent = "";
   $("wallFlash").style.display = "none"; wallFlashUntil = 0;
+  $("wallEnd").style.display = "none";
   wallOn = true;
   wallFocus = null; wallFocusUntil = 0; wallSlowAt = 0;
   $("roomScreen").classList.remove("show");
   $("wallScreen").classList.add("show");
+  document.body.classList.add("wall-on");
+  window.scrollTo(0, 0);
+  applyChatUI();
+  startRoomTimer(1000);       // feine Kurs-Scheiben wie in der laufenden Runde
+  wallWake(true);
   if(!wallRaf) wallFrame();   // sofort einmal zeichnen und die rAF-Schleife anstoßen (keine Doppel-Schleife)
 }
 function stopWall(){
@@ -1020,19 +1061,78 @@ function stopWall(){
   wallOn = false;
   if(wallRaf){ cancelAnimationFrame(wallRaf); wallRaf = 0; }
   $("wallScreen").classList.remove("show");
-  if(room) $("roomScreen").classList.add("show");
+  $("wallCount").style.display = "none";
+  $("wallEnd").style.display = "none";
+  $("wallFlash").style.display = "none";
+  document.body.classList.remove("wall-on");
+  wallWake(false);
+  if(document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  if(room){
+    $("roomScreen").classList.add("show");
+    if(roomTimer) startRoomTimer();  // zurück zum gemütlichen Raum-Puls
+  }
+  applyChatUI();
+  if(roomState) renderRoomScreen(roomState);
 }
+/* Bildschirm wach halten, solange die Leinwand läuft (Beamer/TV soll nicht einschlafen) */
+async function wallWake(on){
+  try{
+    if(on && !wallLock && navigator.wakeLock && document.visibilityState === "visible")
+      wallLock = await navigator.wakeLock.request("screen");
+    else if(!on && wallLock){ const l = wallLock; wallLock = null; await l.release(); }
+  }catch(e){ wallLock = null; }
+}
+document.addEventListener("visibilitychange", () => {
+  if(wallOn && document.visibilityState === "visible"){ wallLock = null; wallWake(true); }
+});
 $("wallExit").onclick = () => { wallDismissed = wallRoundN; stopWall(); };
+$("wallOpenBtn").onclick = () => {
+  const rd = roomState && roomState.round;
+  if(!rd || !room || room.role !== "wall") return;
+  wallDismissed = 0;
+  ensureWall(rd);
+  roomTick();
+};
+$("wallFs").onclick = () => {
+  const d = document;
+  try{
+    if(d.fullscreenElement) d.exitFullscreen();
+    else if(d.documentElement.requestFullscreen) d.documentElement.requestFullscreen();
+  }catch(e){}
+};
+if(!document.documentElement || !document.documentElement.requestFullscreen) $("wallFs").style.display = "none";
 document.querySelectorAll("#wallToggle .ctg").forEach(b => b.onclick = () => {
   wallChartMode = b.dataset.w;
   document.querySelectorAll("#wallToggle .ctg").forEach(x => x.classList.toggle("active", x === b));
 });
 
+/* Daten aus dem Raum-Puls übernehmen: Kurs-Scheibe anhängen, Expert-Journal in
+   Effektiv-Pfade übersetzen, Rangliste auffrischen. */
+function wallFeed(st){
+  wallInfo.startAt = st.round.startAt;   // maßgeblich ist immer die Server-Zeit der Runde
+  const n = mergeSlice(wallMarket, wallLen, st.market);
+  const grew = n > wallLen;
+  if(grew){
+    wallLen = n; wallTickAt = performance.now();
+    if(!wallPrimed){ wallPrimed = true; wallNewsSeen = wallMarket.events.length; }
+  }
+  let rebuild = grew && wallJournal.length > 0;
+  if(wallInfo.expert && Array.isArray(st.trades) && st.trades.length !== wallJournal.length){
+    wallJournal = st.trades; rebuild = true;
+    if(wallBlockSeen < 0) wallBlockSeen = wallJournal.length; // Einstieg mitten in der Runde
+  }
+  if(rebuild){
+    const res = buildEffPaths(wallMarket, wallJournal, wallInfo.startAt, wallTicksTotal());
+    wallEff = res.eff; wallSqueezes = res.squeezes;
+  }
+  renderWallBoard(st);
+}
+
 /* Frisch von einer News getroffener (nicht marktweiter) Wert der letzten ~25 Ticks */
 function wallNewsHit(t){
   let hit = null;
   for(const e of wallMarket.events)
-    if(e.ev.t !== "ALL" && e.tick <= t && t - e.tick < 25) hit = e.ev.t;
+    if(e.ev.t !== "ALL" && e.tick <= t && t - e.tick < 25 && wallPaths()[e.ev.t]) hit = e.ev.t;
   return hit;
 }
 /* Größte Bewegung der letzten ~90 Ticks (Fallback ohne aktuelle News) */
@@ -1042,13 +1142,14 @@ function wallFocusSym(t){
   if(back < 2) return best;
   for(const s of DISPLAY_SYMS){
     const p = wallPaths()[s];
+    if(!p || p[t] == null) continue;
     const m = Math.abs(p[t] / p[t - back] - 1);
     if(m > bm){ bm = m; best = s; }
   }
   return best;
 }
 /* Fokuswahl mit „Verweildauer": News ziehen den Blick sofort auf sich, sonst wird
-   der größte Bewegen gehalten – aber mindestens ein paar Sekunden, damit die
+   der größte Beweger gehalten – aber mindestens ein paar Sekunden, damit die
    Leinwand nicht zwischen Werten flackert. */
 function wallPickFocus(t, now){
   const hit = wallNewsHit(t);
@@ -1070,8 +1171,7 @@ function drawWallLine(cv, path, t, back){
   cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
   const ctx = cv.getContext("2d");
   ctx.scale(dpr, dpr);
-  const b = Math.min(t, back);
-  const data = wallMarketSlice(path, t, b);
+  const data = path.slice(Math.max(0, t - back), t + 1);
   if(data.length < 2) return;
   let mn = Math.min(...data), mx = Math.max(...data);
   if(mx - mn < 1e-9) mx = mn + 1;
@@ -1087,13 +1187,14 @@ function drawWallLine(cv, path, t, back){
   ctx.fillStyle = up ? "rgba(61,220,151,.12)" : "rgba(255,92,114,.12)";
   ctx.fill();
 }
-const wallMarketSlice = (path, t, back) => path.slice(Math.max(0, t - back), t + 1);
 
 function buildWallMinis(){
   $("wallMinis").innerHTML = DISPLAY_SYMS.map(s =>
-    `<div class="wall-mini"><canvas id="wm-${s}"></canvas>
+    `<div class="wall-mini" id="wmb-${s}"><canvas id="wm-${s}"></canvas>
      <div class="wm-l"><b>${s}</b><span class="wm-skew" id="wmsk-${s}"></span><span id="wmc-${s}"></span></div></div>`).join("");
 }
+const wallClockTxt = ms => Math.floor(ms / 60000) + ":" + String(Math.floor(ms % 60000 / 1000)).padStart(2, "0");
+
 /* rAF-Schleife: das Fokus-Chart wird jeden Frame glatt interpoliert (wie der Spieler-
    Chart), die schwereren Teile (Mini-Wand, Rangliste-Text, News, Restzeit) laufen
    gedrosselt ~3×/s über wallSlow(). */
@@ -1103,14 +1204,20 @@ function wallFrame(){
   const now = Date.now();
   const {t, prog} = wallClockTick();
   const sym = wallPickFocus(t, now);
+  const p = wallPaths()[sym];
+  if(!p || p[t] == null) return;
   // Fokus-Chart über den echten Spieler-Renderer (Kerzen/Linie, Live-Marker, Fläche);
   // in Expert-Runden auf den Effektiv-Pfaden (Blockorders/Squeeze sichtbar)
-  drawChart({canvas: $("wallChart"), sym, market: {paths: wallPaths()}, tick: t, prog,
-             pos: null, chartMode: wallChartMode, big: true});
-  const p = wallPaths()[sym];
-  const live = t >= 1 ? p[t-1] + (p[t] - p[t-1]) * prog : (p[0] || 0);
+  const cv = $("wallChart");
+  drawChart({canvas: cv, sym, market: {paths: wallPaths()}, tick: t, prog,
+             pos: null, chartMode: wallChartMode, big: cv.clientWidth > 640});
+  const live = t >= 1 ? p[t-1] + (p[t] - p[t-1]) * prog : p[0];
   const ch = (live / p[0] - 1) * 100;
-  $("wallSym").textContent = sym;
+  if($("wallSym").textContent !== sym){
+    $("wallSym").textContent = sym;
+    const d = defOf(sym);
+    $("wallName").textContent = d && d.name ? d.name : "";
+  }
   $("wallPx").textContent = fmt(live);
   const che = $("wallChg");
   che.textContent = (ch >= 0 ? "+" : "") + ch.toFixed(2) + "%";
@@ -1118,19 +1225,35 @@ function wallFrame(){
   if(now - wallSlowAt >= 320){ wallSlowAt = now; wallSlow(now, t, sym); }
 }
 function wallSlow(now, t, focus){
-  // Restzeit (bzw. Countdown vor dem Start)
-  const leftMs = wallInfo.startAt > now
-    ? wallInfo.startAt - now
-    : Math.max(0, wallInfo.startAt + wallInfo.dur * 60000 - now);
-  $("wallTime").textContent = (wallInfo.startAt > now ? "Start in " : "") +
-    Math.floor(leftMs / 60000) + ":" + String(Math.floor(leftMs % 60000 / 1000)).padStart(2, "0");
+  const pre = wallInfo.startAt > now, done = now >= wallEndAt();
+  // Countdown-Einblendung vor dem Start
+  const cnt = $("wallCount");
+  if(pre){
+    const left = wallInfo.startAt - now;
+    $("wallCountTitle").textContent = `Runde ${wallInfo.n} startet in`;
+    $("wallCountNum").textContent = left < 10000 ? String(Math.ceil(left / 1000)) : wallClockTxt(left);
+    const names = ((roomState && roomState.members) || []).filter(m => m.role === "player").map(m => esc(m.name));
+    $("wallCountSub").innerHTML = `${wallInfo.dur} Minuten${wallInfo.expert ? " · 🎓 Experten-Runde" : ""}` +
+      (names.length ? `<br>🏁 ${names.join(" · ")}` : "");
+    cnt.style.display = "";
+  }else if(cnt.style.display !== "none") cnt.style.display = "none";
+  // Restzeit + Fortschrittsbalken
+  const leftMs = pre ? wallInfo.dur * 60000 : Math.max(0, wallEndAt() - now);
+  $("wallTime").textContent = done ? "Ende" : wallClockTxt(leftMs);
+  $("wallTime").classList.toggle("hurry", !pre && !done && leftMs <= 30000);
+  $("wallProg").style.width = (100 * (1 - leftMs / (wallInfo.dur * 60000))).toFixed(1) + "%";
+  // Endstand-Einblendung nach der Runde
+  $("wallEnd").style.display = done ? "" : "none";
+  if(done) $("wallEndHint").textContent =
+    `Zurück zum Raum in ${Math.max(0, Math.ceil((wallEndAt() + WALL_HOLD_MS - now) / 1000))} s`;
   // Mini-Wand (kompakte Sparklines); Fokus-Wert hervorgehoben, Herden-Schieflage daneben
+  const paths = wallPaths();
   for(const s of DISPLAY_SYMS){
-    const cv = $("wm-" + s);
-    if(!cv) continue;
-    if(cv.parentElement) cv.parentElement.classList.toggle("hot", s === focus);
-    drawWallLine(cv, wallPaths()[s], t, 150);
-    const q = wallPaths()[s], c2 = (q[t] / q[0] - 1) * 100;
+    const cv = $("wm-" + s), q = paths[s];
+    if(!cv || !q || q[t] == null) continue;
+    $("wmb-" + s).classList.toggle("hot", s === focus);
+    drawWallLine(cv, q, t, 150);
+    const c2 = (q[t] / q[0] - 1) * 100;
     const el = $("wmc-" + s);
     el.textContent = (c2 >= 0 ? "+" : "") + c2.toFixed(1) + "%";
     el.style.color = c2 >= 0 ? "var(--up)" : "var(--down)";
@@ -1143,17 +1266,15 @@ function wallSlow(now, t, focus){
     }
   }
   // News-Band + Vollbild-Einblendung für frische Meldungen
-  const evs = wallMarket.events.filter(e => e.tick <= t);
-  let band = evs.length ? "📰 " + evs[evs.length - 1].ev.txt : null;
+  const evs = wallMarket.events;
+  let band = evs.length ? (evs[evs.length - 1].mega ? "🚨 " : "📰 ") + evs[evs.length - 1].ev.txt : null;
   if(evs.length > wallNewsSeen){
     const e = evs[evs.length - 1];
     wallNewsSeen = evs.length;
-    $("wallFlashText").textContent = (e.mega ? "🚨 " : "📰 ") + e.ev.txt;
-    $("wallFlash").style.display = "";
-    wallFlashUntil = now + (e.mega ? 8000 : 4500);
+    if(!done) wallShowFlash((e.mega ? "🚨 " : "📰 ") + e.ev.txt, now + (e.mega ? 8000 : 4500));
   }
   // Frische Blockorders übernehmen kurz das News-Band (anonym – wer war's?!)
-  if(wallJournal.length > wallBlockSeen){
+  if(wallBlockSeen >= 0 && wallJournal.length > wallBlockSeen){
     wallBlockSeen = wallJournal.length;
     wallBlockUntil = now + 7000;
   }
@@ -1163,34 +1284,83 @@ function wallSlow(now, t, focus){
       ? `🐘 Blockorder: Jemand kauft groß ${tr.sym} ein!`
       : `🐘 Blockorder: Jemand wirft ${tr.sym} im großen Stil ab!`;
   }
-  if(band) $("wallNews").textContent = band;
+  // Führungswechsel im Rennen (renderWallBoard) hat kurz Vorrang
+  if(wallBandUntil > now) band = wallBandTxt;
+  const nb = $("wallNews");
+  if(band && nb.textContent !== band){
+    nb.textContent = band;
+    nb.classList.remove("fresh"); void nb.offsetWidth; nb.classList.add("fresh");
+  }
   // Squeeze/Blasen-Crash: Vollbild-Flash, sobald die Wirkung zündet
   const due = wallSqueezes.filter(q => q.hitTick <= t);
   if(wallSqSeen < 0) wallSqSeen = due.length; // Einstieg mitten in der Runde: nicht nachholen
   if(due.length > wallSqSeen){
     const q = due[due.length - 1];
     wallSqSeen = due.length;
-    $("wallFlashText").textContent = q.short
-      ? `🔥 SHORT SQUEEZE: ${q.sym}!` : `💥 BLASE PLATZT: ${q.sym}!`;
-    $("wallFlash").style.display = "";
-    wallFlashUntil = now + 6000;
+    wallShowFlash(q.short ? `🔥 SHORT SQUEEZE: ${q.sym}!` : `💥 BLASE PLATZT: ${q.sym}!`, now + 6000);
   }
   if(wallFlashUntil && now > wallFlashUntil){
     $("wallFlash").style.display = "none";
     wallFlashUntil = 0;
   }
 }
-/* Rangliste der Leinwand aus dem Raum-Puls speisen */
+function wallShowFlash(txt, until){
+  $("wallFlashText").textContent = txt;
+  $("wallFlash").style.display = "";
+  wallFlashUntil = until;
+}
+/* Rangliste der Leinwand aus dem Raum-Puls speisen: alle Spieler des Raums, Balken
+   relativ zum größten Ausschlag. Nach Rundenende zählen – sobald abgeliefert – die
+   vom Server geprüften Ergebnisse; dazu das Siegerpodest. */
 function renderWallBoard(st){
-  const names = {};
-  (st.members || []).forEach(m => names[m.p] = m.name);
-  const rows = Object.keys(st.pnls || {}).map(p => ({p: +p, v: st.pnls[p]})).sort((a, b) => b.v - a.v);
+  const roster = (st.members || []).filter(m => m.role === "player");
+  const done = Date.now() >= wallEndAt();
+  const val = p => {
+    if(done && st.results && st.results[p]){
+      const o = unpackResult(st.results[p], +room.code);
+      if(o && !o.wrongGame && o.result) return o.result.pnl;
+    }
+    return st.pnls && st.pnls[p] !== undefined ? st.pnls[p] : null;
+  };
+  const known = new Set(roster.map(m => m.p));
+  for(const p in (st.pnls || {})) if(!known.has(+p)) roster.push({p: +p, name: "?"}); // bereits gegangene Spieler
+  const rows = roster.map(m => ({p: m.p, name: m.name, v: val(m.p), sus: st.sus && st.sus[m.p], bot: st.bot && st.bot[m.p]}))
+    .sort((a, b) => (b.v === null ? -Infinity : b.v) - (a.v === null ? -Infinity : a.v));
+  const mx = Math.max(1, ...rows.map(r => Math.abs(r.v || 0)));
+  $("wallBoardTitle").textContent = done ? "🏁 Endstand" : "🏁 Live-Rennen";
   $("wallBoard").innerHTML = rows.length
-    ? rows.map((r, i) =>
-        `<div class="wall-row"><span class="wall-pos">${i === 0 ? "👑" : (i + 1) + "."}</span>
-         <span class="wall-nm">${esc(names[r.p] || "?")}</span>
-         <span class="wall-v" style="color:${r.v >= 0 ? "var(--up)" : "var(--down)"}">${sgn(r.v)}</span></div>`).join("")
+    ? rows.map((r, i) => {
+        const col = r.v === null ? "var(--muted)" : r.v >= 0 ? "var(--up)" : "var(--down)";
+        const lead = i === 0 && r.v !== null;
+        return `<div class="wall-row${lead ? " lead" : ""}">
+          <span class="wall-bar" style="width:${(Math.abs(r.v || 0) / mx * 100).toFixed(1)}%;background:${col}"></span>
+          <span class="wall-pos">${lead ? "👑" : (i + 1) + "."}</span>
+          <span class="wall-nm">${esc(r.name)}${r.sus ? " 🤨" : ""}${r.bot ? " 🤖" : ""}</span>
+          <span class="wall-v" style="color:${col}">${r.v === null ? "…" : sgn(r.v)}</span></div>`;
+      }).join("")
     : '<div class="mode-hint">Gleich geht\'s los …</div>';
+  // Führungswechsel ansagen (erst sobald jemand vorne liegt, nicht beim Einstieg)
+  const top = rows.length && rows[0].v !== null && rows[0].v !== 0 ? rows[0] : null;
+  if(top && !done && Date.now() >= wallInfo.startAt){
+    if(wallLeader !== null && wallLeader !== top.p){
+      wallBandTxt = `👑 Führungswechsel: ${top.name} übernimmt die Spitze!`;
+      wallBandUntil = Date.now() + 5000;
+    }
+    wallLeader = top.p;
+  }
+  // Siegerpodest (Plätze 2 · 1 · 3) + Rest als Liste
+  if(done){
+    const medal = ["🥇", "🥈", "🥉"];
+    const pod = rows.slice(0, 3).map((r, i) => ({r, i}));
+    const order = pod.length === 3 ? [pod[1], pod[0], pod[2]] : pod.length === 2 ? [pod[1], pod[0]] : pod;
+    $("wallEndTitle").textContent = `🏁 Runde ${wallInfo.n} beendet`;
+    $("wallPodium").innerHTML = order.map(({r, i}) =>
+      `<div class="wp p${i + 1}"><div class="wp-name">${esc(r.name)}</div>
+        <div class="wp-v" style="color:${r.v === null ? "var(--muted)" : r.v >= 0 ? "var(--up)" : "var(--down)"}">${r.v === null ? "…" : sgn(r.v)}</div>
+        <div class="wp-block">${medal[i]}</div></div>`).join("");
+    $("wallRest").innerHTML = rows.slice(3).map((r, i) =>
+      `${i + 4}. ${esc(r.name)} ${r.v === null ? "…" : sgn(r.v)}`).join(" · ");
+  }
 }
 
 /* Runde angenommen: Markt aus dem Runden-Seed bauen und auf das gemeinsame

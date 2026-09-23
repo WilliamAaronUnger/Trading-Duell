@@ -174,8 +174,16 @@ const noop = () => {};
     const liveHtml = $id("roomLive").innerHTML || "";
     out["Leinwand: Live-Stand sichtbar, Ben vorn"] = $id("roomLiveField").style.display === "" &&
       liveHtml.indexOf("Ben") >= 0 && liveHtml.indexOf("Ben") < liveHtml.indexOf("Anna");
-    // Leinwand v6: im Live-Modus (noch) deaktiviert – der Markt streamt noch nicht auf die Leinwand (Phase 2)
-    out["Leinwand: im Live-Modus (noch) deaktiviert"] = wallOn === false;
+    // Leinwand v6: bekommt den Markt wie die Spieler gestreamt (kein Seed, keine Zukunft)
+    out["Leinwand: Großbild an, Markt gestreamt (exakt dieselbe Front)"] =
+      wallOn === true && wallRoundN === 1 && wallLen >= frontALen && wallLen < Math.round(5 * 60000 / TICK_MS) &&
+      wallMarket.paths.SPCX.length === wallLen && JSON.stringify(wallMarket.paths.SPCX.slice(0, frontALen)) === frontA;
+    const wallLen1 = wallLen;
+    await roomTick(); // Folge-Poll mit &mt= → nur Neues, nichts doppelt
+    out["Leinwand: Folge-Scheibe lückenlos angehängt"] =
+      wallLen >= wallLen1 && wallMarket.paths.SPCX.length === wallLen && wallMarket.paths[ETF_SYM].length === wallLen;
+    out["Leinwand: Live-Rennen, Ben vorn mit Krone"] = (() => { const h = $id("wallBoard").innerHTML || "";
+      return h.indexOf("👑") >= 0 && h.indexOf("Ben") >= 0 && h.indexOf("Ben") < h.indexOf("Anna"); })();
 
     // --- Runde 1 endet: Ergebnisse (mit Trade-Log!) → Server-Replay → Rangliste + Wertung ---
     // Gewinnstrecke deterministisch aus dem Pfad: globales Min, danach Max
@@ -311,6 +319,23 @@ const noop = () => {};
     out["Expert: Ben in Runde 3 – gleiche Regeln, gleicher Effektivkurs"] =
       expert === true && START_CASH === 50000 && marketSeed === null &&
       !!effPaths && JSON.stringify(effPaths.SPCX.slice(0, 120)) === effA;
+    // Leinwand in der Expert-Runde: Journal + Effektivkurse aus dem STREAM (Progressiv-Markt)
+    restore(C);
+    await roomTick();
+    out["Leinwand (Expert): Journal da, Effektivkurs = Spieler-Effektivkurs bis zur Front"] =
+      wallOn === true && wallRoundN === 3 && wallJournal.length === 1 && !!wallEff &&
+      wallEff.SPCX.length === wallLen && JSON.stringify(wallEff.SPCX.slice(0, wallLen)) === JSON.stringify(JSON.parse(effA).slice(0, wallLen)) &&
+      Number.isFinite(wallEff[ETF_SYM][wallLen - 1]);
+    // Spieler im Progressiv-Markt: neue Scheibe → Effektivkurse wachsen mit (keine Lücke nach der Blockorder)
+    restore(AE);
+    const mkt3 = trueMkt(3), jr3 = journal;
+    market = emptyRoomMarket(); revealedLen = 1; journal = jr3; rebuildEff();
+    const sl = to => ({from: revealedLen, to, over: false, events: [], tips: [],
+      paths: Object.fromEntries(Object.keys(mkt3.paths).map(s => [s, mkt3.paths[s].slice(revealedLen, to + 1)]))});
+    applyMarketSlice(sl(15)); applyMarketSlice(sl(40));
+    out["Expert-Stream: Effektivkurse wachsen mit der Front"] =
+      revealedLen === 41 && effPaths.SPCX.length === 41 && Number.isFinite(effPaths[ETF_SYM][40]) &&
+      Number.isFinite(effPaths[ETF2_SYM][40]);
     restore(AE); roomPhase = "idle"; over = true;
 
     // --- Zuspätkommer: Dana kommt mitten in einer laufenden Runde ---

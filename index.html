@@ -205,6 +205,7 @@
       <div class="field" id="roomLiveField" style="display:none">
         <label id="roomLiveLabel">Runde läuft</label>
         <div id="roomLive"></div>
+        <button class="start-btn" id="wallOpenBtn" style="display:none;height:44px;font-size:14px;margin-top:12px">🖥️ Leinwand öffnen</button>
       </div>
       <div class="field" id="roomStartField" style="display:none">
         <label>Nächste Runde (Dauer)</label>
@@ -261,28 +262,44 @@
 <div class="screen" id="wallScreen">
   <div class="wall">
     <div class="wall-head">
-      <span class="wall-title">🌐 Raum <b id="wallRoom"></b> · Runde <b id="wallRound"></b></span>
+      <span class="wall-title">🌐 Raum <b id="wallRoom"></b> · Runde <b id="wallRound"></b><span class="wall-tag" id="wallTag" style="display:none">🎓 Experten</span></span>
       <span class="wall-clock" id="wallTime">–:–</span>
+      <button class="wall-exit" id="wallFs" title="Vollbild an/aus">⛶ Vollbild</button>
       <button class="wall-exit" id="wallExit">← Raum</button>
     </div>
+    <div class="wall-prog"><div id="wallProg"></div></div>
     <div class="wall-main">
       <div class="wall-chartbox">
         <div class="wall-focus">
-          <b id="wallSym">SPCX</b> <span id="wallPx"></span> <span id="wallChg"></span>
+          <b id="wallSym">SPCX</b> <span class="wall-fname" id="wallName"></span>
+          <span id="wallPx"></span> <span id="wallChg"></span>
           <span class="wall-ctg" id="wallToggle">
             <button class="ctg active" data-w="line">Linie</button>
             <button class="ctg" data-w="candle">Kerzen</button>
           </span>
         </div>
-        <canvas id="wallChart"></canvas>
+        <div class="wall-chartwrap"><canvas id="wallChart"></canvas></div>
       </div>
       <div class="wall-board">
-        <div class="wall-board-title">🏁 Live-Rennen</div>
+        <div class="wall-board-title" id="wallBoardTitle">🏁 Live-Rennen</div>
         <div id="wallBoard"></div>
       </div>
     </div>
     <div class="wall-minis" id="wallMinis"></div>
     <div class="wall-news" id="wallNews">Gleich geht's los …</div>
+  </div>
+  <!-- Countdown vor dem Start -->
+  <div class="wall-over" id="wallCount" style="display:none">
+    <div class="wo-eyebrow" id="wallCountTitle">Runde startet in</div>
+    <div class="wo-big" id="wallCountNum">0:10</div>
+    <div class="wo-sub" id="wallCountSub"></div>
+  </div>
+  <!-- Endstand nach der Runde -->
+  <div class="wall-over" id="wallEnd" style="display:none">
+    <div class="wo-eyebrow" id="wallEndTitle">🏁 Runde beendet</div>
+    <div class="wall-podium" id="wallPodium"></div>
+    <div class="wall-rest" id="wallRest"></div>
+    <div class="wo-sub" id="wallEndHint"></div>
   </div>
   <div class="wall-flash" id="wallFlash" style="display:none"><div id="wallFlashText"></div></div>
 </div>

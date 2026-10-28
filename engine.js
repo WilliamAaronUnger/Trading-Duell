@@ -163,6 +163,7 @@ function genMarket(seed, ticks){
   for(let i = 1; i <= ticks; i++){
     // Opening-Pop fest am Anfang
     if(i === 3) fire(i, OPENING_EVENT, "SPCX");
+    if(i === 6) fire(i, OPENING_EVENT_ANTH, "ANTH");
 
     if(i === megaAt) fireMega(i, megaEv);
 

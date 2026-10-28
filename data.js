@@ -27,6 +27,8 @@ const STOCK_DEFS = {
         char:"⚡ Trendläufer: Bewegungen verstärken sich"},
   META:{name:"Meta",       type:"risk",     start:600.00, sigma:0.0011, drift:0, spikeP:0.005, spikeMag:0.011, liq:1.5,
         char:"🎭 Stimmungswert: kann sprunghaft drehen"},
+  ANTH:{name:"Anthropic",  type:"growth",   start:240.00, sigma:0.0013, drift:0.00001, newsMult:1.2, liq:1.5,
+        char:"🧠 Frischer KI-Börsengang: schwankt lebhaft, reagiert stark auf KI-Schlagzeilen"},
 };
 const ETF_SYM = "MKT", ETF_BASE = 100.00;
 const ETF_DEF = {name:"Markt-ETF", type:"index", start:ETF_BASE, liq:4.0,
@@ -39,7 +41,7 @@ const ETF2_DEF = {name:"Aktiv-Fonds", type:"active", start:ETF2_BASE, liq:1.0,
 const ACTIVE_LEV = 3.0;            // Hebel auf die %-Abweichung des Korbs (~Vola der wildesten Aktie)
 const ACTIVE_FEE_PCT = 0.005;      // 0,5 % Ordergebühr (≈3× normal)
 // Korbgewichte: Wachstums-/Risiko-Werte stark über-, Dividendenwerte untergewichtet
-const ACTIVE_WEIGHTS = {SPCX:3, TSLA:2.5, RKLB:2, AMD:2, META:2, GOOGL:1.5, NVDA:1, AMZN:0.5, AAPL:0.5, MSFT:0.5};
+const ACTIVE_WEIGHTS = {SPCX:3, TSLA:2.5, ANTH:2, RKLB:2, AMD:2, META:2, GOOGL:1.5, NVDA:1, AMZN:0.5, AAPL:0.5, MSFT:0.5};
 /* ===== Wochenend-Specials (zeitlich begrenzte Aktionen) =====
    Jedes Special ist ein rein abgeleiteter Extra-Wert (Index-artig: kein Market-Impact,
    block-exempt, teure Aktiv-Gebühr, keine Dividende). genMarket leitet ALLE Specials IMMER
@@ -73,7 +75,7 @@ const SPECIALS = [
   { id:"ai", sym:"HAL", kind:"ai", from:SPECIAL_FROM, to:SPECIAL_TO,
     def:{name:"Halluzinet AI", type:"active", start:SPECIAL_BASE, liq:1.0,
          char:"🤖 Nur am Wochenende: Die Haus-KI liest jede News in Sekunden und der Kurs springt sofort – aber rund ein Drittel deutet sie völlig falsch. Dann entschuldigt sie sich. Brutal."},
-    cfg:{basket:{NVDA:4, AMD:2.5, GOOGL:2, MSFT:2, META:1.5, TSLA:1},
+    cfg:{basket:{NVDA:4, ANTH:3, AMD:2.5, GOOGL:2, MSFT:2, META:1.5, TSLA:1},
          entry:2, ramp:3, kick:0.045, megaMult:2.5, halluP:0.32, shame:0.6, bonus:0.5,
          beta:1.6, burn:0.00025, maxTick:0.05} },
 ];
@@ -174,6 +176,16 @@ const NEWS_POOL = [
   {t:"AMD",  txt:"Schwache Rechenzentrums-Nachfrage drückt AMDs Ausblick.", jump:-0.009, drift:-0.0004, dur:28},
   {t:"META", txt:"Meta meldet Rekord-Werbeumsatz – Reels überholt die Konkurrenz.", jump:+0.010, drift:+0.0004, dur:30},
   {t:"META", txt:"Reality-Labs verbrennt weiter Milliarden – Anleger verlieren Geduld.", jump:-0.009, drift:-0.0004, dur:28},
+  {t:"ANTH", txt:"Neues Claude-Modell setzt sich an die Spitze der KI-Benchmarks.", jump:+0.011, drift:+0.0005, dur:32},
+  {t:"ANTH", txt:"Großbank stellt komplette Belegschaft auf Claude um – Milliardenvertrag.", jump:+0.010, drift:+0.0004, dur:30},
+  {t:"ANTH", txt:"Umsatz mit Unternehmenskunden wächst schneller als erwartet.", jump:+0.009, drift:+0.0004, dur:30},
+  {t:"ANTH", txt:"Erste Analysten starten Coverage von ANTH mit »Kaufen«.", jump:+0.008, drift:+0.0003, dur:28},
+  {t:"ANTH", txt:"Claude Code wird zum meistgenutzten Programmier-Werkzeug der Branche.", jump:+0.009, drift:+0.0004, dur:28},
+  {t:"ANTH", txt:"Rechenzentrumskosten steigen – Marge unter Druck.", jump:-0.009, drift:-0.0004, dur:30},
+  {t:"ANTH", txt:"Analyst nennt IPO-Bewertung »sportlich« – erste Gewinnmitnahmen.", jump:-0.008, drift:-0.0003, dur:28},
+  {t:"ANTH", txt:"Konkurrenzmodell überholt Claude in einem wichtigen Benchmark.", jump:-0.008, drift:-0.0004, dur:28},
+  {t:"ANTH", txt:"Lock-up-Gerüchte: Frühe Investoren könnten Anteile abgeben.", jump:-0.009, drift:-0.0004, dur:30},
+  {t:"ANTH", txt:"Neue KI-Regulierung in der EU sorgt für Unsicherheit.", jump:-0.007, drift:-0.0003, dur:26},
   {t:"ALL",  txt:"Inflationsdaten besser als erwartet – Markt dreht ins Plus.", jump:+0.004, drift:+0.0002, dur:36},
   {t:"ALL",  txt:"Fed-Mitglied dämpft Zinssenkungshoffnungen.", jump:-0.004, drift:-0.0002, dur:36},
   {t:"ALL",  txt:"Risk-off: Anleger schichten in Anleihen um.", jump:-0.003, drift:-0.0002, dur:30},
@@ -187,6 +199,10 @@ const NEWS_POOL = [
 ];
 const OPENING_EVENT = {t:"SPCX",
   txt:"Eröffnung: SPCX startet über dem Ausgabepreis von 135 $.",
+  jump:+0.012, drift:+0.0006, dur:24};
+/* Zweiter Börsengang des Tages: ANTH feiert ihr Debüt kurz nach SPCX (feste Ticks am Anfang). */
+const OPENING_EVENT_ANTH = {t:"ANTH",
+  txt:"Börsendebüt: Anthropic (ANTH) startet über dem Ausgabepreis von 240 $.",
   jump:+0.012, drift:+0.0006, dur:24};
 const MEGA_REACT_TICKS = Math.round(20000 / TICK_MS);
 const MEGA_PRE_FRAC = 0.2;  // Anteil der Mega-Bewegung, der als Vor-Beben vorab hereinkriecht
@@ -205,6 +221,7 @@ const MEGA_POOL = [
   {t:"AAPL", txt:"💥 MEGA: Apple enthüllt eigenen KI-Chip – Branche spricht von Quantensprung.", jump:+0.26, drift:+0.0008, dur:40},
   {t:"AMZN", txt:"💥 MEGA: Amazon übernimmt großen KI-Konzern – Marktdominanz auf Jahre zementiert.", jump:+0.28, drift:+0.0008, dur:40},
   {t:"MSFT", txt:"💥 MEGA: Microsoft sichert sich Exklusivrechte am führenden KI-Modell.", jump:+0.27, drift:+0.0008, dur:40},
+  {t:"ANTH", txt:"💥 MEGA: Durchbruch! Anthropics neues Modell löst ein jahrzehntealtes Mathe-Rätsel.", jump:+0.30, drift:+0.0008, dur:40},
 ];
 const MOMENTUM_POOL = {
   upCont: [
@@ -262,6 +279,10 @@ const CHAIN_POOL = [
    rumor:  {txt:"Gerücht: FAA prüft Sicherheitsmängel an Starship-Hitzeschutzplatten.", jump:-0.007, drift:-0.0003, dur:22},
    confirm:{txt:"FAA verhängt vorläufigen Startbann – Untersuchung dauert Wochen.", jump:-0.015, drift:-0.0005, dur:34},
    deny:   {txt:"FAA-Prüfung abgeschlossen: Starship erhält grünes Licht – Erleichterung.", jump:+0.013, drift:+0.0005, dur:30}},
+  {t:"ANTH",
+   rumor:  {txt:"Gerücht: Anthropic soll kurz vor einem Rechenzentrums-Deal mit einem Cloud-Riesen stehen.", jump:+0.006, drift:+0.0003, dur:20},
+   confirm:{txt:"Bestätigt: Anthropic sichert sich Gigawatt an Rechenleistung für die nächsten Jahre.", jump:+0.015, drift:+0.0006, dur:32},
+   deny:   {txt:"Dementi: Kein Rechenzentrums-Deal – Anthropic verhandelt weiter.", jump:-0.012, drift:-0.0004, dur:28}},
 ];
 const GENERIC_NEWS = {
   up: [
@@ -301,7 +322,7 @@ const GENERIC_MEGA = [
 ];
 // Standard-Favoriten der Watchlist (inkl. Markt-ETF); am Aktions-Wochenende wird der Turbo prominent eingeblendet
 // Standard-Favoriten; aktive Wochenend-Specials werden prominent vorn eingeblendet (max. 4 Karten)
-const DEFAULT_FAVS = [...new Set(["SPCX", ...activeSpecials().map(s => s.sym), "MKT", "NVDA", "RKLB"])].slice(0, 4);
+const DEFAULT_FAVS = [...new Set(["SPCX", ...activeSpecials().map(s => s.sym), "ANTH", "MKT", "NVDA", "RKLB"])].slice(0, 4);
 const DURATIONS = [5, 10, 15];
 const MODE_HINTS = {
   solo:   "Du spielst allein und misst dich an deinem eigenen Rekord.",
@@ -499,6 +520,6 @@ if(typeof globalThis === "object") Object.assign(globalThis, {
   SKEW_FULL, SKEW_MIN, DAMP_MAX, DAMP_CAP, SQUEEZE_K,
   EXPERT_SPREAD_BASE, SPREAD_WIDE_TICKS, EXPERT_HALT_TICKS, EXPERT_ACT_HOLD,
   EXPERT_MAX_ORDERS, liqOf, DIV_PCT, DIV_PCT_ETF, DIV_PAYOUT, isDividendSym, isIndexSym, divRate,
-  NEWS_POOL, OPENING_EVENT, MEGA_REACT_TICKS, MEGA_PRE_FRAC, MEGA_FADE_FRAC,
+  NEWS_POOL, OPENING_EVENT, OPENING_EVENT_ANTH, MEGA_REACT_TICKS, MEGA_PRE_FRAC, MEGA_FADE_FRAC,
   MEGA_POOL, MOMENTUM_POOL, CHAIN_POOL, GENERIC_NEWS, GENERIC_CHAINS, GENERIC_MEGA,
 });

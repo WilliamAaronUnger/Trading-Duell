@@ -2066,10 +2066,15 @@ function showNewsPop(e){
   clearTimeout(npTimer);
   if(wallClock()) npTimer = setTimeout(closeNewsPop, e.mega ? 12000 : 6000);
   const sym = e.ev.t;
-  $("npLive").textContent = e.insider ? "Insider" : e.mega ? "Mega-Event" : "Breaking";
+  $("npLive").textContent = e.insider ? "Insider" : e.mega ? "Mega-Event"
+    : e.sched === "announce" ? "Termin" : e.sched === "result" ? "Ergebnis" : e.flash ? "Flash" : "Breaking";
   $("npHint").style.display = e.insider ? "none" : "";
   $("npHint").textContent = e.mega
     ? "💥 Gewaltige Kursreaktion in ~20 Sekunden – noch ist Zeit zu handeln!"
+    : e.sched === "announce"
+    ? "📅 Das Ergebnis kommt in 60 Sekunden – bis dahin wird's nervös. Vorher zocken oder abwarten?"
+    : e.flash
+    ? "⚡ Der Kurs ist schon weggerutscht – die Gegenbewegung setzt in wenigen Sekunden ein …"
     : "⏳ Der Markt reagiert in wenigen Sekunden …";
   $("npSym").textContent = sym === "ALL" ? "MARKT" : sym;
   $("npSym").className = "np-sym " + e.tag;
@@ -2553,7 +2558,13 @@ function renderAll(){
   const divBadge = dy >= 0.05
     ? ` · <span class="div-yield" title="Brutto-Dividende, wenn du den ganzen Lauf hältst">💰 ~${dy.toLocaleString("de-DE", {maximumFractionDigits:1})} % Div./Lauf</span>`
     : "";
-  $("qName").innerHTML = `${defOf(selected).name} · Eröffnung ${fmt(op)}<br><span class="char-line">${defOf(selected).char}${divBadge}</span>`;
+  // 📅 Laufender Termin für diesen Wert (oder marktweit): Countdown bis zum Ergebnis
+  const term = market.events.find(e => e.sched === "announce" && e.tick <= tickCount && tickCount < e.at &&
+                                       (e.ev.t === selected || e.ev.t === "ALL"));
+  const termBadge = term
+    ? `<br><span class="term-badge">📅 ${term.ev.t === "ALL" ? "Fed-Entscheid" : "Termin"} in ${Math.ceil((term.at - tickCount) * TICK_MS / 1000)} s – erhöhte Schwankung</span>`
+    : "";
+  $("qName").innerHTML = `${defOf(selected).name} · Eröffnung ${fmt(op)}<br><span class="char-line">${defOf(selected).char}${divBadge}</span>${termBadge}`;
   $("tradeSym").textContent = selected;
 
   // Order: Kaufen deckt bei Short-Position ein, Verkaufen nur für Longs,

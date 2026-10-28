@@ -185,6 +185,69 @@ function genMarket(seed, ticks){
                  tag: ev.jump > 0 ? "up" : "down", mega:true});
   }
 
+  /* 📅 Termine vorab würfeln: ~einer je SCHED_EVERY_TICKS, gleichmäßig verteilt, je Wert
+     höchstens einer, Fed (ALL) höchstens einmal; Abstand zum Mega-Event. Ergebnis steht
+     schon jetzt fest (Seed) – sichtbar wird es erst zum Termin. */
+  const schedLead = Math.round(SCHED_LEAD_MS / TICK_MS);
+  const scheds = [];
+  {
+    const lo = Math.round(ticks * 0.15), hi = ticks - schedLead - REACT_TICKS - 20;
+    const count = Math.max(1, Math.round(ticks / SCHED_EVERY_TICKS));
+    const used = new Set();
+    if(hi > lo) for(let k = 0; k < count; k++){
+      const slot = (hi - lo) / count;
+      const at = Math.round(lo + slot * k + rnd() * slot * 0.7);
+      let tpl, S;
+      if(!used.has("ALL") && rnd() < SCHED_P_ALL){ tpl = SCHED_ALL; S = "ALL"; }
+      else{
+        const free = symList.filter(x => !used.has(x));
+        S = free[Math.floor(rnd() * free.length)];
+        const own = SCHED_POOL.find(x => x.t === S);
+        tpl = own && rnd() < SCHED_P_SPECIFIC ? own : GENERIC_SCHED;
+      }
+      const r = rnd();
+      const outcome = r < SCHED_ODDS.beat ? "beat" : r < SCHED_ODDS.beat + SCHED_ODDS.inline ? "inline" : "miss";
+      used.add(S);
+      // nicht in den Mega-Trubel legen: um je 30 Ticks ausweichen (kein rnd()), sonst entfällt er
+      const near = x => megaAt > 0 && Math.abs(x - megaAt) < 25;
+      const pos = [at, at + 30, at - 30, at + 60, at - 60].find(x => x >= lo && x <= hi && !near(x) && !near(x + schedLead));
+      if(pos !== undefined) scheds.push({at: pos, res: pos + schedLead, sym: S, tpl, outcome});
+    }
+  }
+  const nervous = scheds.map(c => ({sym: c.sym, from: c.at, until: c.res + REACT_TICKS}));
+
+  /* ⚡ Flash-Crash/-Spike vorab würfeln: je ~10 Spielminuten ein Slot mit Chance FLASH_P
+     (kurze Spiele anteilig). Weicht Mega und Terminen aus statt zu entfallen. */
+  const flashes = [];
+  {
+    const slots = Math.max(1, Math.round(ticks / 600));
+    const slot = ticks * 0.7 / slots;
+    for(let k = 0; k < slots; k++){
+      if(rnd() >= FLASH_P * Math.min(1, ticks / 600)) continue;
+      const at = Math.round(ticks * 0.15 + slot * k + rnd() * slot);
+      const S = symList[Math.floor(rnd() * symList.length)];
+      const crash = rnd() < FLASH_P_CRASH;
+      const mag = FLASH_MAG[0] + rnd() * (FLASH_MAG[1] - FLASH_MAG[0]);
+      const back = FLASH_BACK[0] + rnd() * (FLASH_BACK[1] - FLASH_BACK[0]);
+      const pool = crash ? FLASH_POOL.crash : FLASH_POOL.spike;
+      const txt = pool[Math.floor(rnd() * pool.length)];
+      const busy = x => (megaAt > 0 && Math.abs(x - megaAt) < 30) ||
+        scheds.some(c => Math.abs(x - c.at) < 30 || Math.abs(x - c.res) < 30);
+      const pos = [at, at + 45, at - 45, at + 90, at - 90].find(x =>
+        x > ticks * 0.1 && x < ticks - (REACT_TICKS + 20) && !busy(x));
+      if(pos !== undefined) flashes.push({at: pos, sym: S, shock: crash ? 1 - mag : 1 + mag, back, txt});
+    }
+  }
+  function fireFlash(f){
+    const net = 1 + (f.shock - 1) * (1 - f.back);              // Rest-Ausschlag nach der Gegenbewegung
+    const rec = net / f.shock;
+    pushJump(f.at, f.sym, f.shock, 2);                         // schlagartig, über 2 Ticks
+    pushJump(f.at + REACT_TICKS, f.sym, rec, Math.round(10000 / TICK_MS)); // Gegenbewegung über ~10 s
+    lastEventSym = f.sym;
+    events.push({tick: f.at, ev: {t: f.sym, txt: fillTpl(f.txt, f.sym), jump: rec - 1, drift: 0, dur: 0},
+                 tag: f.shock < 1 ? "down" : "up", flash: true});
+  }
+
   const LOOKBACK = Math.round(60000 / TICK_MS); // Momentum über die letzte Minute
 
   for(let i = 1; i <= ticks; i++){
@@ -193,6 +256,13 @@ function genMarket(seed, ticks){
     if(i === 6) fire(i, OPENING_EVENT_ANTH, "ANTH");
 
     if(i === megaAt) fireMega(i, megaEv);
+    for(const f of flashes) if(i === f.at) fireFlash(f);
+    for(const c of scheds){
+      if(i === c.at)                                           // Ankündigung: kein Sprung, nur Nervosität
+        events.push({tick: i, ev: {t: c.sym, txt: fillTpl(c.tpl.ann, c.sym), jump: 0, drift: 0, dur: 0},
+                     tag: "neutral", sched: "announce", at: c.res});
+      if(i === c.res){ fire(i, c.tpl[c.outcome], c.sym); events[events.length - 1].sched = "result"; }
+    }
 
     // Zufalls-News: ~50% Momentum-News über die gerade "beliebte" Aktie, sonst klassische News
     // Spätgrenze so, dass der verzögerte Kurssprung noch vor Spielende passiert
@@ -274,6 +344,7 @@ function genMarket(seed, ticks){
         prices[sym] *= 1 + (rnd() < 0.5 ? -1 : 1) * d.spikeMag * (0.7 + rnd()*0.6);
       let sig = d.sigma;
       if(sym === "SPCX" && i < ticks*0.12) sig *= 1.3;
+      for(const n of nervous) if(i >= n.from && i < n.until && (n.sym === sym || n.sym === "ALL")){ sig *= SCHED_NERVOUS; break; }
       if(i > ticks*0.9) sig *= 1.2;
       prices[sym] = Math.max(1, prices[sym] * Math.exp(drift - sig*sig/2 + sig*g()));
       paths[sym].push(prices[sym]);
@@ -284,7 +355,8 @@ function genMarket(seed, ticks){
      Deterministisch aus dem Seed → beide Spieler/Geräte bekommen dieselben Tipps. */
   const lead = Math.round(50000 / TICK_MS);
   const tips = [];
-  const candidates = events.filter(e => !e.mega && e.ev.t !== "ALL" && Math.abs(e.ev.jump) >= 0.008 && e.tick > lead + 10);
+  // Termin-Ergebnisse und Flashs bleiben ungetippt: deren Spannung ist der Punkt
+  const candidates = events.filter(e => !e.mega && !e.sched && !e.flash && e.ev.t !== "ALL" && Math.abs(e.ev.jump) >= 0.008 && e.tick > lead + 10);
   for(const [lo, hi] of [[0.12, 0.5], [0.5, 0.95]]){
     const zone = candidates.filter(e =>
       e.tick >= ticks*lo && e.tick < ticks*hi && !tips.some(t => t.eventTick === e.tick));
@@ -347,7 +419,7 @@ function addFundPath(paths, ticks, events, sym, cfg){
   const dir = cfg.dir;
   let wsum = 0; for(const s in ACTIVE_WEIGHTS) wsum += ACTIVE_WEIGHTS[s];
   const baseFrac = {}; for(const s in ACTIVE_WEIGHTS) baseFrac[s] = ACTIVE_WEIGHTS[s] / wsum; // Summe 1
-  const evs = (events || []).filter(e => e && e.ev && e.ev.t);
+  const evs = (events || []).filter(e => e && e.ev && e.ev.t && e.sched !== "announce");
   const nav = [SPECIAL_BASE];
   let equity = 1e6, prevW = {}, hwm = SPECIAL_BASE;
   for(let t = 1; t <= ticks; t++){
@@ -389,7 +461,7 @@ function addFundPath(paths, ticks, events, sym, cfg){
 function addMemePath(paths, ticks, events, sym, cfg){
   let wsum = 0; for(const s in ACTIVE_WEIGHTS) wsum += ACTIVE_WEIGHTS[s];
   const basket = t => { let acc = 0; for(const s in ACTIVE_WEIGHTS) acc += ACTIVE_WEIGHTS[s] * (paths[s][t] / STOCK_DEFS[s].start); return acc / wsum; };
-  const evs = (events || []).filter(e => e && e.ev && e.ev.t);
+  const evs = (events || []).filter(e => e && e.ev && e.ev.t && e.sched !== "announce");
   const arr = [SPECIAL_BASE];
   let price = SPECIAL_BASE, hype = 0;
   for(let t = 1; t <= ticks; t++){
@@ -434,7 +506,7 @@ function addAiPath(paths, ticks, events, sym, cfg){
   if(!wsum) wsum = 1;
   const basket = t => { let acc = 0; for(const s in W){ const p = paths[s]; if(p) acc += W[s] * (p[t] / STOCK_DEFS[s].start); } return acc / wsum; };
   const imp = new Array(Math.max(0, ticks | 0) + 2).fill(0);
-  const evs = (events || []).filter(e => e && e.ev && e.ev.t);
+  const evs = (events || []).filter(e => e && e.ev && e.ev.t && e.sched !== "announce");
   for(const e of evs){
     const d = Math.sign(e.ev.jump || e.ev.drift || 0) || 1;
     const wrong = aiHash01(Math.imul(e.tick + 1, 1103515245) + aiSymCode(String(e.ev.t))) < cfg.halluP;
@@ -575,7 +647,8 @@ function spreadAtTick(mkt, sym, t){
   let s = EXPERT_SPREAD_BASE / liqOf(sym);
   for(const e of mkt.events){
     if(e.ev.t !== sym && e.ev.t !== "ALL") continue;
-    const hit = e.tick + (e.mega ? MEGA_REACT_TICKS : REACT_TICKS);
+    // Flash: das Buch ist schon ab dem Ausschlag (= Anzeige) dünn, nicht erst ab der Gegenbewegung
+    const hit = e.flash ? e.tick : e.tick + (e.mega ? MEGA_REACT_TICKS : REACT_TICKS);
     if(t >= hit && t < hit + SPREAD_WIDE_TICKS){ s *= 3; break; }
   }
   return Math.min(s, 0.02);
@@ -773,14 +846,17 @@ function botSuspicion(mkt, log, ticks){
   let prescient = 0, reacts = 0, fast = 0;
   for(const ev of shown){
     const dir = ev.ev.jump > 0 ? 1 : -1;
+    // Flash: jump = Gegenbewegung; der Ausschlag selbst (schon bei Anzeige) läuft andersherum –
+    // „hellseherisch“ wäre also, VORHER in Ausschlag-Richtung zu handeln
+    const preDir = ev.flash ? -dir : dir;
     let pre = false, delta = Infinity;
     for(const o of log){
       const t = +o[0], sym = String(o[1]);
-      if((String(o[2]) === "buy" ? 1 : -1) !== dir) continue; // sell & short = Abwaerts-Wette/-Flucht
+      const side = String(o[2]) === "buy" ? 1 : -1;           // sell & short = Abwaerts-Wette/-Flucht
       if(ev.ev.t !== sym && ev.ev.t !== "ALL") continue;
       if(t < ev.tick){
-        if(blind.has(ev) && ev.tick - t <= preWin && !tipped(t, sym, dir)) pre = true;
-      }else delta = Math.min(delta, t - ev.tick);
+        if(side === preDir && blind.has(ev) && ev.tick - t <= preWin && !tipped(t, sym, preDir)) pre = true;
+      }else if(side === dir) delta = Math.min(delta, t - ev.tick);
     }
     if(pre) prescient += ev.mega ? 2 : 1;
     if(delta <= reactWin){ reacts++; if(delta <= fastMax) fast++; }

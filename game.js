@@ -12,7 +12,10 @@ let START_CASH = 25000;
    - newsMult: News-Sprünge wirken stärker/schwächer (Hype-Wert)
    - momentum: jüngerer Trend verstärkt sich selbst (Momentum-Wert)
    - meanRev:  Kurs wird zur Eröffnung zurückgezogen (stabiler Riese)
-   - spikeP/spikeMag: seltene, plötzliche Einzelsprünge (Zock-Papier) */
+   - spikeP/spikeMag: seltene, plötzliche Einzelsprünge (Zock-Papier)
+   - think:    News wirken als sanfte S-Kurve über think Sekunden statt als Zacken
+   - anchorRev: Rauschen kehrt zum mitwandernden fairen Wert zurück → News-Stufen halten
+   - peers:    zieht bei News der Branchenkollegen anteilig mit (Ticker → Beta) */
 /* type steuert nur die Balance (Dividenden), NICHT die Marktgenerierung:
    dividend = zahlt pro Tick eine kleine Dividende an Long-Halter,
    growth/risk = keine Dividende. */

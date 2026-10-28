@@ -27,8 +27,12 @@ const STOCK_DEFS = {
         char:"⚡ Trendläufer: Bewegungen verstärken sich"},
   META:{name:"Meta",       type:"risk",     start:600.00, sigma:0.0011, drift:0, spikeP:0.005, spikeMag:0.011, liq:1.5,
         char:"🎭 Stimmungswert: kann sprunghaft drehen"},
-  ANTH:{name:"Anthropic",  type:"growth",   start:240.00, sigma:0.0013, drift:0.00001, newsMult:1.2, liq:1.5,
-        char:"🧠 Frischer KI-Börsengang: schwankt lebhaft, reagiert stark auf KI-Schlagzeilen"},
+  // Denkt erst nach: News als sanfte S-Kurve über think Sekunden statt Zacken (think), das neue
+  // Niveau hält (anchorRev = Rückzug zum mitwandernden fairen Wert) und KI-News der Branche
+  // ziehen anteilig mit (peers: Ticker → Beta). Gegenstück zu HAL, der sofort reagiert und irrt.
+  ANTH:{name:"Anthropic",  type:"growth",   start:240.00, sigma:0.0008, drift:0.00001, newsMult:1.3, liq:1.5,
+        think:12, anchorRev:0.05, peers:{NVDA:0.6, MSFT:0.5, GOOGL:0.5, AMD:0.4, META:0.4},
+        char:"🧠 Denkt erst nach: News wirken als sanfte Kurve, das neue Niveau hält – KI-News der Branche ziehen mit"},
 };
 const ETF_SYM = "MKT", ETF_BASE = 100.00;
 const ETF_DEF = {name:"Markt-ETF", type:"index", start:ETF_BASE, liq:4.0,

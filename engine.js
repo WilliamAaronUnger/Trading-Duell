@@ -32,9 +32,11 @@ function genMarket(seed, ticks){
   const events = [];
   const paths = {};
   const prices = {};
+  const anchor = {};   // „fairer Wert“ je Aktie mit anchorRev (Treppen-Niveau, s. u.)
   for(const [sym,d] of Object.entries(STOCK_DEFS)){
     paths[sym] = [d.start];
     prices[sym] = d.start;
+    if(d.anchorRev) anchor[sym] = d.start;
   }
 
   /* Platzhalter in News-Vorlagen füllen (%SYM% = Ticker, %NAME% = Firmenname). */
@@ -98,6 +100,22 @@ function genMarket(seed, ticks){
     for(let k = 0; k < rampTicks; k++) pendingJumps.push({at: at + k, sym, factor: per});
   };
 
+  /* „Denkt erst nach“ (think-Trait): Der Sprung kommt nicht als Zacken, sondern als
+     sanfte S-Kurve über d.think Ticks (smoothstep: langsam an, zügig durch, weich aus).
+     Gesamtfaktor unverändert, kein rnd() – reine zeitliche Verteilung. */
+  const thinkTicks = sym => Math.round((STOCK_DEFS[sym].think || 0) * 1000 / TICK_MS);
+  const pushThink = (at, sym, factor) => {
+    const n = thinkTicks(sym);
+    const sm = x => x * x * (3 - 2 * x);
+    for(let k = 0; k < n; k++)
+      pendingJumps.push({at: at + k, sym, factor: Math.pow(factor, sm((k + 1) / n) - sm(k / n))});
+  };
+  /* Branchen-Sog (peers-Trait): Aktien mit d.peers ziehen bei News ihrer Branchen-
+     kollegen anteilig mit (Faktor-Abweichung × Beta) – aus dem schon gewürfelten
+     Faktor abgeleitet, also KEIN zusätzliches rnd(). */
+  const peerFollowers = [];
+  for(const [sym,d] of Object.entries(STOCK_DEFS)) if(d.peers) peerFollowers.push(sym);
+
   /* Event auslösen: News erscheint bei Tick i, der Kurs reagiert erst
      REACT_TICKS später – so bleibt Zeit, auf die Meldung zu reagieren.
      Die rnd()-Aufrufe passieren trotzdem hier, damit die PRNG-Reihenfolge
@@ -111,7 +129,16 @@ function genMarket(seed, ticks){
     for(const s of targets){
       // newsMult: Hype-Werte reagieren stärker auf Schlagzeilen
       const mult = STOCK_DEFS[s].newsMult || 1;
-      if(resolved.jump) pushJump(hits, s, 1 + resolved.jump * mult * (0.85 + rnd()*0.3));
+      if(!resolved.jump) continue;
+      const factor = 1 + resolved.jump * mult * (0.85 + rnd()*0.3);
+      if(STOCK_DEFS[s].think) pushThink(hits, s, factor); else pushJump(hits, s, factor);
+      if(sym === "ALL") continue;                  // marktweite News treffen die Follower ohnehin direkt
+      for(const f of peerFollowers){
+        const beta = f !== s && STOCK_DEFS[f].peers[s];
+        if(!beta) continue;
+        const fac = 1 + (factor - 1) * beta;
+        if(STOCK_DEFS[f].think) pushThink(hits, f, fac); else pushJump(hits, f, fac);
+      }
     }
     if(resolved.drift) effects.push({sym, drift:resolved.drift * TICK_SCALE, from:hits, until:hits + dur});
     if(sym !== "ALL") lastEventSym = sym;
@@ -221,7 +248,9 @@ function genMarket(seed, ticks){
 
     // Fällige News-Sprünge (REACT_TICKS nach der Meldung) anwenden
     for(const j of pendingJumps){
-      if(j.at === i) prices[j.sym] = Math.max(1, prices[j.sym] * j.factor);
+      if(j.at !== i) continue;
+      prices[j.sym] = Math.max(1, prices[j.sym] * j.factor);
+      if(anchor[j.sym]) anchor[j.sym] *= j.factor;  // News verschieben das Niveau mit
     }
     pendingJumps = pendingJumps.filter(j => j.at > i);
 
@@ -235,6 +264,12 @@ function genMarket(seed, ticks){
       // Charakter der Aktie:
       if(d.momentum) drift += d.momentum * (prices[sym] / paths[sym][Math.max(0, i - 1 - LOOKBACK)] - 1) / LOOKBACK;
       if(d.meanRev)  drift -= d.meanRev * (prices[sym] / d.start - 1);
+      /* anchorRev: Rauschen wird zum „fairen Wert“ zurückgezogen, der jede News und
+         Drift mitgeht – News setzen neue Stufen, dazwischen ruhige Seitwärtsphasen. */
+      if(anchor[sym]){
+        anchor[sym] *= Math.exp(drift);
+        drift -= d.anchorRev * Math.log(prices[sym] / anchor[sym]);
+      }
       if(d.spikeP && rnd() < d.spikeP)
         prices[sym] *= 1 + (rnd() < 0.5 ? -1 : 1) * d.spikeMag * (0.7 + rnd()*0.6);
       let sig = d.sigma;

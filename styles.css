@@ -367,6 +367,7 @@
   .chg.ek{background:none;border:1px dashed currentColor;font-size:13px}
   .qname{font-size:13px;color:var(--muted);width:100%}
   .char-line{font-size:12px;opacity:.85}
+  .term-badge{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:var(--accent)}
   .div-yield{color:#e9c46a;font-weight:600;white-space:nowrap}
   canvas{width:100%;height:190px;display:block;background:var(--panel-2);
          border:1px solid var(--line);border-radius:12px}

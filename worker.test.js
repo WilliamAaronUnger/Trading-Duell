@@ -244,7 +244,8 @@ function ok(cond, name){ console.log((cond ? "✔ " : "✘ ") + name); cond ? pa
   // nur ihr TIMING unterscheidet Bot von Mensch.
   const TB = Math.round(15 * 60000 / TICK_MS);
   const clusterW = Math.round(160000 / TICK_MS), earliest = Math.round(45000 / TICK_MS);
-  const upEvents = mkt => mkt.events.filter(e => (e.ev.jump || 0) >= 0.008 && e.ev.t !== "ALL" && !e.mega);
+  // Flash ausgenommen: dessen jump ist die Gegenbewegung NACH dem Ausschlag (Kauf davor = Verlust, kein Hellsehen)
+  const upEvents = mkt => mkt.events.filter(e => (e.ev.jump || 0) >= 0.008 && e.ev.t !== "ALL" && !e.mega && !e.flash);
   const blindUp = mkt => upEvents(mkt).filter(e => e.tick >= earliest &&
     !mkt.tips.some(tp => tp.sym === e.ev.t) &&
     !mkt.events.some(o => o !== e && o.tick < e.tick && o.tick >= e.tick - clusterW &&
